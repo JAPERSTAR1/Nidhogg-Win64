@@ -1,0 +1,32 @@
+{
+  "elf_offset": 288,
+  "entry": 559568,
+  "phdrs": [
+    {
+      "type": 1,
+      "flags": 5,
+      "offset": 16384,
+      "vaddr": 0,
+      "filesz": 2019160,
+      "memsz": 2019160,
+      "align": 16384
+    },
+    {
+      "type": 1,
+      "flags": 6,
+      "offset": 2048000,
+      "vaddr": 2031616,
+      "filesz": 1370656,
+      "memsz": 2288712,
+      "align": 16384
+    }
+  ],
+  "rela_source": {
+    "offset": 3398960,
+    "size": 229888
+  },
+  "rela_output": {
+    "offset": 3420160,
+    "size": 229888
+  }
+}
