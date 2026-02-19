@@ -11,11 +11,19 @@
 *.sln.docstates
 *.env
 
-# User-specific files (MonoDevelop/Xamarin Studio)
-*.userprefs
+# Game assets and audio
+*.at9
+*.bnk
+*.vag
+*.wem
+*.dds
 
-# Mono auto generated files
-mono_crash.*
+# Runtime / extracted data
+work/
+*.log
+*.err
+shot_*.png
+*.dmp
 
 # Python / temporary
 __pycache__/
