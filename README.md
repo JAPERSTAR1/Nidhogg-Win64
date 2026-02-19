@@ -94,3 +94,29 @@ code is already the program. The port is therefore a platform replacement:
       ├── libSceFios2                           → Win32 file IO
       ├── libSceSaveData / SaveDataDialog       → %APPDATA%
       ├── libSceUserService / Rtc / SystemService
+      └── libSceNp* / Http / Ssl                → stubbed out
+```
+
+`libSceSysmodule` gates most of the others: it is the first thing the CRT calls
+and every module load must succeed or the game bails.
+
+The only genuinely hard piece is GNM, because it is a command-buffer API:
+the game encodes PM4 packets rather than issuing draw calls. Two ways to land
+it, and they are not interchangeable:
+
+1. **PM4 interpreter** — parse the command buffer and translate packets into
+   D3D11 state. Faithful, keeps the original renderer and shaders (which must
+   then be translated from GCN ISA to HLSL). Weeks of work, but the game's
+   visuals come out as built.
+2. **Draw-level interception** — hook the engine's own sprite/quad submit path
+   and reimplement it in D3D11. Much smaller; throws away the original
+   renderer, so every effect has to be rebuilt by hand.
+
+## Next block of work
+
+1. Recover the entry point: scan for the CRT startup, cross-check against the
+   Sysmodule calls it makes, wire `Sysmodule` to a table of fake module ids.
+2. Get the process to the first `sceGnmDriver` call and log the command stream.
+3. Classify the 465 import slots by call site (format strings, buffer sizes,
+   return-code checks) until each one has a name.
+4. Stand up D3D11 behind `sceVideoOut` + the first GNM packet handlers.
