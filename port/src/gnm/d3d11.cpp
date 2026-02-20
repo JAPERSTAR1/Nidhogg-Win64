@@ -334,3 +334,99 @@ ID3D11RenderTargetView* EnsureOffscreenRt(uint64_t addr, uint32_t w, uint32_t h)
     }
     g.context->ClearRenderTargetView(rt.rtv.Get(), clr);
     std::printf("[d3d11] offscreen rt 0x%llx %ux%u\n",
+                static_cast<unsigned long long>(addr), w, h);
+    std::fflush(stdout);
+    auto& slot = g.offscreenRts[addr];
+    slot = std::move(rt);
+    return slot.rtv.Get();
+}
+
+D3D11_TEXTURE_ADDRESS_MODE MapClamp(uint32_t mode) {
+    switch (mode & 0x7) {
+        case 0: return D3D11_TEXTURE_ADDRESS_WRAP;
+        case 1: return D3D11_TEXTURE_ADDRESS_MIRROR;
+        case 3: return D3D11_TEXTURE_ADDRESS_MIRROR_ONCE;
+        case 6: return D3D11_TEXTURE_ADDRESS_BORDER;
+        default: return D3D11_TEXTURE_ADDRESS_CLAMP;
+    }
+}
+
+ID3D11SamplerState* LookupSampler(const uint32_t* words) {
+    const uint64_t key = (static_cast<uint64_t>(words[0]) * 1099511628211ull) ^
+                         (static_cast<uint64_t>(words[2]) << 32) ^ words[1];
+    auto it = g.samplers.find(key);
+    if (it != g.samplers.end()) return it->second;
+
+    const uint32_t w0 = words[0];
+    const uint32_t w2 = words[2];
+    const bool magLinear = ((w2 >> 20) & 0x3) == 1 || ((w2 >> 20) & 0x3) == 3;
+    const bool minLinear = ((w2 >> 22) & 0x3) == 1 || ((w2 >> 22) & 0x3) == 3;
+    D3D11_FILTER filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+    if (minLinear && magLinear) filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    else if (minLinear) filter = D3D11_FILTER_MIN_LINEAR_MAG_MIP_POINT;
+    else if (magLinear) filter = D3D11_FILTER_MIN_POINT_MAG_LINEAR_MIP_POINT;
+
+    D3D11_SAMPLER_DESC desc{};
+    desc.Filter = filter;
+    desc.AddressU = MapClamp(w0);
+    desc.AddressV = MapClamp(w0 >> 3);
+    desc.AddressW = MapClamp(w0 >> 6);
+    desc.MaxLOD = D3D11_FLOAT32_MAX;
+
+    ID3D11SamplerState* state = nullptr;
+    if (FAILED(g.device->CreateSamplerState(&desc, &state))) return nullptr;
+    g.samplers.emplace(key, state);
+    return state;
+}
+
+D3D11_BLEND MapBlendFactor(uint32_t f, bool isAlpha) {
+    switch (f & 0x1f) {
+        case 0: return D3D11_BLEND_ZERO;
+        case 1: return D3D11_BLEND_ONE;
+        case 2: return isAlpha ? D3D11_BLEND_SRC_ALPHA : D3D11_BLEND_SRC_COLOR;
+        case 3: return isAlpha ? D3D11_BLEND_INV_SRC_ALPHA : D3D11_BLEND_INV_SRC_COLOR;
+        case 4: return D3D11_BLEND_SRC_ALPHA;
+        case 5: return D3D11_BLEND_INV_SRC_ALPHA;
+        case 6: return D3D11_BLEND_DEST_ALPHA;
+        case 7: return D3D11_BLEND_INV_DEST_ALPHA;
+        case 8: return isAlpha ? D3D11_BLEND_DEST_ALPHA : D3D11_BLEND_DEST_COLOR;
+        case 9: return isAlpha ? D3D11_BLEND_INV_DEST_ALPHA : D3D11_BLEND_INV_DEST_COLOR;
+        case 10: return D3D11_BLEND_SRC_ALPHA_SAT;
+        case 13:
+        case 19: return D3D11_BLEND_BLEND_FACTOR;
+        case 14:
+        case 20: return D3D11_BLEND_INV_BLEND_FACTOR;
+        default: return D3D11_BLEND_ONE;
+    }
+}
+
+D3D11_BLEND_OP MapBlendOp(uint32_t op) {
+    switch (op & 0x7) {
+        case 1: return D3D11_BLEND_OP_SUBTRACT;
+        case 2: return D3D11_BLEND_OP_MIN;
+        case 3: return D3D11_BLEND_OP_MAX;
+        case 4: return D3D11_BLEND_OP_REV_SUBTRACT;
+        default: return D3D11_BLEND_OP_ADD;
+    }
+}
+
+ID3D11BlendState* LookupBlend(uint32_t ctl, uint32_t targetMask) {
+    const uint8_t writeMask = (targetMask & 0xf) ? static_cast<uint8_t>(targetMask & 0xf)
+                                                 : static_cast<uint8_t>(D3D11_COLOR_WRITE_ENABLE_ALL);
+    const uint64_t key = (static_cast<uint64_t>(writeMask) << 32) | ctl;
+    auto it = g.blends.find(key);
+    if (it != g.blends.end()) return it->second;
+
+    const bool enable = ((ctl >> 30) & 1u) != 0;
+    const bool sepAlpha = ((ctl >> 29) & 1u) != 0;
+    const uint32_t cSrc = ctl & 0x1f;
+    const uint32_t cOp = (ctl >> 5) & 0x7;
+    const uint32_t cDst = (ctl >> 8) & 0x1f;
+    const uint32_t aSrc = sepAlpha ? ((ctl >> 16) & 0x1f) : cSrc;
+    const uint32_t aOp = sepAlpha ? ((ctl >> 21) & 0x7) : cOp;
+    const uint32_t aDst = sepAlpha ? ((ctl >> 24) & 0x1f) : cDst;
+
+    D3D11_BLEND_DESC desc{};
+    auto& rt = desc.RenderTarget[0];
+    rt.BlendEnable = enable ? TRUE : FALSE;
+    rt.SrcBlend = MapBlendFactor(cSrc, false);
