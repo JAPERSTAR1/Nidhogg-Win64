@@ -142,3 +142,99 @@ struct Renderer {
 
     ComPtr<ID3D11Device> device;
     ComPtr<ID3D11DeviceContext> context;
+    ComPtr<IDXGISwapChain> swap;
+    ComPtr<ID3D11RenderTargetView> backBuffer;
+    ComPtr<ID3D11VertexShader> vs;
+    ComPtr<ID3D11PixelShader> ps;
+    ComPtr<ID3D11InputLayout> layout;
+    ComPtr<ID3D11Buffer> vb;
+    ComPtr<ID3D11Buffer> ib;
+    ComPtr<ID3D11Buffer> cb;
+    ComPtr<ID3D11BlendState> blendDisabled;
+    ComPtr<ID3D11RasterizerState> rasterizer;
+    ComPtr<ID3D11DepthStencilState> depthDisabled;
+    ComPtr<ID3D11ShaderResourceView> missingTexture;
+    ComPtr<ID3D11SamplerState> defaultSampler;
+
+    struct OffscreenRt {
+        uint32_t width = 0;
+        uint32_t height = 0;
+        ComPtr<ID3D11Texture2D> tex;
+        ComPtr<ID3D11RenderTargetView> rtv;
+        ComPtr<ID3D11ShaderResourceView> srv;
+    };
+    struct ClearRgba {
+        float c[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    };
+
+    std::unordered_map<uint64_t, ID3D11ShaderResourceView*> textures;
+    std::unordered_map<uint64_t, ID3D11SamplerState*> samplers;
+    std::unordered_map<uint64_t, ID3D11BlendState*> blends;
+    std::unordered_map<uint64_t, OffscreenRt> offscreenRts;
+    std::unordered_map<uint64_t, ClearRgba> pendingClears;
+
+    uint32_t vbCapacity = 0;
+    uint32_t ibCapacity = 0;
+
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
+    float matrix[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+};
+
+Renderer g;
+
+bool Readable(uint64_t address, size_t bytes) {
+    return address != 0 && ps4::gnm::HostReadable(address, bytes);
+}
+
+// Byte size of one texel of a Sea Islands (GCN) DataFormat, Table 8.13.
+uint32_t TexelBytes(uint32_t dataFormat) {
+    switch (dataFormat) {
+        case 1: return 1;   // Format8
+        case 2: return 2;   // Format16
+        case 3: return 2;   // Format8_8
+        case 4: return 4;   // Format32
+        case 5: return 4;   // Format16_16
+        case 6: return 4;   // Format10_11_11
+        case 7: return 4;   // Format11_11_10
+        case 8: return 4;   // Format10_10_10_2
+        case 9: return 4;   // Format2_10_10_10
+        case 10: return 4;  // Format8_8_8_8
+        case 11: return 8;  // Format32_32
+        case 12: return 8;  // Format16_16_16_16
+        case 13: return 12; // Format32_32_32
+        case 14: return 16; // Format32_32_32_32
+        case 16: return 2;  // Format5_6_5
+        case 17: return 2;  // Format1_5_5_5
+        case 19: return 2;  // Format4_4_4_4
+        default: return 0;
+    }
+}
+
+DXGI_FORMAT TexelFormat(uint32_t dataFormat, uint32_t numFormat) {
+    switch (dataFormat) {
+        case 1: return DXGI_FORMAT_R8_UNORM;
+        case 2: return numFormat == 7 ? DXGI_FORMAT_R16_FLOAT : DXGI_FORMAT_R16_UNORM;
+        case 3: return DXGI_FORMAT_R8G8_UNORM;
+        case 4: return DXGI_FORMAT_R32_FLOAT;
+        case 5: return numFormat == 7 ? DXGI_FORMAT_R16G16_FLOAT : DXGI_FORMAT_R16G16_UNORM;
+        case 8: return DXGI_FORMAT_R10G10B10A2_UNORM;
+        case 10:
+            return numFormat == 9 ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB
+                                  : DXGI_FORMAT_R8G8B8A8_UNORM;
+        case 11: return DXGI_FORMAT_R32G32_FLOAT;
+        case 12:
+            return numFormat == 7 ? DXGI_FORMAT_R16G16B16A16_FLOAT
+                                  : DXGI_FORMAT_R16G16B16A16_UNORM;
+        case 13: return DXGI_FORMAT_R32G32B32_FLOAT;
+        case 14: return DXGI_FORMAT_R32G32B32A32_FLOAT;
+        case 16: return DXGI_FORMAT_B5G6R5_UNORM;
+        case 17: return DXGI_FORMAT_B5G5R5A1_UNORM;
+        default: return DXGI_FORMAT_UNKNOWN;
+    }
+}
+
+uint64_t ImageKey(const ImageDesc& i) {
+    uint64_t k = i.address * 1099511628211ull;
+    k ^= static_cast<uint64_t>(i.width) << 48;
+    k ^= static_cast<uint64_t>(i.height) << 32;
