@@ -238,3 +238,99 @@ uint64_t ImageKey(const ImageDesc& i) {
     uint64_t k = i.address * 1099511628211ull;
     k ^= static_cast<uint64_t>(i.width) << 48;
     k ^= static_cast<uint64_t>(i.height) << 32;
+    k ^= static_cast<uint64_t>(i.pitch) << 16;
+    k ^= static_cast<uint64_t>(i.dataFormat) << 8;
+    k ^= i.numFormat << 4;
+    k ^= i.tiling;
+    const uint32_t texel = TexelBytes(i.dataFormat);
+    const uint64_t span = static_cast<uint64_t>(i.pitch) * texel * i.height;
+    if (texel && span >= 8 && Readable(i.address, static_cast<size_t>(span))) {
+        const auto* b = reinterpret_cast<const uint8_t*>(i.address);
+        const uint64_t step = span > 512 ? (span / 64) & ~7ull : 8;
+        for (uint64_t off = 0; off + 8 <= span; off += (step ? step : 8)) {
+            uint64_t w;
+            std::memcpy(&w, b + off, 8);
+            k = (k ^ w) * 1099511628211ull;
+        }
+    }
+    return k;
+}
+
+ID3D11ShaderResourceView* CreateTexture(const ImageDesc& image) {
+    const uint32_t texel = TexelBytes(image.dataFormat);
+    const DXGI_FORMAT format = TexelFormat(image.dataFormat, image.numFormat);
+    if (!texel || format == DXGI_FORMAT_UNKNOWN) return nullptr;
+
+    const uint64_t pitchBytes = static_cast<uint64_t>(image.pitch) * texel;
+    const uint64_t total = pitchBytes * (image.height - 1) + static_cast<uint64_t>(image.width) * texel;
+    if (!image.width || !image.height || total > (32u << 20)) return nullptr;
+    if (!Readable(image.address, static_cast<size_t>(total))) return nullptr;
+
+    D3D11_TEXTURE2D_DESC desc{};
+    desc.Width = image.width;
+    desc.Height = image.height;
+    desc.MipLevels = 1;
+    desc.ArraySize = 1;
+    desc.Format = format;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_IMMUTABLE;
+    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+    D3D11_SUBRESOURCE_DATA data{};
+    data.pSysMem = reinterpret_cast<const void*>(image.address);
+    data.SysMemPitch = static_cast<UINT>(pitchBytes);
+
+    ComPtr<ID3D11Texture2D> texture;
+    if (FAILED(g.device->CreateTexture2D(&desc, &data, &texture))) return nullptr;
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC view{};
+    view.Format = format;
+    view.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    view.Texture2D.MipLevels = 1;
+
+    ID3D11ShaderResourceView* srv = nullptr;
+    if (FAILED(g.device->CreateShaderResourceView(texture.Get(), &view, &srv))) return nullptr;
+    return srv;
+}
+
+ID3D11ShaderResourceView* LookupTexture(const ImageDesc& image) {
+    if (!image.address) return nullptr;
+    auto rtIt = g.offscreenRts.find(image.address);
+    if (rtIt != g.offscreenRts.end() && rtIt->second.srv) return rtIt->second.srv.Get();
+    const uint64_t key = ImageKey(image);
+    auto it = g.textures.find(key);
+    if (it != g.textures.end()) return it->second;
+    ID3D11ShaderResourceView* srv = CreateTexture(image);
+    if (srv) g.textures.emplace(key, srv);
+    return srv;
+}
+
+ID3D11RenderTargetView* EnsureOffscreenRt(uint64_t addr, uint32_t w, uint32_t h) {
+    auto it = g.offscreenRts.find(addr);
+    if (it != g.offscreenRts.end() && it->second.width == w && it->second.height == h)
+        return it->second.rtv.Get();
+
+    Renderer::OffscreenRt rt;
+    rt.width = w;
+    rt.height = h;
+    D3D11_TEXTURE2D_DESC td{};
+    td.Width = w;
+    td.Height = h;
+    td.MipLevels = 1;
+    td.ArraySize = 1;
+    td.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    td.SampleDesc.Count = 1;
+    td.Usage = D3D11_USAGE_DEFAULT;
+    td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+    if (FAILED(g.device->CreateTexture2D(&td, nullptr, &rt.tex))) return nullptr;
+    if (FAILED(g.device->CreateRenderTargetView(rt.tex.Get(), nullptr, &rt.rtv))) return nullptr;
+    if (FAILED(g.device->CreateShaderResourceView(rt.tex.Get(), nullptr, &rt.srv))) return nullptr;
+
+    float clr[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    auto pc = g.pendingClears.find(addr);
+    if (pc != g.pendingClears.end()) {
+        std::memcpy(clr, pc->second.c, sizeof(clr));
+        g.pendingClears.erase(pc);
+    }
+    g.context->ClearRenderTargetView(rt.rtv.Get(), clr);
+    std::printf("[d3d11] offscreen rt 0x%llx %ux%u\n",
