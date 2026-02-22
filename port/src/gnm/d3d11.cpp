@@ -910,3 +910,47 @@ void RenderFrame(void* hwnd, const std::vector<Draw>& draws) {
             if (SUCCEEDED(g.device->CreateTexture2D(&td, nullptr, &stage))) {
                 g.context->CopyResource(stage.Get(), back.Get());
                 D3D11_MAPPED_SUBRESOURCE map{};
+                if (SUCCEEDED(g.context->Map(stage.Get(), 0, D3D11_MAP_READ, 0, &map))) {
+                    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+                    ComPtr<IWICImagingFactory> wic;
+                    if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr,
+                                                   CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic)))) {
+                        wchar_t path[128];
+                        std::swprintf(path, 128, L"work\\shot_%llu.png",
+                                      static_cast<unsigned long long>(s_frame));
+                        ComPtr<IWICStream> stream;
+                        ComPtr<IWICBitmapEncoder> enc;
+                        ComPtr<IWICBitmapFrameEncode> frm;
+                        if (SUCCEEDED(wic->CreateStream(&stream)) &&
+                            SUCCEEDED(stream->InitializeFromFilename(path, GENERIC_WRITE)) &&
+                            SUCCEEDED(wic->CreateEncoder(GUID_ContainerFormatPng, nullptr, &enc)) &&
+                            SUCCEEDED(enc->Initialize(stream.Get(), WICBitmapEncoderNoCache)) &&
+                            SUCCEEDED(enc->CreateNewFrame(&frm, nullptr)) &&
+                            SUCCEEDED(frm->Initialize(nullptr)) &&
+                            SUCCEEDED(frm->SetSize(td.Width, td.Height))) {
+                            WICPixelFormatGUID pf = GUID_WICPixelFormat32bppRGBA;
+                            frm->SetPixelFormat(&pf);
+                            ComPtr<IWICBitmap> bmp;
+                            if (SUCCEEDED(wic->CreateBitmapFromMemory(
+                                    td.Width, td.Height, GUID_WICPixelFormat32bppRGBA,
+                                    map.RowPitch, map.RowPitch * td.Height,
+                                    static_cast<BYTE*>(map.pData), &bmp))) {
+                                frm->WriteSource(bmp.Get(), nullptr);
+                                frm->Commit();
+                                enc->Commit();
+                                std::printf("[d3d11] saved work/shot_%llu.png\n",
+                                            static_cast<unsigned long long>(s_frame));
+                                std::fflush(stdout);
+                            }
+                        }
+                    }
+                    g.context->Unmap(stage.Get(), 0);
+                }
+            }
+        }
+    }
+
+    g.swap->Present(1, 0);
+}
+
+}  // namespace ps4::gnm
