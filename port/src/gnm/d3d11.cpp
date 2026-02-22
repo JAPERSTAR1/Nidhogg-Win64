@@ -526,3 +526,99 @@ bool CreateDevice(HWND hwnd, uint32_t width, uint32_t height) {
     raster.FillMode = D3D11_FILL_SOLID;
     raster.CullMode = D3D11_CULL_NONE;
     raster.FrontCounterClockwise = TRUE;
+    raster.DepthClipEnable = TRUE;
+    if (FAILED(g.device->CreateRasterizerState(&raster, &g.rasterizer))) return false;
+
+    D3D11_DEPTH_STENCIL_DESC depth{};
+    depth.DepthEnable = FALSE;
+    depth.StencilEnable = FALSE;
+    if (FAILED(g.device->CreateDepthStencilState(&depth, &g.depthDisabled))) return false;
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC white{};
+    white.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    white.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    white.Texture2D.MipLevels = 1;
+
+    const uint32_t pixels[4] = {0xffffffffu, 0xffffffffu, 0xffffffffu, 0xffffffffu};
+    D3D11_TEXTURE2D_DESC whiteDesc{};
+    whiteDesc.Width = 2;
+    whiteDesc.Height = 2;
+    whiteDesc.MipLevels = 1;
+    whiteDesc.ArraySize = 1;
+    whiteDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    whiteDesc.SampleDesc.Count = 1;
+    whiteDesc.Usage = D3D11_USAGE_IMMUTABLE;
+    whiteDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    D3D11_SUBRESOURCE_DATA whiteData{};
+    whiteData.pSysMem = pixels;
+    whiteData.SysMemPitch = 8;
+    ComPtr<ID3D11Texture2D> whiteTexture;
+    if (SUCCEEDED(g.device->CreateTexture2D(&whiteDesc, &whiteData, &whiteTexture)))
+        g.device->CreateShaderResourceView(whiteTexture.Get(), &white, &g.missingTexture);
+
+    D3D11_SAMPLER_DESC sampler{};
+    sampler.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+    sampler.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+    sampler.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+    sampler.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+    sampler.MaxLOD = D3D11_FLOAT32_MAX;
+    if (FAILED(g.device->CreateSamplerState(&sampler, &g.defaultSampler))) return false;
+
+    D3D11_BUFFER_DESC bufferDesc{};
+    bufferDesc.Usage = D3D11_USAGE_DYNAMIC;
+    bufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    bufferDesc.ByteWidth = 64;
+    bufferDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    if (FAILED(g.device->CreateBuffer(&bufferDesc, nullptr, &g.cb))) return false;
+
+    g.width = width;
+    g.height = height;
+    return CompileShaders();
+}
+
+bool EnsureRenderer(HWND hwnd, uint32_t width, uint32_t height) {
+    if (g.ok && g.hwnd == hwnd) return EnsureSize(width, height);
+    if (g.tried) return false;
+    g.tried = true;
+    if (!hwnd || !width || !height) return false;
+    g.hwnd = hwnd;
+    g.ok = CreateDevice(hwnd, width, height);
+    std::printf("[d3d11] %s\n", g.ok ? "ready" : "unavailable");
+    return g.ok;
+}
+
+// ------------------------------------------------------------------- drawing --
+
+// Appends one draw's geometry.  Returns false when the state is not the shape
+// this backend knows how to reproduce.
+bool BuildGeometry(const Draw& draw, const uint32_t* sh) {
+    const uint64_t table = (static_cast<uint64_t>(sh[kVsTable + 1] & 0xffff) << 32) |
+                           sh[kVsTable];
+    if (!Readable(table, 0x30)) return false;
+
+    const auto* tableWords = reinterpret_cast<const uint32_t*>(table);
+    const BufferDesc pos = DecodeBuffer(tableWords + 0);
+    const BufferDesc color = DecodeBuffer(tableWords + 4);
+    const BufferDesc uv = DecodeBuffer(tableWords + 8);
+    if (!pos.stride || !pos.base) return false;
+
+    std::vector<uint32_t> localIndices;
+    const uint32_t* indexData = nullptr;
+    uint32_t indexCount = 0;
+
+    if (draw.kind == Draw::Kind::Indexed) {
+        const uint32_t bytes = draw.indexCount * (draw.indexType ? 4u : 2u);
+        if (!draw.indexCount || !Readable(draw.indexBase, bytes)) return false;
+        indexCount = draw.indexCount;
+        if (draw.indexType) {
+            indexData = reinterpret_cast<const uint32_t*>(draw.indexBase);
+        } else {
+            localIndices.resize(indexCount);
+            const auto* src = reinterpret_cast<const uint16_t*>(draw.indexBase);
+            for (uint32_t i = 0; i < indexCount; ++i) localIndices[i] = src[i];
+            indexData = localIndices.data();
+        }
+    } else if (draw.kind == Draw::Kind::Auto) {
+        if (!draw.indexCount) return false;
+        indexCount = draw.indexCount;
+        localIndices.resize(indexCount);
