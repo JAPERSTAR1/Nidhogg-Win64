@@ -430,3 +430,99 @@ ID3D11BlendState* LookupBlend(uint32_t ctl, uint32_t targetMask) {
     auto& rt = desc.RenderTarget[0];
     rt.BlendEnable = enable ? TRUE : FALSE;
     rt.SrcBlend = MapBlendFactor(cSrc, false);
+    rt.DestBlend = MapBlendFactor(cDst, false);
+    rt.BlendOp = MapBlendOp(cOp);
+    rt.SrcBlendAlpha = MapBlendFactor(aSrc, true);
+    rt.DestBlendAlpha = MapBlendFactor(aDst, true);
+    rt.BlendOpAlpha = MapBlendOp(aOp);
+    rt.RenderTargetWriteMask = writeMask;
+
+    ID3D11BlendState* state = nullptr;
+    if (FAILED(g.device->CreateBlendState(&desc, &state))) return g.blendDisabled.Get();
+    g.blends.emplace(key, state);
+    return state;
+}
+
+bool CompileShaders() {
+    ComPtr<ID3DBlob> vsBlob, psBlob, errors;
+
+    UINT flags = D3DCOMPILE_ENABLE_STRICTNESS;
+    if (FAILED(D3DCompile(kShaderSource, std::strlen(kShaderSource), "nidhogg.hlsl", nullptr,
+                          nullptr, "VSMain", "vs_5_0", flags, 0, &vsBlob, &errors))) {
+        std::printf("[d3d11] VS compile failed: %s\n",
+                    errors ? static_cast<const char*>(errors->GetBufferPointer()) : "?");
+        return false;
+    }
+    if (FAILED(D3DCompile(kShaderSource, std::strlen(kShaderSource), "nidhogg.hlsl", nullptr,
+                          nullptr, "PSMain", "ps_5_0", flags, 0, &psBlob, &errors))) {
+        std::printf("[d3d11] PS compile failed: %s\n",
+                    errors ? static_cast<const char*>(errors->GetBufferPointer()) : "?");
+        return false;
+    }
+
+    if (FAILED(g.device->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(),
+                                            nullptr, &g.vs)))
+        return false;
+    if (FAILED(g.device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(),
+                                           nullptr, &g.ps)))
+        return false;
+
+    const D3D11_INPUT_ELEMENT_DESC elements[] = {
+        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 28, D3D11_INPUT_PER_VERTEX_DATA, 0},
+    };
+    return SUCCEEDED(g.device->CreateInputLayout(elements, 3, vsBlob->GetBufferPointer(),
+                                                 vsBlob->GetBufferSize(), &g.layout));
+}
+
+bool EnsureSize(uint32_t width, uint32_t height) {
+    if (g.swap && width == g.width && height == g.height) return true;
+    g.backBuffer.Reset();
+    if (!g.swap) return false;
+    if (FAILED(g.swap->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0))) return false;
+
+    ComPtr<ID3D11Texture2D> back;
+    if (FAILED(g.swap->GetBuffer(0, IID_PPV_ARGS(&back)))) return false;
+    if (FAILED(g.device->CreateRenderTargetView(back.Get(), nullptr, &g.backBuffer))) return false;
+    g.width = width;
+    g.height = height;
+    return true;
+}
+
+bool CreateDevice(HWND hwnd, uint32_t width, uint32_t height) {
+    DXGI_SWAP_CHAIN_DESC swapDesc{};
+    swapDesc.BufferCount = 2;
+    swapDesc.BufferDesc.Width = width;
+    swapDesc.BufferDesc.Height = height;
+    swapDesc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    swapDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    swapDesc.OutputWindow = hwnd;
+    swapDesc.SampleDesc.Count = 1;
+    swapDesc.Windowed = TRUE;
+    swapDesc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+
+    const D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0};
+    D3D_FEATURE_LEVEL got{};
+    HRESULT hr = D3D11CreateDeviceAndSwapChain(
+        nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, levels, 2, D3D11_SDK_VERSION, &swapDesc,
+        &g.swap, &g.device, &got, &g.context);
+    if (FAILED(hr)) {
+        std::printf("[d3d11] device creation failed 0x%08lx\n", static_cast<unsigned long>(hr));
+        return false;
+    }
+    std::printf("[d3d11] feature level 0x%x\n", static_cast<unsigned>(got));
+
+    ComPtr<ID3D11Texture2D> back;
+    if (FAILED(g.swap->GetBuffer(0, IID_PPV_ARGS(&back)))) return false;
+    if (FAILED(g.device->CreateRenderTargetView(back.Get(), nullptr, &g.backBuffer))) return false;
+
+    D3D11_BLEND_DESC blend{};
+    blend.RenderTarget[0].BlendEnable = FALSE;
+    blend.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+    if (FAILED(g.device->CreateBlendState(&blend, &g.blendDisabled))) return false;
+
+    D3D11_RASTERIZER_DESC raster{};
+    raster.FillMode = D3D11_FILL_SOLID;
+    raster.CullMode = D3D11_CULL_NONE;
+    raster.FrontCounterClockwise = TRUE;
