@@ -814,3 +814,99 @@ void RenderFrame(void* hwnd, const std::vector<Draw>& draws) {
                 }
             }
             continue;
+        }
+
+        // Skip embedded Gnmx fast-clear / CMASK passes (VS != shader_vv.sb).
+        if (sh[0x048] && sh[0x048] != 0x40100010u) continue;
+        if (!LoadMatrix(sh)) continue;
+
+        const size_t firstIndex = g.indices.size();
+        if (!BuildGeometry(draw, sh)) continue;
+
+        const float xScale = *reinterpret_cast<const float*>(&cx[kCtxViewport + 0]);
+        const float xOffset = *reinterpret_cast<const float*>(&cx[kCtxViewport + 1]);
+        const float yScale = *reinterpret_cast<const float*>(&cx[kCtxViewport + 2]);
+        const float yOffset = *reinterpret_cast<const float*>(&cx[kCtxViewport + 3]);
+
+        const uint64_t rtAddr = static_cast<uint64_t>(cx[kCtxColor0Base]) << 8;
+        ID3D11RenderTargetView* targetRtv = g.backBuffer.Get();
+        if (rtAddr && mainRtAddr && rtAddr != mainRtAddr) {
+            const uint32_t rtPitch = ((cx[0x319] & 0x7ffu) + 1u) << 3;
+            const uint32_t rtSliceH = rtPitch ? (((cx[0x31A] & 0x3fffffu) + 1u) * 64u / rtPitch) : 0;
+            uint32_t rw = (xScale > 0.0f) ? static_cast<uint32_t>(xScale * 2.0f + 0.5f) : rtPitch;
+            uint32_t rh = (yScale < 0.0f) ? static_cast<uint32_t>(-yScale * 2.0f + 0.5f) : rtSliceH;
+            if (rw >= 16 && rh >= 16 && rw <= 4096 && rh <= 4096) {
+                if (ID3D11RenderTargetView* off = EnsureOffscreenRt(rtAddr, rw, rh))
+                    targetRtv = off;
+            }
+        }
+        if (targetRtv != currentRtv) {
+            ID3D11ShaderResourceView* nullSrv = nullptr;
+            g.context->PSSetShaderResources(0, 1, &nullSrv);
+            currentRtv = targetRtv;
+            g.context->OMSetRenderTargets(1, &currentRtv, nullptr);
+        }
+
+        if (xScale > 0.0f && yScale < 0.0f) {
+            const D3D11_VIEWPORT dvp{xOffset - xScale, yOffset + yScale, xScale * 2.0f,
+                                     -yScale * 2.0f, 0.0f, 1.0f};
+            g.context->RSSetViewports(1, &dvp);
+        }
+
+        const float blendFactor[4] = {
+            *reinterpret_cast<const float*>(&cx[kCtxBlendConstants + 0]),
+            *reinterpret_cast<const float*>(&cx[kCtxBlendConstants + 1]),
+            *reinterpret_cast<const float*>(&cx[kCtxBlendConstants + 2]),
+            *reinterpret_cast<const float*>(&cx[kCtxBlendConstants + 3]),
+        };
+        g.context->OMSetBlendState(LookupBlend(cx[kCtxBlend0Control], cx[kCtxTargetMask]),
+                                   blendFactor, 0xffffffff);
+
+        const ImageDesc texture = DecodeImage(&sh[kPsTexture]);
+        ID3D11ShaderResourceView* srv = LookupTexture(texture);
+        if (!srv) srv = g.missingTexture.Get();
+        ID3D11SamplerState* sampler = LookupSampler(&sh[kPsSampler]);
+        if (!sampler) sampler = g.defaultSampler.Get();
+        g.context->PSSetShaderResources(0, 1, &srv);
+        g.context->PSSetSamplers(0, 1, &sampler);
+        UploadAndDraw(g.width, g.height);
+        g.indices.resize(firstIndex);
+        g.vertices.clear();
+    }
+
+    static uint64_t s_frame = 0;
+    ++s_frame;
+    static std::vector<uint64_t> s_shotFrames;
+    static bool s_parsedShots = false;
+    if (!s_parsedShots) {
+        s_parsedShots = true;
+        char* env = nullptr;
+        size_t len = 0;
+        if (_dupenv_s(&env, &len, "NIDHOGG_SCREENSHOT") == 0 && env) {
+            const char* p = env;
+            while (*p) {
+                char* end = nullptr;
+                unsigned long long f = std::strtoull(p, &end, 10);
+                if (end == p) break;
+                if (f > 0) s_shotFrames.push_back(f);
+                p = (*end == ',') ? (end + 1) : end;
+            }
+            std::free(env);
+        }
+    }
+    bool takeShot = false;
+    for (uint64_t f : s_shotFrames) {
+        if (f == s_frame) { takeShot = true; break; }
+    }
+    if (takeShot) {
+        ComPtr<ID3D11Texture2D> back;
+        if (SUCCEEDED(g.swap->GetBuffer(0, IID_PPV_ARGS(&back)))) {
+            D3D11_TEXTURE2D_DESC td{};
+            back->GetDesc(&td);
+            td.Usage = D3D11_USAGE_STAGING;
+            td.BindFlags = 0;
+            td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+            ComPtr<ID3D11Texture2D> stage;
+            if (SUCCEEDED(g.device->CreateTexture2D(&td, nullptr, &stage))) {
+                g.context->CopyResource(stage.Get(), back.Get());
+                D3D11_MAPPED_SUBRESOURCE map{};
