@@ -718,3 +718,99 @@ void UploadAndDraw(uint32_t vpWidth, uint32_t vpHeight) {
     g.context->IASetVertexBuffers(0, 1, &vb, &stride, &offset);
     g.context->IASetIndexBuffer(ib, DXGI_FORMAT_R32_UINT, 0);
     g.context->IASetInputLayout(g.layout.Get());
+    g.context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    g.context->VSSetShader(g.vs.Get(), nullptr, 0);
+    g.context->VSSetConstantBuffers(0, 1, &cb);
+    g.context->PSSetShader(g.ps.Get(), nullptr, 0);
+    g.context->DrawIndexed(static_cast<UINT>(g.indices.size()), 0, 0);
+    (void)vpWidth;
+    (void)vpHeight;
+}
+
+}  // namespace
+
+void RenderFrame(void* hwnd, const std::vector<Draw>& draws) {
+    if (!hwnd || draws.empty()) return;
+
+    // Pick the swapchain dimensions from the final display-buffer draw so an
+    // earlier 512x256 or 1024x256 offscreen pass never shrinks the backbuffer.
+    uint32_t vpWidth = 1920, vpHeight = 1080;
+    for (auto it = draws.rbegin(); it != draws.rend(); ++it) {
+        if (it->kind != Draw::Kind::Indexed) continue;
+        const uint32_t* sh = it->regs[Space::Sh];
+        if (sh[0x048] && sh[0x048] != 0x40100010u) continue;
+        const uint32_t* cx = it->regs[Space::Context];
+        const float xScale = *reinterpret_cast<const float*>(&cx[kCtxViewport + 0]);
+        const float yScale = *reinterpret_cast<const float*>(&cx[kCtxViewport + 2]);
+        if (xScale > 0.0f && yScale < 0.0f) {
+            vpWidth = static_cast<uint32_t>(xScale * 2.0f + 0.5f);
+            vpHeight = static_cast<uint32_t>(-yScale * 2.0f + 0.5f);
+        }
+        break;
+    }
+    if (vpWidth < 16 || vpHeight < 16 || vpWidth > 4096 || vpHeight > 4096) {
+        vpWidth = 1920;
+        vpHeight = 1080;
+    }
+
+    if (!EnsureRenderer(static_cast<HWND>(hwnd), vpWidth, vpHeight)) return;
+
+    MSG msg;
+    while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) {
+        TranslateMessage(&msg);
+        DispatchMessageA(&msg);
+    }
+
+    // Identify the display buffer presented at the end of the submit so
+    // offscreen surface passes route to their own D3D11 render targets.
+    uint64_t mainRtAddr = 0;
+    for (auto it = draws.rbegin(); it != draws.rend(); ++it) {
+        if (it->kind == Draw::Kind::Dispatch) continue;
+        const uint32_t* sh = it->regs[Space::Sh];
+        if (sh[0x048] && sh[0x048] != 0x40100010u) continue;
+        mainRtAddr = static_cast<uint64_t>(it->regs[Space::Context][kCtxColor0Base]) << 8;
+        if (mainRtAddr) break;
+    }
+
+    const float clear[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    ID3D11RenderTargetView* currentRtv = g.backBuffer.Get();
+    g.context->OMSetRenderTargets(1, &currentRtv, nullptr);
+    g.context->ClearRenderTargetView(g.backBuffer.Get(), clear);
+    g.context->OMSetBlendState(g.blendDisabled.Get(), nullptr, 0xffffffff);
+    g.context->OMSetDepthStencilState(g.depthDisabled.Get(), 0);
+    g.context->RSSetState(g.rasterizer.Get());
+    const D3D11_VIEWPORT viewport{0.0f, 0.0f, static_cast<float>(g.width),
+                                  static_cast<float>(g.height), 0.0f, 1.0f};
+    g.context->RSSetViewports(1, &viewport);
+
+    g.vertices.clear();
+    g.indices.clear();
+
+    for (const auto& draw : draws) {
+        const uint32_t* sh = draw.regs[Space::Sh];
+        const uint32_t* cx = draw.regs[Space::Context];
+
+        if (draw.kind == Draw::Kind::Dispatch) {
+            if (sh[0x20C] == 0x40100009u) {
+                const BufferDesc src = DecodeBuffer(&sh[0x244]);
+                const BufferDesc dst = DecodeBuffer(&sh[0x248]);
+                if (src.base && dst.base && dst.records >= 256 && Readable(src.base, 4)) {
+                    const uint32_t rgba = *reinterpret_cast<const uint32_t*>(src.base);
+                    Renderer::ClearRgba cc{{
+                        (rgba & 0xffu) / 255.0f,
+                        ((rgba >> 8) & 0xffu) / 255.0f,
+                        ((rgba >> 16) & 0xffu) / 255.0f,
+                        ((rgba >> 24) & 0xffu) / 255.0f,
+                    }};
+                    if (dst.base == mainRtAddr) {
+                        g.context->ClearRenderTargetView(g.backBuffer.Get(), cc.c);
+                    } else {
+                        auto rtIt = g.offscreenRts.find(dst.base);
+                        if (rtIt != g.offscreenRts.end() && rtIt->second.rtv)
+                            g.context->ClearRenderTargetView(rtIt->second.rtv.Get(), cc.c);
+                        else
+                            g.pendingClears[dst.base] = cc;
+                    }
+                }
+            }
+            continue;
