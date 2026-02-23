@@ -622,3 +622,99 @@ bool BuildGeometry(const Draw& draw, const uint32_t* sh) {
         if (!draw.indexCount) return false;
         indexCount = draw.indexCount;
         localIndices.resize(indexCount);
+        for (uint32_t i = 0; i < indexCount; ++i) localIndices[i] = i;
+        indexData = localIndices.data();
+    } else {
+        return false;
+    }
+
+    uint32_t highest = 0;
+    for (uint32_t i = 0; i < indexCount; ++i)
+        if (indexData[i] > highest) highest = indexData[i];
+
+    const uint32_t need = highest + 1;
+    if (need > 65536) return false;
+
+    const uint64_t posBytes = static_cast<uint64_t>(pos.stride) * need;
+    const uint64_t colorBytes = static_cast<uint64_t>(color.stride) * need;
+    const uint64_t uvBytes = static_cast<uint64_t>(uv.stride) * need;
+    if (!Readable(pos.base, static_cast<size_t>(posBytes))) return false;
+    const bool haveColor = color.stride && color.base && Readable(color.base, static_cast<size_t>(colorBytes));
+    const bool haveUv = uv.stride && uv.base && Readable(uv.base, static_cast<size_t>(uvBytes));
+
+    const uint32_t baseVertex = static_cast<uint32_t>(g.vertices.size());
+    for (uint32_t v = 0; v < need; ++v) {
+        Vertex out{};
+        std::memcpy(out.pos, reinterpret_cast<const void*>(pos.base + v * pos.stride), 12);
+        if (haveColor)
+            std::memcpy(out.color, reinterpret_cast<const void*>(color.base + v * color.stride), 16);
+        else
+            out.color[0] = out.color[1] = out.color[2] = out.color[3] = 1.0f;
+        if (haveUv) std::memcpy(out.uv, reinterpret_cast<const void*>(uv.base + v * uv.stride), 8);
+        g.vertices.push_back(out);
+    }
+    for (uint32_t i = 0; i < indexCount; ++i) g.indices.push_back(baseVertex + indexData[i]);
+    return true;
+}
+
+// The matrix lives behind VS user-data slot 2 as a V# whose base points at four
+// float4 rows.  Row order is x, y, z, w because the VS multiplies the rows the
+// shader loads from offsets 0x0, 0x4, 0x8 and 0xc.
+bool LoadMatrix(const uint32_t* sh) {
+    const uint64_t address = (static_cast<uint64_t>(sh[kVsMatrix + 1] & 0xffff) << 32) |
+                             sh[kVsMatrix];
+    const uint32_t stride = (sh[kVsMatrix + 1] >> 16) & 0x3fff;
+    if (!Readable(address, 0x40)) return false;
+    const uint32_t step = stride ? stride : 16;
+    for (int row = 0; row < 4; ++row)
+        std::memcpy(&g.matrix[row * 4],
+                    reinterpret_cast<const void*>(address + static_cast<uint64_t>(row) * step),
+                    16);
+    return true;
+}
+
+void UploadAndDraw(uint32_t vpWidth, uint32_t vpHeight) {
+    if (g.indices.empty() || g.vertices.empty()) return;
+
+    if (!g.vb || g.vbCapacity < g.vertices.size()) {
+        g.vb.Reset();
+        D3D11_BUFFER_DESC desc{};
+        desc.Usage = D3D11_USAGE_DYNAMIC;
+        desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+        desc.ByteWidth = static_cast<UINT>(g.vertices.size() * sizeof(Vertex));
+        desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        if (FAILED(g.device->CreateBuffer(&desc, nullptr, &g.vb))) return;
+        g.vbCapacity = static_cast<uint32_t>(g.vertices.size());
+    }
+    if (!g.ib || g.ibCapacity < g.indices.size()) {
+        g.ib.Reset();
+        D3D11_BUFFER_DESC desc{};
+        desc.Usage = D3D11_USAGE_DYNAMIC;
+        desc.BindFlags = D3D11_BIND_INDEX_BUFFER;
+        desc.ByteWidth = static_cast<UINT>(g.indices.size() * sizeof(uint32_t));
+        desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        if (FAILED(g.device->CreateBuffer(&desc, nullptr, &g.ib))) return;
+        g.ibCapacity = static_cast<uint32_t>(g.indices.size());
+    }
+
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    if (FAILED(g.context->Map(g.vb.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) return;
+    std::memcpy(mapped.pData, g.vertices.data(), g.vertices.size() * sizeof(Vertex));
+    g.context->Unmap(g.vb.Get(), 0);
+
+    if (FAILED(g.context->Map(g.ib.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) return;
+    std::memcpy(mapped.pData, g.indices.data(), g.indices.size() * sizeof(uint32_t));
+    g.context->Unmap(g.ib.Get(), 0);
+
+    if (FAILED(g.context->Map(g.cb.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) return;
+    std::memcpy(mapped.pData, g.matrix, sizeof(g.matrix));
+    g.context->Unmap(g.cb.Get(), 0);
+
+    const UINT stride = sizeof(Vertex);
+    const UINT offset = 0;
+    ID3D11Buffer* vb = g.vb.Get();
+    ID3D11Buffer* cb = g.cb.Get();
+    ID3D11Buffer* ib = g.ib.Get();
+    g.context->IASetVertexBuffers(0, 1, &vb, &stride, &offset);
+    g.context->IASetIndexBuffer(ib, DXGI_FORMAT_R32_UINT, 0);
+    g.context->IASetInputLayout(g.layout.Get());
