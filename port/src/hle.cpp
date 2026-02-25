@@ -1822,3 +1822,99 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                                 static_cast<unsigned long long>(h), lens[0]);
                     std::fflush(stdout);
                     prevHash = h;
+                    ++printed;
+                }
+            }
+
+            g_machine.Submit(hosts, lens, buffers);
+            (void)ccbAddrs;
+            (void)ccbSizes;
+
+            // Does the frame loop actually move?  The first frame's quads are
+            // the whole 320x200 screen with uv (0,0) and the texture they name
+            // is still zeroed, so the picture at t=0 is black no matter how
+            // correct the backend is.  What matters is whether the guest ever
+            // rewrites that data: hash the vertex block and report the texture
+            // the last indexed draw samples from.
+            if (g_submits % 60 == 1) {
+                const auto& ds = g_machine.draws();
+                uint32_t vhash = 2166136261u;
+                if (gnm::HostReadable(0x4011408000ull, 0x240)) {
+                    const auto* v = reinterpret_cast<const uint32_t*>(0x4011408000ull);
+                    for (int i = 0; i < 0x90; ++i) vhash = (vhash ^ v[i]) * 16777619u;
+                }
+                uint64_t tex = 0;
+                uint32_t tw = 0, th = 0;
+                for (auto it = ds.rbegin(); it != ds.rend(); ++it) {
+                    if (it->kind != gnm::Draw::Kind::Indexed) continue;
+                    const uint32_t* sh = it->regs[gnm::Space::Sh];
+                    tex = ((static_cast<uint64_t>(sh[0x11] & 0x3f) << 32) | sh[0x10]) << 8;
+                    tw = (sh[0x12] & 0x3fff) + 1;
+                    th = ((sh[0x12] >> 14) & 0x3fff) + 1;
+                    break;
+                }
+                size_t nz = 0;
+                if (tex && gnm::HostReadable(tex, 0x20000)) {
+                    const auto* p = reinterpret_cast<const unsigned char*>(tex);
+                    for (size_t i = 0; i < 0x20000; ++i) nz += p[i] != 0;
+                }
+                std::printf("[frame %llu] draws=%zu vhash=%08x tex=%llx %ux%u nz=%zu\n",
+                            static_cast<unsigned long long>(g_submits), ds.size(), vhash,
+                            static_cast<unsigned long long>(tex), tw, th, nz);
+                std::fflush(stdout);
+            }
+
+            // Everything the D3D11 backend needs for one real draw, printed
+            // once.  The descriptor conventions come from GNM's own tables, but
+            // the only way to be sure the decode is right is to print the data
+            // the descriptors point at.
+            if (g_submits == 2) {
+                const gnm::Draw* d = nullptr;
+                for (const auto& c : g_machine.draws())
+                    if (c.kind == gnm::Draw::Kind::Indexed) d = &c;
+                if (!d) {
+                    std::printf("[draw] no indexed draw\n");
+                } else {
+                    const uint32_t* sh = d->regs[gnm::Space::Sh];
+                    const uint32_t* cx = d->regs[gnm::Space::Context];
+                    auto qword = [&](uint32_t reg) {
+                        return (static_cast<uint64_t>(sh[reg + 1]) << 32) | sh[reg];
+                    };
+                    std::printf("[draw] indexed count=%u type=%u base=0x%llx prim=%08x\n",
+                                d->indexCount, d->indexType,
+                                static_cast<unsigned long long>(d->indexBase),
+                                cx[0x200]);
+                    std::printf("[draw] fetch=0x%llx table=0x%llx\n",
+                                static_cast<unsigned long long>(qword(0x4C)),
+                                static_cast<unsigned long long>(qword(0x4E)));
+
+                    const uint64_t table = qword(0x4E);
+                    if (gnm::HostReadable(table, 0x30)) {
+                        auto vsharp = [&](const char* nm, uint32_t off) {
+                            const auto* w = reinterpret_cast<const uint32_t*>(table + off);
+                            const uint64_t base = ((static_cast<uint64_t>(w[1] & 0xff)) << 32) | w[0];
+                            const uint32_t stride = (w[1] >> 16) & 0x3fff;
+                            const uint32_t sel = w[3] & 0xfff;
+                            std::printf("[draw] V# %-6s base=0x%llx stride=%u num=%u fmt=%08x "
+                                        "df=%u nf=%u sel=%u,%u,%u,%u\n",
+                                        nm, static_cast<unsigned long long>(base), stride, w[2],
+                                        w[3], (w[3] >> 16) & 0xf, (w[3] >> 12) & 0xf,
+                                        sel & 7, (sel >> 3) & 7, (sel >> 6) & 7, (sel >> 9) & 7);
+                            if (gnm::HostReadable(base, 0x24)) {
+                                const auto* f = reinterpret_cast<const float*>(base);
+                                std::printf("[draw]   first vertex: %.4f %.4f %.4f | %.3f %.3f "
+                                            "%.3f %.3f | %.4f %.4f\n",
+                                            f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8]);
+                            }
+                        };
+                        vsharp("pos", 0x00);
+                        vsharp("color", 0x10);
+                        vsharp("uv", 0x20);
+                    }
+
+                    const uint64_t mv = qword(0x54);
+                    if (gnm::HostReadable(mv, 0x40)) {
+                        const auto* f = reinterpret_cast<const float*>(mv);
+                        std::printf("[draw] matrix @0x%llx stride=%u num=%u\n",
+                                    static_cast<unsigned long long>(mv), (sh[0x55] >> 16) & 0x3fff,
+                                    sh[0x56]);
