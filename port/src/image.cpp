@@ -94,3 +94,63 @@ void Image::findImports(const std::vector<uint8_t>& f) {
         if ((s.flags & PF_X) && plt >= s.vaddr && plt + 0x10 <= s.vaddr + s.filesz) text = &s;
     if (!text) return;
 
+    auto slotAt = [&](uint64_t va, uint64_t* slot) {
+        const uint8_t* p = text->file + (va - text->vaddr);
+        if (p[0] != 0xff || p[1] != 0x25) return false;
+        const int32_t disp = *reinterpret_cast<const int32_t*>(p + 2);
+        *slot = va + 6 + static_cast<int64_t>(disp);
+        return true;
+    };
+
+    uint64_t slot = 0;
+    if (!slotAt(plt + 6, &slot)) return;   // skip the resolver trampoline
+    for (uint64_t va = plt + 0x10; va + 6 <= text->vaddr + text->filesz; va += 0x10) {
+        uint64_t next = 0;
+        if (!slotAt(va, &next) || next != slot + 8) break;
+        imports_.push_back(next);
+        slot = next;
+    }
+}
+
+bool Image::load(const std::string& elfPath) {
+    FILE* fp = std::fopen(elfPath.c_str(), "rb");
+    if (!fp) return false;
+    std::fseek(fp, 0, SEEK_END);
+    const long n = std::ftell(fp);
+    std::fseek(fp, 0, SEEK_SET);
+    std::vector<uint8_t> file(static_cast<size_t>(n));
+    if (std::fread(file.data(), 1, file.size(), fp) != file.size()) {
+        std::fclose(fp);
+        return false;
+    }
+    std::fclose(fp);
+
+    if (!parse(file)) return false;
+
+    // Reserve the whole span so the image lives at one contiguous, aligned
+    // window; vaddr == address - base becomes true everywhere.
+    const uint64_t align = 0x10000;
+    const uint64_t want = (span_ + align - 1) & ~(align - 1);
+    for (uintptr_t hint = 0x10000000; hint < 0x70000000; hint += 0x10000000) {
+        void* p = VirtualAlloc(reinterpret_cast<void*>(hint), want,
+                               MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+        if (p) { base_ = static_cast<uint8_t*>(p); break; }
+    }
+    if (!base_) return false;
+
+    std::memset(base_, 0, want);
+    for (const auto& s : segs_)
+        std::memcpy(base_ + s.vaddr, s.file, static_cast<size_t>(s.filesz));
+
+    findRelocs(file);
+    findImports(file);
+    return true;
+}
+
+size_t Image::relocate() {
+    for (const auto& r : relocs_)
+        *reinterpret_cast<uint64_t*>(base_ + r.offset) = reinterpret_cast<uint64_t>(base_ + r.addend);
+    return relocs_.size();
+}
+
+}  // namespace ps4
