@@ -2110,3 +2110,99 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             const uint64_t pitch = stack[0];
             a[0] = static_cast<uint32_t>(r.gpr[1]);  // pixel format
             a[1] = static_cast<uint32_t>(r.gpr[2]);  // tiling mode
+            a[2] = static_cast<uint32_t>(r.gpr[3]);  // aspect ratio
+            a[3] = static_cast<uint32_t>(r.gpr[4]);  // width
+            a[4] = static_cast<uint32_t>(r.gpr[5]);  // height
+            a[5] = static_cast<uint32_t>(pitch);     // pitch
+            a[6] = 0;
+            a[7] = 0;
+            std::printf("[videoout] buffer attribute %ux%u fmt=0x%08x tiling=0x%x pitch=%u\n",
+                        a[3], a[4], a[0], a[1], a[5]);
+            std::fflush(stdout);
+            return 0;
+        }
+        case 117:  // sceVideoOutRegisterBuffers(handle, start, addresses, count, attr)
+        {
+            const uint32_t startIdx = static_cast<uint32_t>(r.gpr[1]);
+            auto* addrs = reinterpret_cast<void* const*>(r.gpr[2]);
+            const uint32_t count = static_cast<uint32_t>(r.gpr[3]);
+            auto* a = reinterpret_cast<const uint32_t*>(r.gpr[4]);
+            if (!Readable(addrs, 8 * (count ? count : 1)) || !Readable(a, 0x20)) return 0;
+            for (uint32_t i = 0; i < count && (startIdx + i) < 8; ++i) {
+                const uint32_t slotIdx = startIdx + i;
+                g_videoOut.buffers[slotIdx].addr = addrs[i];
+                g_videoOut.buffers[slotIdx].width = a[3];
+                g_videoOut.buffers[slotIdx].height = a[4];
+                g_videoOut.buffers[slotIdx].pitch = a[5];
+                g_videoOut.buffers[slotIdx].index = static_cast<int>(slotIdx);
+                if (static_cast<int>(slotIdx + 1) > g_videoOut.bufferCount)
+                    g_videoOut.bufferCount = static_cast<int>(slotIdx + 1);
+                std::printf("[videoout] buffer %u  addr=%p %ux%u pitch=%u fmt=0x%08x tiling=0x%x\n",
+                            slotIdx, addrs[i], a[3], a[4], a[5], a[0], a[1]);
+            }
+            std::fflush(stdout);
+            return 0;
+        }
+        case 118: {  // sceKernelWaitEqueue(eq, events, num, out, timeout)
+            auto* ev = reinterpret_cast<uint8_t*>(r.gpr[1]);
+            const uint32_t want = static_cast<uint32_t>(r.gpr[2]);
+            if (want && Readable(ev, 0x20)) {
+                std::memset(ev, 0, 0x20);
+                *reinterpret_cast<uint64_t*>(ev + 0x00) = 0x40;  // EOP event id
+                *reinterpret_cast<int16_t*>(ev + 0x08) = -13;    // EVFILT_GRAPHICS_CORE
+                *reinterpret_cast<int64_t*>(ev + 0x10) = static_cast<int64_t>(g_videoOut.lastFlipArg);
+            }
+            auto* outCount = reinterpret_cast<uint32_t*>(r.gpr[3]);
+            if (Readable(outCount, 4)) *outCount = want ? 1 : 0;
+            return 0;
+        }
+        case 119: {  // sceKernelUsleep(usec)
+            const uint32_t us = static_cast<uint32_t>(r.gpr[0]);
+            if (us > 2000) Sleep(us / 1000);
+            else if (us) Sleep(1);
+            return 0;
+        }
+        case 120: {  // sceVideoOutGetFlipStatus(handle, status)
+            auto* st = reinterpret_cast<uint8_t*>(r.gpr[1]);
+            if (!Readable(st, 0x40)) return 0;
+            const uint64_t us = NowUsec();
+            const uint64_t tsc = us * 1600ULL;
+            std::memset(st, 0, 0x40);
+            *reinterpret_cast<uint64_t*>(st + 0x00) = g_videoOut.flipCount;
+            *reinterpret_cast<uint64_t*>(st + 0x08) = us * 1000ULL;  // processTime (ns)
+            *reinterpret_cast<uint64_t*>(st + 0x10) = tsc;
+            *reinterpret_cast<uint64_t*>(st + 0x18) = g_videoOut.lastFlipArg;
+            *reinterpret_cast<uint64_t*>(st + 0x20) = tsc;
+            *reinterpret_cast<int32_t*>(st + 0x30) = 0;   // gcQueueNum: idle
+            *reinterpret_cast<int32_t*>(st + 0x34) = 0;   // flipPendingNum
+            *reinterpret_cast<int32_t*>(st + 0x38) = static_cast<int32_t>(g_videoOut.flipCount & 1);
+            return 0;
+        }
+        case 121:  // sceKernelDeleteEqueue
+        case 122:  // sceVideoOutClose
+            return 0;
+
+        default: {
+            // Report each unknown slot once, with the caller, so the next
+            // library to implement is always at the top of the log.
+            if (slot < 512 && !g_seen[slot]) {
+                g_seen[slot] = true;
+                const char* name = SlotName(slot);
+                std::printf("  [hle %3u] %s from +0x%06llx  rdi=%016llx rsi=%016llx rdx=%016llx rcx=%016llx\n",
+                            slot, name ? name : "unimplemented",
+                            static_cast<unsigned long long>(ret - g_base),
+                            static_cast<unsigned long long>(r.gpr[0]),
+                            static_cast<unsigned long long>(r.gpr[1]),
+                            static_cast<unsigned long long>(r.gpr[2]),
+                            static_cast<unsigned long long>(r.gpr[3]));
+                std::fflush(stdout);
+            }
+            return 0;
+        }
+    }
+}
+
+namespace gnm {
+
+bool HostReadable(uint64_t addr, size_t n) {
+    return Readable(reinterpret_cast<void*>(addr), n);
