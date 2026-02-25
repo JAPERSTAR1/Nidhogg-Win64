@@ -1294,3 +1294,99 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             if (handle == 1) {
                 if (down('W') || down(VK_UP))    buttons |= 0x0010;  // Up
                 if (down('S') || down(VK_DOWN))  buttons |= 0x0040;  // Down
+                if (down('A') || down(VK_LEFT))  buttons |= 0x0080;  // Left
+                if (down('D') || down(VK_RIGHT)) buttons |= 0x0020;  // Right
+                if (down(VK_SPACE) || down('Z') || down('G')) buttons |= 0x4000;  // Cross (Jump/OK)
+                if (down('F') || down('X'))      buttons |= 0x8000;  // Square (Attack/Throw)
+                if (down(VK_ESCAPE) || down('C')) buttons |= 0x2000; // Circle (Back)
+                if (down('E'))                   buttons |= 0x1000;  // Triangle
+                if (down(VK_RETURN))             buttons |= 0x0008;  // Options (Start)
+            } else if (handle == 2) {
+                if (down('I'))                   buttons |= 0x0010;
+                if (down('K'))                   buttons |= 0x0040;
+                if (down('J'))                   buttons |= 0x0080;
+                if (down('L'))                   buttons |= 0x0020;
+                if (down('O') || down(VK_RCONTROL)) buttons |= 0x4000;
+                if (down('U') || down(VK_RSHIFT))   buttons |= 0x8000;
+                if (down(VK_BACK))               buttons |= 0x2000;
+            }
+
+            XINPUT_STATE xi{};
+            if (XInputGetState(static_cast<DWORD>(handle - 1), &xi) == ERROR_SUCCESS) {
+                const WORD xb = xi.Gamepad.wButtons;
+                if (xb & XINPUT_GAMEPAD_DPAD_UP)        buttons |= 0x0010;
+                if (xb & XINPUT_GAMEPAD_DPAD_DOWN)      buttons |= 0x0040;
+                if (xb & XINPUT_GAMEPAD_DPAD_LEFT)      buttons |= 0x0080;
+                if (xb & XINPUT_GAMEPAD_DPAD_RIGHT)     buttons |= 0x0020;
+                if (xb & XINPUT_GAMEPAD_START)          buttons |= 0x0008;
+                if (xb & XINPUT_GAMEPAD_A)              buttons |= 0x4000;
+                if (xb & XINPUT_GAMEPAD_B)              buttons |= 0x2000;
+                if (xb & XINPUT_GAMEPAD_X)              buttons |= 0x8000;
+                if (xb & XINPUT_GAMEPAD_Y)              buttons |= 0x1000;
+                if (xb & XINPUT_GAMEPAD_LEFT_SHOULDER)  buttons |= 0x0400;
+                if (xb & XINPUT_GAMEPAD_RIGHT_SHOULDER) buttons |= 0x0800;
+                if (xi.Gamepad.bLeftTrigger > 64)       buttons |= 0x0100;
+                if (xi.Gamepad.bRightTrigger > 64)      buttons |= 0x0200;
+                lx = static_cast<uint8_t>((static_cast<int>(xi.Gamepad.sThumbLX) + 32768) >> 8);
+                ly = static_cast<uint8_t>((32767 - static_cast<int>(xi.Gamepad.sThumbLY)) >> 8);
+                rx = static_cast<uint8_t>((static_cast<int>(xi.Gamepad.sThumbRX) + 32768) >> 8);
+                ry = static_cast<uint8_t>((32767 - static_cast<int>(xi.Gamepad.sThumbRY)) >> 8);
+            }
+
+            static struct AutoPress {
+                uint64_t frame;
+                uint32_t mask;
+            } s_press[32];
+            static int s_pressCount = -1;
+            if (s_pressCount < 0) {
+                s_pressCount = 0;
+                char* env = nullptr;
+                size_t len = 0;
+                if (_dupenv_s(&env, &len, "NIDHOGG_AUTOPRESS") == 0 && env) {
+                    const char* p = env;
+                    while (*p && s_pressCount < 32) {
+                        char* mid = nullptr;
+                        unsigned long long f = std::strtoull(p, &mid, 10);
+                        if (mid == p || *mid != ':') break;
+                        char* end = nullptr;
+                        unsigned long m = std::strtoul(mid + 1, &end, 0);
+                        if (end == mid + 1) break;
+                        s_press[s_pressCount++] = {f, static_cast<uint32_t>(m)};
+                        p = (*end == ',') ? (end + 1) : end;
+                    }
+                    std::free(env);
+                }
+            }
+            if (handle == 1) {
+                for (int i = 0; i < s_pressCount; ++i) {
+                    if (g_submits >= s_press[i].frame && g_submits < s_press[i].frame + 6)
+                        buttons |= s_press[i].mask;
+                }
+            }
+
+            *reinterpret_cast<uint32_t*>(out + 0x00) = buttons;
+            out[0x04] = lx;
+            out[0x05] = ly;
+            out[0x06] = rx;
+            out[0x07] = ry;
+            out[0x28] = 1;  // connected
+            return 1;
+        }
+
+        // ---- libSceSaveData & Orbis POSIX file descriptors
+        case 124:  // sceSaveDataInitialize3
+        case 126:  // sceSaveDataUmount
+        case 127:  // sceSaveDataSaveIcon
+        case 131:  // sceSaveDataGetParam
+        case 132:  // localtime_r
+        case 133:  // strftime
+        case 134:  // sceSaveDataLoadIcon
+            return 0;
+        case 125: {  // sceSaveDataMount2(mount, mountResult)
+            if (!Readable(ptr(0), 0x30) || !Readable(ptr(1), 0x20)) return 0x809f0001ull;
+            const auto* m = reinterpret_cast<const uint8_t*>(r.gpr[0]);
+            const char* dirName = *reinterpret_cast<const char* const*>(m + 0x10);
+            const uint32_t mode = *reinterpret_cast<const uint32_t*>(m + 0x28);
+            std::string hostDir = SaveRoot((dirName && Readable(dirName, 1)) ? dirName : "00");
+            DWORD attr = GetFileAttributesA(hostDir.c_str());
+            if (mode == 1) {  // READ_ONLY
