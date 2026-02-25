@@ -238,3 +238,59 @@ void Machine::Packet(uint32_t op, const uint32_t* p, uint32_t n, uint64_t pos) {
                 }
             }
             break;
+    }
+}
+
+void Machine::SetRegs(Space space, const uint32_t* p, uint32_t n) {
+    if (!n) return;
+    const uint32_t base = p[0];
+    uint32_t* block = regs_[space];
+    for (uint32_t i = 1; i < n; ++i) {
+        const uint32_t reg = base + i - 1;
+        if (reg >= kSpaceSize) {
+            ++errors_;
+            std::printf("[pm4] register 0x%x outside space %u\n", reg,
+                        static_cast<uint32_t>(space));
+            continue;
+        }
+        block[reg] = p[i];
+    }
+}
+
+void Machine::WriteMemory(uint64_t addr, const uint32_t* data, uint32_t words) {
+    if (!HostReadable(addr, static_cast<size_t>(words) * 4)) {
+        ++errors_;
+        std::printf("[pm4] write of %u dwords to unmapped %p\n", words,
+                    reinterpret_cast<void*>(addr));
+        return;
+    }
+    auto* dst = reinterpret_cast<uint32_t*>(addr);
+    for (uint32_t i = 0; i < words; ++i) dst[i] = data[i];
+    ++writes_;
+}
+
+bool Machine::WaitMemory(uint64_t addr, uint32_t ref, uint32_t mask,
+                         uint32_t func) {
+    if (!HostReadable(addr, 4)) return false;
+    auto* p = reinterpret_cast<volatile uint32_t*>(addr);
+    for (int i = 0; i < kWaitSpins; ++i) {
+        const uint32_t v = *p & mask;
+        const uint32_t r = ref & mask;
+        bool ok;
+        switch (func) {
+            case 0: ok = true; break;
+            case 1: ok = v < r; break;
+            case 2: ok = v <= r; break;
+            case 3: ok = v == r; break;
+            case 4: ok = v != r; break;
+            case 5: ok = v >= r; break;
+            case 6: ok = v > r; break;
+            default: ok = true; break;
+        }
+        if (ok) return true;
+        Sleep(0);
+    }
+    return false;
+}
+
+}  // namespace ps4::gnm
