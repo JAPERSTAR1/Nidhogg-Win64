@@ -1678,3 +1678,147 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
         case 463:  // sceGnmIsUserPaEnabled (false on retail)
             return 0;
 
+        case 437: {  // sceGnmSubmitAndFlipCommandBuffers
+            const uint32_t count = static_cast<uint32_t>(r.gpr[0]);
+            auto* dcbAddrs = reinterpret_cast<const uint64_t*>(r.gpr[1]);
+            auto* dcbSizes = reinterpret_cast<const uint32_t*>(r.gpr[2]);
+            auto* ccbAddrs = reinterpret_cast<const uint64_t*>(r.gpr[3]);
+            auto* ccbSizes = reinterpret_cast<const uint32_t*>(r.gpr[4]);
+            const uint32_t displayIndex = Readable(stack, 24)
+                                              ? static_cast<uint32_t>(stack[0]) : 0;
+            const int32_t flipMode = Readable(stack, 24)
+                                         ? static_cast<int32_t>(stack[1]) : 0;
+            const int64_t flipArg = Readable(stack, 24)
+                                        ? static_cast<int64_t>(stack[2]) : 0;
+            ++g_submits;
+            const bool first = !g_dumpedSubmit;
+
+            // The renderer is a static object in the image; its context pointer
+            // and the GPU label the frame loop polls are two dereferences away.
+            // The loop writes 1 into that label and spins until the GPU clears
+            // it, so the clear is what the stream has to produce.
+            uint64_t label = 0;
+            {
+                const uint64_t renderer = g_base + 0x341460;
+                if (Readable(reinterpret_cast<void*>(renderer + 0x664a8), 8)) {
+                    const uint64_t ctx = *reinterpret_cast<uint64_t*>(renderer + 0x664a8);
+                    if (ctx && Readable(reinterpret_cast<void*>(ctx + 0x23a0), 8))
+                        label = *reinterpret_cast<uint64_t*>(ctx + 0x23a0);
+                }
+            }
+
+            if (g_submits <= 3) {
+                std::printf("[gnm] submit #%llu count=%u vid=%llu display=%u mode=%d arg=%lld label=%p value=%u\n",
+                            static_cast<unsigned long long>(g_submits),
+                            count, static_cast<unsigned long long>(r.gpr[5]), displayIndex,
+                            flipMode, static_cast<long long>(flipArg),
+                            reinterpret_cast<void*>(label),
+                            label && Readable(reinterpret_cast<void*>(label), 4)
+                                ? *reinterpret_cast<uint32_t*>(label) : 0xffffffffu);
+                if (first) g_dumpedSubmit = true;
+                for (uint32_t i = 0; i < count; ++i) {
+                    const uint64_t dcbHost = GpuAddrToHost(dcbAddrs[i]);
+                    if (dcbHost && Readable(reinterpret_cast<void*>(dcbHost), dcbSizes[i]))
+                        DumpPackets(dcbHost, dcbSizes[i], "dcb");
+                    else
+                        std::printf("[gnm] dcb[%u] addr=0x%llx size=0x%x NOT MAPPED\n", i,
+                                    static_cast<unsigned long long>(dcbAddrs[i]), dcbSizes[i]);
+                }
+                // The renderer keeps the two GnmShader objects as plain
+                // pointers.  Their +8 field is the code address shifted left
+                // by 8, which is the same encoding PGM_LO uses, so printing
+                // them next to the register dump identifies the program
+                // registers without guessing at GCN offsets.
+                {
+                    const uint64_t renderer = g_base + 0x341460;
+                    for (const auto& [off, name] :
+                         {std::pair<uint32_t, const char*>{0x600b0, "vs"},
+                          {0x600b8, "ps"}, {0x60108, "vsbuf"}}) {
+                        const uint64_t obj = Readable(reinterpret_cast<void*>(renderer + off), 8)
+                                                 ? *reinterpret_cast<uint64_t*>(renderer + off)
+                                                 : 0;
+                        if (!obj || !Readable(reinterpret_cast<void*>(obj), 16)) {
+                            std::printf("[gnm] shader %s: (null)\n", name);
+                            continue;
+                        }
+                        const auto* w = reinterpret_cast<const uint32_t*>(obj);
+                        const uint64_t code = (static_cast<uint64_t>(w[3]) << 40) |
+                                              (static_cast<uint64_t>(w[2]) << 8) |
+                                              (w[0] & 0x7fffff);
+                        std::printf("[gnm] shader %s obj=%p d0=%08x d4=%08x q8=%08x%08x code=0x%010llx lo=%08x\n",
+                                    name, reinterpret_cast<void*>(obj), w[0], w[1], w[3], w[2],
+                                    static_cast<unsigned long long>(code),
+                                    static_cast<uint32_t>(code >> 8));
+                    }
+                }
+
+                // The shader binaries live in the arena the GPU reads from, so
+                // the whole page range around them goes to disk once.  The
+                // context object holds GNM's shadow copy of every register it
+                // has queued, which is where a program address that never
+                // appears in the stream would be parked.
+                if (first) {
+                    std::FILE* probe = std::fopen("work/arena_probe.bin", "wb");
+                    if (probe) {
+                        const uint64_t arena = 0x4010000000ull;
+                        if (Readable(reinterpret_cast<void*>(arena), 0x100000))
+                            std::fwrite(reinterpret_cast<const void*>(arena), 1, 0x100000, probe);
+                        std::fclose(probe);
+                    }
+                }
+
+                const uint64_t renderer = g_base + 0x341460;
+                if (Readable(reinterpret_cast<void*>(renderer + 0x664a8), 8)) {
+                    const uint64_t ctx = *reinterpret_cast<uint64_t*>(renderer + 0x664a8);
+                    if (ctx && Readable(reinterpret_cast<void*>(ctx), 0x31c0)) {
+                        char ctxName[64];
+                        std::snprintf(ctxName, sizeof(ctxName), "work/gnmctx%llu.bin",
+                                      static_cast<unsigned long long>(g_submits));
+                        if (std::FILE* f = std::fopen(ctxName, "wb")) {
+                            std::fwrite(reinterpret_cast<const void*>(ctx), 1, 0x31c0, f);
+                            std::fclose(f);
+                        }
+                        const auto* cw = reinterpret_cast<const uint32_t*>(ctx);
+                        std::printf("[gnm] submit %llu ctx+0xbb8=%08x ctx+0xbbc=%08x "
+                                    "vs=0x%010llx\n",
+                                    static_cast<unsigned long long>(g_submits), cw[0xbb8 / 4],
+                                    cw[0xbbc / 4],
+                                    static_cast<unsigned long long>(
+                                        (static_cast<uint64_t>(cw[0xbbc / 4]) << 32) |
+                                        cw[0xbb8 / 4]));
+                    }
+                }
+                std::fflush(stdout);
+            }
+
+            // Hand the stream to the PM4 interpreter.  It applies the state
+            // writes, records every draw with a register snapshot, and performs
+            // the event packets that write back to memory.
+            uint64_t hosts[8]{};
+            uint32_t lens[8]{};
+            const uint32_t buffers = count < 8 ? count : 8;
+            for (uint32_t i = 0; i < buffers; ++i) {
+                hosts[i] = GpuAddrToHost(dcbAddrs[i]);
+                lens[i] = dcbSizes[i];
+            }
+
+            // A frame that never changes its command stream is a frame loop
+            // that has reached a fixed point: the guest is alive and pacing
+            // itself against vblank but has stopped producing new work.  One
+            // hash per submit, printed on change, is the shortest way to tell
+            // "still loading" from "stuck".
+            {
+                static uint64_t prevHash = 0;
+                static int printed = 0;
+                uint64_t h = 1469598103934665603ull;
+                for (uint32_t i = 0; i < buffers; ++i) {
+                    if (!hosts[i] || !lens[i]) continue;
+                    const auto* b = reinterpret_cast<const unsigned char*>(hosts[i]);
+                    for (uint32_t k = 0; k < lens[i]; ++k) h = (h ^ b[k]) * 1099511628211ull;
+                }
+                if (h != prevHash && printed < 60) {
+                    std::printf("[dcb] frame %llu changed -> %016llx (%u bytes)\n",
+                                static_cast<unsigned long long>(g_submits),
+                                static_cast<unsigned long long>(h), lens[0]);
+                    std::fflush(stdout);
+                    prevHash = h;
