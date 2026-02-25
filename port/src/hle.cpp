@@ -1102,3 +1102,99 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
         case 154: {
             const float y = XmmF32(r, 1);
             return RetF32(y != 0.0f ? std::fmodf(XmmF32(r, 0), y) : 0.0f);
+        }
+        case 156: {
+            const double y = XmmF64(r, 1);
+            return RetF64(y != 0.0 ? std::fmod(XmmF64(r, 0), y) : 0.0);
+        }
+        case 415:
+            return RetF64(std::ldexp(XmmF64(r, 0), static_cast<int>(r.gpr[0])));
+        case 416:
+            return RetF64(std::fmax(XmmF64(r, 0), XmmF64(r, 1)));
+        case 417:
+            return RetF64(std::pow(XmmF64(r, 0), XmmF64(r, 1)));
+        case 418:
+            return RetF64(std::fmin(XmmF64(r, 0), XmmF64(r, 1)));
+
+        // ---- stdio (libSceLibcInternal)
+        case 51: {  // fopen
+            std::string path = HostPath(str(0));
+            std::string mode = str(1);
+            // Orbis/POSIX has no text-mode CRLF or 0x1A (^Z) translation;
+            // opening PNGs with mode "r" on MSVC CRT truncates at byte 6.
+            if (mode.find('b') == std::string::npos && mode.find('t') == std::string::npos)
+                mode += 'b';
+            if (mode.find('w') != std::string::npos || mode.find('a') != std::string::npos)
+                MakeParentDirs(path);
+            std::FILE* f = std::fopen(path.c_str(), mode.c_str());
+            std::printf("[fios] fopen \"%s\" mode \"%s\" -> %p\n", path.c_str(),
+                        mode.c_str(), static_cast<void*>(f));
+            std::fflush(stdout);
+            return reinterpret_cast<uint64_t>(f);
+        }
+        case 47:  // fseek
+            return static_cast<uint64_t>(static_cast<int64_t>(
+                std::fseek(reinterpret_cast<std::FILE*>(r.gpr[0]),
+                           static_cast<long>(r.gpr[1]), static_cast<int>(r.gpr[2]))));
+        case 48:  // ftell
+            return static_cast<uint64_t>(static_cast<int64_t>(
+                std::ftell(reinterpret_cast<std::FILE*>(r.gpr[0]))));
+        case 49:  // fread
+            return std::fread(ptr(0), static_cast<size_t>(r.gpr[1]),
+                              static_cast<size_t>(r.gpr[2]),
+                              reinterpret_cast<std::FILE*>(r.gpr[3]));
+        case 50:  // fclose
+            return static_cast<uint64_t>(
+                std::fclose(reinterpret_cast<std::FILE*>(r.gpr[0])));
+        case 52: {  // mkdir(path, mode)
+            std::string path = HostPath(str(0));
+            MakeParentDirs(path);
+            return static_cast<uint64_t>(static_cast<int64_t>(_mkdir(path.c_str())));
+        }
+        case 53:  // fwrite
+            return std::fwrite(ptr(0), static_cast<size_t>(r.gpr[1]),
+                               static_cast<size_t>(r.gpr[2]),
+                               reinterpret_cast<std::FILE*>(r.gpr[3]));
+        case 54: {  // remove
+            std::string path = HostPath(str(0));
+            return static_cast<uint64_t>(static_cast<int64_t>(std::remove(path.c_str())));
+        }
+
+        // ---- libScePngDec
+        case 20: {  // scePngDecParseHeader(parseParam, imageInfo)
+            if (!Readable(ptr(0), 16) || !Readable(ptr(1), 16)) return 0x80690001ull;
+            const auto* p = reinterpret_cast<const uint8_t*>(r.gpr[0]);
+            const void* pngAddr = *reinterpret_cast<const void* const*>(p + 0);
+            const uint32_t pngSize = *reinterpret_cast<const uint32_t*>(p + 8);
+            const int32_t rc = PngParseHeader(pngAddr, pngSize, ptr(1));
+            return rc < 0 ? 0x80690002ull : 0;
+        }
+        case 21:  // scePngDecQueryMemorySize(createParam)
+            return 0x1000;
+        case 22: {  // scePngDecCreate(createParam, memAddr, memSize, &handle)
+            static uint64_t s_nextPngHandle = 1;
+            if (Readable(ptr(3), 8)) *reinterpret_cast<uint64_t*>(r.gpr[3]) = s_nextPngHandle++;
+            return 0;
+        }
+        case 23: {  // scePngDecDecode(handle, decodeParam, imageInfo)
+            if (!Readable(ptr(1), 0x20)) return 0x80690001ull;
+            const auto* p = reinterpret_cast<const uint8_t*>(r.gpr[1]);
+            const void* pngAddr = *reinterpret_cast<const void* const*>(p + 0x00);
+            void* dstAddr = *reinterpret_cast<void* const*>(p + 0x08);
+            const uint32_t pngSize = *reinterpret_cast<const uint32_t*>(p + 0x10);
+            const uint32_t dstSize = *reinterpret_cast<const uint32_t*>(p + 0x14);
+            const uint32_t pitch = *reinterpret_cast<const uint32_t*>(p + 0x1c);
+            const int32_t rc = PngDecodeRgba(pngAddr, pngSize, dstAddr, dstSize, pitch);
+            return rc < 0 ? 0x80690004ull : 0;
+        }
+        case 25:  // scePngDecDelete
+            return 0;
+
+        // ---- diagnostics & formatting
+        case 9:
+            std::printf("\n[stack_chk_fail] guard corrupted\n");
+            std::fflush(stdout);
+            std::abort();
+
+        case 17: {  // sprintf(dst, fmt, ...)
+            VaList va = MakeVa(r, stack, 16);
