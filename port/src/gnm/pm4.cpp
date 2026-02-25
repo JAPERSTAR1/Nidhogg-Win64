@@ -142,3 +142,99 @@ void Machine::Packet(uint32_t op, const uint32_t* p, uint32_t n, uint64_t pos) {
             d.indexCount = p[3];
             d.streamPos = pos;
             d.indexType = indexType_;
+            d.regs = regs_;
+            draws_.push_back(std::move(d));
+            break;
+        }
+
+        case 0x15: {  // DISPATCH_DIRECT(gx, gy, gz, initiator)
+            if (n < 3) break;
+            Draw d;
+            d.kind = Draw::Kind::Dispatch;
+            d.dispatch[0] = p[0];
+            d.dispatch[1] = p[1];
+            d.dispatch[2] = p[2];
+            d.streamPos = pos;
+            d.regs = regs_;
+            draws_.push_back(std::move(d));
+            break;
+        }
+
+        case 0x37: {  // WRITE_DATA(control, addr_lo, addr_hi, data...)
+            if (n < 4) break;
+            WriteMemory(GpuAddr(p[1], p[2]), p + 3, n - 3);
+            break;
+        }
+
+        case 0x47: {  // EVENT_WRITE_EOP(control, addr_lo, addr_hi, data_lo, data_hi)
+            if (n < 5) break;
+            const uint64_t addr = GpuAddr(p[1], p[2]);
+            if (addr) {
+                const uint32_t data[2] = {p[3], p[4]};
+                WriteMemory(addr, data, 2);
+            }
+            break;
+        }
+
+        case 0x48: {  // EVENT_WRITE_EOS(control, addr_lo, addr_hi, data)
+            if (n < 4) break;
+            const uint64_t addr = GpuAddr(p[1], p[2]);
+            if (addr) WriteMemory(addr, p + 3, 1);
+            break;
+        }
+
+        case 0x46:  // EVENT_WRITE: report only, no address payload
+            break;
+
+        case 0x58:  // ACQUIRE_MEM: cache maintenance; all memory is coherent here
+            break;
+
+        case 0x3c: {  // WAIT_REG_MEM(control, addr_lo, addr_hi, ref, mask, poll)
+            if (n < 5) break;
+            const uint32_t func = p[0] & 0xf;
+            const uint32_t space = (p[0] >> 4) & 3;
+            const uint64_t addr = GpuAddr(p[1], p[2]);
+            if (space != 1) {
+                // Register-space waits are satisfied by the shadow register
+                // file, which the packet stream has already applied.
+                break;
+            }
+            if (!WaitMemory(addr, p[3], p[4], func)) {
+                ++errors_;
+                std::printf(
+                    "[pm4] WAIT_REG_MEM at +0x%llx timed out: [%p] = 0x%08x, "
+                    "want 0x%08x mask 0x%08x func %u\n",
+                    static_cast<unsigned long long>(pos * 4),
+                    reinterpret_cast<void*>(addr),
+                    HostReadable(addr, 4) ? *reinterpret_cast<uint32_t*>(addr)
+                                          : 0xffffffffu,
+                    p[3], p[4], func);
+            }
+            break;
+        }
+
+        case 0x3f: {  // INDIRECT_BUFFER(base_lo, base_hi, size, flags)
+            if (n < 3) break;
+            const uint64_t ib = GpuAddr(p[0], p[1]);
+            const uint32_t size = n >= 3 ? p[2] : 0;
+            if (ib && size) RunBuffer(ib, size, 1);
+            break;
+        }
+
+        default:
+            ++errors_;
+            {
+                static bool seen[256] = {};
+                if (!seen[op & 0xff]) {
+                    seen[op & 0xff] = true;
+                    const char* nm = OpName(op);
+                    std::printf("[pm4] unhandled op 0x%02x%s%s at +0x%llx, n=%u:",
+                                op, nm ? " " : "", nm ? nm : "",
+                                static_cast<unsigned long long>(pos * 4), n);
+                    for (uint32_t k = 0; k < n && k < 8; ++k)
+                        std::printf(" %08x", p[k]);
+                    std::printf("\n");
+                    std::fflush(stdout);
+                }
+            }
+            break;
