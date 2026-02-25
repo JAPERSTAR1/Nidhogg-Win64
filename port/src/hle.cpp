@@ -382,3 +382,99 @@ int32_t PngParseHeader(const void* pngMem, uint32_t pngSize, void* infoOut) {
     ComPtr<IWICBitmapFrameDecode> frame;
     if (FAILED(dec->GetFrame(0, &frame))) return -1;
     UINT w = 0, h = 0;
+    if (FAILED(frame->GetSize(&w, &h))) return -1;
+    if (infoOut) {
+        auto* u32 = static_cast<uint32_t*>(infoOut);
+        auto* u16 = static_cast<uint16_t*>(infoOut);
+        u32[0] = w;
+        u32[1] = h;
+        u16[4] = 3;  // RGBA
+        u16[5] = 8;  // 8 bpc
+        u32[3] = 0;
+    }
+    return 0;
+}
+
+int32_t PngDecodeRgba(const void* pngMem, uint32_t pngSize, void* dstMem,
+                      uint32_t dstSize, uint32_t pitchInPixels) {
+    IWICImagingFactory* f = GetWicFactory();
+    if (!f || !pngMem || !pngSize || !dstMem) return -1;
+    using Microsoft::WRL::ComPtr;
+    ComPtr<IWICStream> stream;
+    if (FAILED(f->CreateStream(&stream))) return -1;
+    if (FAILED(stream->InitializeFromMemory(
+            const_cast<BYTE*>(static_cast<const BYTE*>(pngMem)), pngSize)))
+        return -1;
+    ComPtr<IWICBitmapDecoder> dec;
+    if (FAILED(f->CreateDecoderFromStream(stream.Get(), nullptr,
+                                          WICDecodeMetadataCacheOnDemand, &dec)))
+        return -1;
+    ComPtr<IWICBitmapFrameDecode> frame;
+    if (FAILED(dec->GetFrame(0, &frame))) return -1;
+    UINT w = 0, h = 0;
+    if (FAILED(frame->GetSize(&w, &h))) return -1;
+    ComPtr<IWICFormatConverter> conv;
+    if (FAILED(f->CreateFormatConverter(&conv))) return -1;
+    if (FAILED(conv->Initialize(frame.Get(), GUID_WICPixelFormat32bppRGBA,
+                                WICBitmapDitherTypeNone, nullptr, 0.0,
+                                WICBitmapPaletteTypeCustom)))
+        return -1;
+    const UINT stride = (pitchInPixels ? pitchInPixels : w) * 4u;
+    const UINT need = stride * h;
+    if (dstSize < need) return -1;
+    if (FAILED(conv->CopyPixels(nullptr, stride, dstSize, static_cast<BYTE*>(dstMem))))
+        return -1;
+    return 0;
+}
+
+// PM4 packet emission helpers for libSceGnmDriver.
+uint32_t* Pm4SetReg(uint32_t* cmd, uint32_t op, uint32_t reg,
+                    std::initializer_list<uint32_t> vals) {
+    const uint32_t count = static_cast<uint32_t>(vals.size());
+    *cmd++ = 0xC0000000u | (count << 16) | (op << 8);
+    *cmd++ = reg;
+    for (uint32_t v : vals) *cmd++ = v;
+    return cmd;
+}
+
+uint32_t* Pm4Nop(uint32_t* cmd, uint32_t totalDwords) {
+    if (!totalDwords) return cmd;
+    if (totalDwords == 1) {
+        *cmd++ = 0x80000000u;  // Type-2 1-dword filler
+        return cmd;
+    }
+    *cmd++ = 0xC0001000u | ((totalDwords - 2) << 16);
+    for (uint32_t i = 1; i < totalDwords; ++i) *cmd++ = 0;
+    return cmd;
+}
+
+void Emit(const char* text, size_t len) {
+    if (len) {
+        std::fwrite(text, 1, len, stdout);
+        std::fflush(stdout);
+    }
+}
+
+// ----------------------------------------------------------- direct memory --
+
+// PS4 direct memory is a physical-address space both the CPU and the GPU can
+// see.  The port backs it with one reserved range of host address space and
+// hands out offsets into it as physical addresses, so `map` is just the commit
+// half of the reservation and every GPU pointer the game stores stays a real
+// pointer.  The arena is sparse: 2 GiB reserved costs nothing until it is
+// committed.
+constexpr uint64_t kDirectArenaSize = 0x80000000ull;  // 2 GiB
+// The game stores GPU addresses as 32-bit `cpuAddress >> 8` (that is why the
+// texture path shifts left by 8 before a memcpy), so every byte the GPU can be
+// pointed at has to live below 2^40.  Windows likes to hand out heap and
+// VirtualAlloc ranges above that, which silently truncates the address and
+// produces a write into an unmapped duplicate of the low bits.
+constexpr uint64_t kDirectArenaBase = 0x0000004000000000ull;  // 256 GiB
+uint8_t* g_directArena = nullptr;
+uint64_t g_directUsed = 0;
+
+bool DirectReserve() {
+    if (g_directArena) return true;
+    void* p = nullptr;
+    for (uint64_t a = kDirectArenaBase; !p && a < 0x0000008000000000ull; a += kDirectArenaSize)
+        p = VirtualAlloc(reinterpret_cast<void*>(a), kDirectArenaSize, MEM_RESERVE, PAGE_NOACCESS);
