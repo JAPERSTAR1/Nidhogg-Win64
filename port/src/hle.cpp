@@ -2206,3 +2206,8 @@ namespace gnm {
 
 bool HostReadable(uint64_t addr, size_t n) {
     return Readable(reinterpret_cast<void*>(addr), n);
+}
+
+}  // namespace gnm
+
+}  // namespace ps4
