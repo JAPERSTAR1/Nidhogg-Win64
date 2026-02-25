@@ -1198,3 +1198,99 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
 
         case 17: {  // sprintf(dst, fmt, ...)
             VaList va = MakeVa(r, stack, 16);
+            size_t n = FormatVa(reinterpret_cast<char*>(r.gpr[0]), 0x10000, str(1), &va);
+            return n;
+        }
+        case 24: {  // printf(fmt, ...)
+            VaList va = MakeVa(r, stack, 8);
+            char buf[4096];
+            FormatVa(buf, sizeof(buf), str(0), &va);
+            Emit(buf, std::strlen(buf));
+            return 0;
+        }
+        case 26: {  // snprintf(dst, cap, fmt, ...)
+            VaList va = MakeVa(r, stack, 24);
+            size_t n = FormatVa(reinterpret_cast<char*>(r.gpr[0]), static_cast<size_t>(r.gpr[1]), str(2), &va);
+            return n;
+        }
+        case 55: {  // vsprintf(dst, fmt, va)
+            auto* va = reinterpret_cast<VaList*>(r.gpr[2]);
+            size_t n = FormatVa(reinterpret_cast<char*>(r.gpr[0]), 0x10000, str(1), va);
+            return n;
+        }
+        case 115: {  // puts(s)
+            if (r.gpr[0]) {
+                const char* s = str(0);
+                Emit(s, std::strlen(s));
+                Emit("\n", 1);
+            }
+            return 0;
+        }
+
+        // ---- modules / C++ runtime
+        case 18:  // sceSysmoduleLoadModule
+        case 40:  // ios_base::Init::Init
+        case 41:  // __cxa_atexit
+        case 42:
+        case 88:  // sceCommonDialogUpdateBar
+        case 414: // munmap
+            return 0;
+
+        // ---- UserService & libScePad
+        case 32:  // scePadInit
+        case 33:  // sceUserServiceInitialize
+            return 0;
+        case 34: {  // sceUserServiceGetInitialUser(&userId)
+            // Calls from 0x88000+ belong to the embedded NpToolkit2 sample;
+            // refusing them up front avoids blocking on PSN futures.
+            if (ret - g_base >= 0x88000) return 0x80552c00ull;
+            if (Readable(ptr(0), 4)) *reinterpret_cast<int32_t*>(ptr(0)) = 1;
+            return 0;
+        }
+        case 35: {  // sceUserServiceGetLoginUserIdList(list)
+            if (Readable(ptr(0), 16)) {
+                auto* ids = reinterpret_cast<int32_t*>(ptr(0));
+                ids[0] = 1;
+                ids[1] = 2;
+                ids[2] = -1;
+                ids[3] = -1;
+            }
+            return 0;
+        }
+        case 28: {  // sceUserServiceGetUserName(userId, buf, size)
+            const int32_t uid = static_cast<int32_t>(r.gpr[0]);
+            char* dst = reinterpret_cast<char*>(r.gpr[1]);
+            const size_t cap = static_cast<size_t>(r.gpr[2]);
+            if (dst && cap && Readable(dst, cap)) {
+                std::snprintf(dst, cap, "Player %d", uid > 0 ? uid : 1);
+            }
+            return 0;
+        }
+        case 27: {  // scePadOpen(userId, type, index, param)
+            const int32_t uid = static_cast<int32_t>(r.gpr[0]);
+            if (uid == 1) return 1;
+            if (uid == 2) return 2;
+            return 0x80920004ull;
+        }
+        case 29:  // scePadSetVibration(handle, param)
+        case 30:  // scePadClose(handle)
+        case 38:  // scePadSetLightBar(handle, color)
+        case 39:  // scePadResetLightBar(handle)
+            return 0;
+        case 31: {  // scePadRead(handle, ScePadData* data, count)
+            const int32_t handle = static_cast<int32_t>(r.gpr[0]);
+            auto* out = reinterpret_cast<uint8_t*>(r.gpr[1]);
+            const int32_t want = static_cast<int32_t>(r.gpr[2]);
+            if ((handle != 1 && handle != 2) || want <= 0 || !Readable(out, 0x78))
+                return 0x80920003ull;
+            std::memset(out, 0, 0x78);
+            uint32_t buttons = 0;
+            uint8_t lx = 0x80, ly = 0x80, rx = 0x80, ry = 0x80;
+
+            const bool focused = g_videoOut.window && GetForegroundWindow() == g_videoOut.window;
+            auto down = [&](int vk) {
+                return focused && (GetAsyncKeyState(vk) & 0x8000) != 0;
+            };
+            if (handle == 1) {
+                if (down('W') || down(VK_UP))    buttons |= 0x0010;  // Up
+                if (down('S') || down(VK_DOWN))  buttons |= 0x0040;  // Down
