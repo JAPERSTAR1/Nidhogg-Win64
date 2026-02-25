@@ -1486,3 +1486,99 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                 uint64_t arg;
             };
             auto* ta = new GuestThreadArgs{r.gpr[2], r.gpr[3]};
+            DWORD tid = 0;
+            HANDLE h = CreateThread(
+                nullptr, 1u << 20,
+                [](LPVOID p) -> DWORD {
+                    auto* a = static_cast<GuestThreadArgs*>(p);
+                    const uint64_t entry = a->entry;
+                    const uint64_t arg = a->arg;
+                    delete a;
+                    GetSysvCompar()(entry, reinterpret_cast<const void*>(arg), nullptr);
+                    return 0;
+                },
+                ta, 0, &tid);
+            if (Readable(ptr(0), 8))
+                *reinterpret_cast<uint64_t*>(ptr(0)) = reinterpret_cast<uint64_t>(h);
+            return 0;
+        }
+        case 144: {  // usleep(usec)
+            const uint32_t us = static_cast<uint32_t>(r.gpr[0]);
+            if (us >= 1000) Sleep(us / 1000);
+            else if (us) Sleep(1);
+            return 0;
+        }
+        case 145: {  // pthread_mutex_init(mtx, attr)
+            if (Readable(ptr(0), 8)) {
+                auto* cs = new CRITICAL_SECTION{};
+                InitializeCriticalSection(cs);
+                *reinterpret_cast<CRITICAL_SECTION**>(ptr(0)) = cs;
+            }
+            return 0;
+        }
+        case 146: {  // pthread_mutex_destroy(mtx)
+            if (Readable(ptr(0), 8)) {
+                auto** slotPtr = reinterpret_cast<CRITICAL_SECTION**>(ptr(0));
+                if (*slotPtr) {
+                    DeleteCriticalSection(*slotPtr);
+                    delete *slotPtr;
+                    *slotPtr = nullptr;
+                }
+            }
+            return 0;
+        }
+        case 147:    // pthread_mutex_lock(mtx)
+        case 354: {  // scePthreadMutexLock(mtx)
+            if (Readable(ptr(0), 8)) {
+                auto** slotPtr = reinterpret_cast<CRITICAL_SECTION**>(ptr(0));
+                if (!*slotPtr) {
+                    auto* cs = new CRITICAL_SECTION{};
+                    InitializeCriticalSection(cs);
+                    *slotPtr = cs;
+                }
+                EnterCriticalSection(*slotPtr);
+            }
+            return 0;
+        }
+        case 148:    // pthread_mutex_unlock(mtx)
+        case 355: {  // scePthreadMutexUnlock(mtx)
+            if (Readable(ptr(0), 8)) {
+                auto* cs = *reinterpret_cast<CRITICAL_SECTION**>(ptr(0));
+                if (cs) LeaveCriticalSection(cs);
+            }
+            return 0;
+        }
+
+        // System event queue: the sample drains it once per frame and reacts to
+        // session-invitation events.  A Windows host has no PSN session, so the
+        // queue is always empty; the count out-parameter is what the loop tests
+        // and the stub was leaving it uninitialised.
+        case 69:
+            if (Readable(ptr(0), 4)) *reinterpret_cast<int32_t*>(ptr(0)) = 0;
+            return 0;
+
+        // User-list iteration: the sample walks entries until this says "no
+        // more".  There are no PSN users on this machine, so the first call
+        // reports the end of the list; leaving the default 0 made the sample
+        // print the same stale entry forever.
+        case 36:
+            if (Readable(ptr(0), 8)) std::memset(ptr(0), 0, 8);
+            return 1;
+
+        // ---- direct memory / gnm bootstrap
+        // sce::Gnm::Initialize asks for two direct-memory blocks before it will
+        // build a render context: 256 MB of "system" memory (type 0) and 512 MB
+        // of "shared GPU" memory (type 3), each mapped read/write for the GPU.
+        // Its own error strings name both, so the pairing is settled.
+        case 410:  // sceKernelGetDirectMemorySize
+            return kDirectArenaSize;
+        case 411: {  // sceKernelAllocateDirectMemory(start, end, len, align, type, &phys)
+            const uint64_t phys = DirectAllocate(r.gpr[2], r.gpr[3]);
+            if (Readable(ptr(5), 8)) *reinterpret_cast<uint64_t*>(r.gpr[5]) = phys;
+            std::printf("[direct] alloc len=0x%llx align=0x%llx type=%llu -> phys=0x%llx\n",
+                        static_cast<unsigned long long>(r.gpr[2]),
+                        static_cast<unsigned long long>(r.gpr[3]),
+                        static_cast<unsigned long long>(r.gpr[4]),
+                        static_cast<unsigned long long>(phys));
+            std::fflush(stdout);
+            return 0;
