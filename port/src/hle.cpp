@@ -190,3 +190,99 @@ size_t FormatVa(char* out, size_t cap, const char* fmt, VaList* va) {
                 break;
             }
             case 'p': {
+                void* v = reinterpret_cast<void*>(VaGp(va));
+                std::snprintf(tmp, sizeof(tmp), "%p", v);
+                break;
+            }
+            case 'n':
+                VaGp(va);
+                break;
+            default:
+                put(start, static_cast<size_t>(p - start));
+                continue;
+        }
+        put(tmp, std::strlen(tmp));
+    }
+    out[n < cap ? n : cap - 1] = '\0';
+    return n;
+}
+
+// Builds a va_list that describes the arguments of a variadic import call.
+VaList MakeVa(const ImportRegs& r, const uint64_t* stack, uint32_t gpOffset) {
+    VaList v;
+    v.gp = gpOffset;
+    v.fp = 48;
+    v.overflow = const_cast<uint64_t*>(stack);
+    v.reg_save = const_cast<uint64_t*>(&r.gpr[0]);
+    return v;
+}
+
+float XmmF32(const ImportRegs& r, int i) {
+    float v;
+    std::memcpy(&v, r.xmm[i], 4);
+    return v;
+}
+
+double XmmF64(const ImportRegs& r, int i) {
+    double v;
+    std::memcpy(&v, r.xmm[i], 8);
+    return v;
+}
+
+uint64_t RetF32(float v) {
+    return static_cast<uint64_t>(std::bit_cast<uint32_t>(v));
+}
+
+uint64_t RetF64(double v) {
+    return std::bit_cast<uint64_t>(v);
+}
+
+int NullSafeStrcmp(const char* a, const char* b) {
+    if (a == b) return 0;
+    if (!a) return -1;
+    if (!b) return 1;
+    return std::strcmp(a, b);
+}
+
+int NullSafeStricmp(const char* a, const char* b) {
+    if (a == b) return 0;
+    if (!a) return -1;
+    if (!b) return 1;
+    return _stricmp(a, b);
+}
+
+// High-resolution monotonic clock in microseconds and simulated 1.6 GHz TSC.
+uint64_t NowUsec() {
+    static LARGE_INTEGER freq{};
+    static LARGE_INTEGER start{};
+    if (!freq.QuadPart) {
+        QueryPerformanceFrequency(&freq);
+        QueryPerformanceCounter(&start);
+    }
+    LARGE_INTEGER now{};
+    QueryPerformanceCounter(&now);
+    return static_cast<uint64_t>((now.QuadPart - start.QuadPart) * 1000000ULL / freq.QuadPart);
+}
+
+// Runtime Win64 -> SysV 2-argument shim for guest qsort comparators.
+using SysvComparFn = int (*)(uint64_t fn, const void* a, const void* b);
+
+SysvComparFn GetSysvCompar() {
+    static SysvComparFn s_fn = nullptr;
+    if (s_fn) return s_fn;
+    auto* code = static_cast<uint8_t*>(
+        VirtualAlloc(nullptr, 256, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
+    uint8_t* c = code;
+    auto emit = [&](std::initializer_list<uint8_t> bytes) {
+        for (uint8_t b : bytes) *c++ = b;
+    };
+    emit({0x57});                                            // push rdi
+    emit({0x56});                                            // push rsi
+    emit({0x48, 0x81, 0xEC, 0xA8, 0x00, 0x00, 0x00});        // sub rsp, 0xA8
+    for (uint8_t reg = 6; reg < 16; ++reg) {
+        const uint8_t rex = reg >= 8 ? 0x44 : 0x00;
+        const uint8_t modrm = static_cast<uint8_t>(0x84 | ((reg & 7) << 3));
+        const uint32_t disp = (reg - 6) * 16;
+        if (rex) emit({rex});
+        emit({0x0F, 0x11, modrm, 0x24});
+        std::memcpy(c, &disp, 4);
