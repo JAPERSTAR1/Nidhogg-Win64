@@ -1918,3 +1918,99 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                         std::printf("[draw] matrix @0x%llx stride=%u num=%u\n",
                                     static_cast<unsigned long long>(mv), (sh[0x55] >> 16) & 0x3fff,
                                     sh[0x56]);
+                        for (int r = 0; r < 4; ++r)
+                            std::printf("[draw]   row%d = %10.6f %10.6f %10.6f %10.6f\n", r,
+                                        f[r * 4], f[r * 4 + 1], f[r * 4 + 2], f[r * 4 + 3]);
+                    }
+
+                    const uint64_t tex = ((static_cast<uint64_t>(sh[0x11] & 0x3f)) << 32 | sh[0x10])
+                                         << 8;
+                    std::printf("[draw] ps user data:");
+                    for (int i = 0; i < 16; ++i) std::printf(" %08x", sh[0x0C + i]);
+                    std::printf("\n[draw] T# words %08x %08x %08x %08x -> 0x%llx %ux%u df=%u nf=%u "
+                                "tile=%u type=%u\n",
+                                sh[0x10], sh[0x11], sh[0x12], sh[0x13],
+                                static_cast<unsigned long long>(tex), (sh[0x12] & 0x3fff) + 1,
+                                ((sh[0x12] >> 14) & 0x3fff) + 1, (sh[0x11] >> 20) & 0x3f,
+                                (sh[0x11] >> 26) & 0xf, (sh[0x13] >> 20) & 0x1f, sh[0x13] >> 28);
+                    if (gnm::HostReadable(tex, 64)) {
+                        const auto* b = reinterpret_cast<const unsigned char*>(tex);
+                        std::printf("[draw] tex bytes:");
+                        for (int i = 0; i < 64; ++i) std::printf(" %02x", b[i]);
+                        std::printf("\n");
+                    }
+                    std::printf("[draw] viewport %.1f %.1f %.1f %.1f %.3f %.3f  rt=0x%llx\n",
+                                *reinterpret_cast<const float*>(&cx[0x10f]),
+                                *reinterpret_cast<const float*>(&cx[0x110]),
+                                *reinterpret_cast<const float*>(&cx[0x111]),
+                                *reinterpret_cast<const float*>(&cx[0x112]),
+                                *reinterpret_cast<const float*>(&cx[0x113]),
+                                *reinterpret_cast<const float*>(&cx[0x114]),
+                                static_cast<unsigned long long>(
+                                    static_cast<uint64_t>(cx[0x318]) << 8));
+                    std::fflush(stdout);
+                }
+            }
+
+            // Is the guest state frozen or just the picture?  Hash the whole
+            // image and the buffers the interpreter writes into.  A constant
+            // image hash over hundreds of frames means the game loop is
+            // replanting a cached command buffer and its logic is not running
+            // at all, which is a completely different bug from a wrong draw.
+            if ((g_submits % 60) == 0) {
+                static uint64_t prev = 0;
+                uint64_t h = 1469598103934665603ull;
+                auto mix = [&](uint64_t addr, size_t n) {
+                    if (!gnm::HostReadable(addr, n)) { h ^= 0xdeadbeefull; return; }
+                    const auto* b = reinterpret_cast<const unsigned char*>(addr);
+                    for (size_t i = 0; i < n; i += 64) h = (h ^ b[i]) * 1099511628211ull;
+                };
+                mix(g_base, 0x41ec48);            // image: code + data + bss
+                mix(0x40136f0000ull, 0x1000);     // vertices
+                mix(0x401144e000ull, 0x2000);     // indices
+                mix(0x401009ce00ull, 0x100);      // 4x4 texture
+                mix(0x4012388000ull, 0x800000);   // render target
+                if (h != prev) {
+                    std::printf("[world] frame %llu state %016llx\n",
+                                static_cast<unsigned long long>(g_submits),
+                                static_cast<unsigned long long>(h));
+                    std::fflush(stdout);
+                    prev = h;
+                }
+            }
+
+            if (g_submits == 1) {                // Where the two shaders are actually executed from, and what the
+                // index buffer points at.  The program registers hold ring
+                // addresses in this title, so the ring is the place to look.
+                auto dump = [](const char* path, uint64_t addr, size_t n) {
+                    std::FILE* f = std::fopen(path, "wb");
+                    if (!f) return;
+                    if (gnm::HostReadable(addr, n))
+                        std::fwrite(reinterpret_cast<const void*>(addr), 1, n, f);
+                    else
+                        std::printf("[gnm] probe %s: 0x%llx not mapped\n", path,
+                                    static_cast<unsigned long long>(addr));
+                    std::fclose(f);
+                };
+                dump("work/gpu_ring.bin", 0x4000200000ull, 0x4000);
+                dump("work/gpu_idx.bin", 0x401144d000ull, 0x3000);
+                dump("work/gpu_direct.bin", 0x4000000000ull, 0x10000);
+                dump("work/gpu_fetch.bin", 0x40100a0000ull, 0x20000);
+
+                // The vertex buffers have not shown up in any descriptor that
+                // reaches the register file, so take the whole guest arena once
+                // and find them from the host side.  768 MiB is what the game
+                // asked for through sceKernelAllocateDirectMemory.  Off by
+                // default: the write costs about ten seconds of wall clock.
+                char* dumpArena = nullptr;
+                size_t dumpArenaLen = 0;
+                const bool wantArenaDump =
+                    _dupenv_s(&dumpArena, &dumpArenaLen, "NIDHOGG_DUMP_ARENA") == 0 && dumpArena;
+                if (wantArenaDump) {
+                    std::free(dumpArena);
+                    std::FILE* f = std::fopen("work/guest768.bin", "wb");
+                    if (f) {
+                        const uint64_t kChunk = 0x10000;
+                        std::vector<unsigned char> zero(static_cast<size_t>(kChunk), 0);
+                        for (uint64_t a = 0x4000000000ull; a < 0x400030000000ull;
+                             a += kChunk) {
