@@ -286,3 +286,99 @@ SysvComparFn GetSysvCompar() {
         if (rex) emit({rex});
         emit({0x0F, 0x11, modrm, 0x24});
         std::memcpy(c, &disp, 4);
+        c += 4;
+    }
+    emit({0x48, 0x89, 0xD7});                                // mov rdi, rdx
+    emit({0x4C, 0x89, 0xC6});                                // mov rsi, r8
+    emit({0xFF, 0xD1});                                      // call rcx
+    for (uint8_t reg = 6; reg < 16; ++reg) {
+        const uint8_t rex = reg >= 8 ? 0x44 : 0x00;
+        const uint8_t modrm = static_cast<uint8_t>(0x84 | ((reg & 7) << 3));
+        const uint32_t disp = (reg - 6) * 16;
+        if (rex) emit({rex});
+        emit({0x0F, 0x10, modrm, 0x24});
+        std::memcpy(c, &disp, 4);
+        c += 4;
+    }
+    emit({0x48, 0x81, 0xC4, 0xA8, 0x00, 0x00, 0x00});        // add rsp, 0xA8
+    emit({0x5E});                                            // pop rsi
+    emit({0x5F});                                            // pop rdi
+    emit({0xC3});                                            // ret
+    FlushInstructionCache(GetCurrentProcess(), code, 256);
+    s_fn = reinterpret_cast<SysvComparFn>(code);
+    return s_fn;
+}
+
+void GuestQsort(uint8_t* base, size_t nmemb, size_t size, uint64_t compar) {
+    if (!base || nmemb < 2 || !size || !compar) return;
+    SysvComparFn cmp = GetSysvCompar();
+    std::vector<uint8_t> tmp(size);
+    auto swapElem = [&](size_t i, size_t j) {
+        if (i == j) return;
+        std::memcpy(tmp.data(), base + i * size, size);
+        std::memcpy(base + i * size, base + j * size, size);
+        std::memcpy(base + j * size, tmp.data(), size);
+    };
+    auto sortRange = [&](auto& self, ptrdiff_t lo, ptrdiff_t hi) -> void {
+        while (lo < hi) {
+            if (hi - lo < 16) {
+                for (ptrdiff_t i = lo + 1; i <= hi; ++i) {
+                    std::memcpy(tmp.data(), base + i * size, size);
+                    ptrdiff_t j = i - 1;
+                    while (j >= lo && cmp(compar, base + j * size, tmp.data()) > 0) {
+                        std::memcpy(base + (j + 1) * size, base + j * size, size);
+                        --j;
+                    }
+                    std::memcpy(base + (j + 1) * size, tmp.data(), size);
+                }
+                return;
+            }
+            ptrdiff_t mid = lo + (hi - lo) / 2;
+            swapElem(static_cast<size_t>(mid), static_cast<size_t>(hi));
+            std::memcpy(tmp.data(), base + hi * size, size);
+            ptrdiff_t i = lo;
+            for (ptrdiff_t j = lo; j < hi; ++j) {
+                if (cmp(compar, base + j * size, tmp.data()) < 0) {
+                    swapElem(static_cast<size_t>(i), static_cast<size_t>(j));
+                    ++i;
+                }
+            }
+            swapElem(static_cast<size_t>(i), static_cast<size_t>(hi));
+            if (i - lo < hi - i) {
+                self(self, lo, i - 1);
+                lo = i + 1;
+            } else {
+                self(self, i + 1, hi);
+                hi = i - 1;
+            }
+        }
+    };
+    sortRange(sortRange, 0, static_cast<ptrdiff_t>(nmemb) - 1);
+}
+
+// WIC-backed libScePngDec implementation.
+IWICImagingFactory* GetWicFactory() {
+    static IWICImagingFactory* s_factory = nullptr;
+    if (s_factory) return s_factory;
+    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+                     IID_PPV_ARGS(&s_factory));
+    return s_factory;
+}
+
+int32_t PngParseHeader(const void* pngMem, uint32_t pngSize, void* infoOut) {
+    IWICImagingFactory* f = GetWicFactory();
+    if (!f || !pngMem || !pngSize) return -1;
+    using Microsoft::WRL::ComPtr;
+    ComPtr<IWICStream> stream;
+    if (FAILED(f->CreateStream(&stream))) return -1;
+    if (FAILED(stream->InitializeFromMemory(
+            const_cast<BYTE*>(static_cast<const BYTE*>(pngMem)), pngSize)))
+        return -1;
+    ComPtr<IWICBitmapDecoder> dec;
+    if (FAILED(f->CreateDecoderFromStream(stream.Get(), nullptr,
+                                          WICDecodeMetadataCacheOnDemand, &dec)))
+        return -1;
+    ComPtr<IWICBitmapFrameDecode> frame;
+    if (FAILED(dec->GetFrame(0, &frame))) return -1;
+    UINT w = 0, h = 0;
