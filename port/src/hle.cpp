@@ -2014,3 +2014,99 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                         std::vector<unsigned char> zero(static_cast<size_t>(kChunk), 0);
                         for (uint64_t a = 0x4000000000ull; a < 0x400030000000ull;
                              a += kChunk) {
+                            if (gnm::HostReadable(a, static_cast<size_t>(kChunk)))
+                                std::fwrite(reinterpret_cast<const void*>(a), 1,
+                                            static_cast<size_t>(kChunk), f);
+                            else
+                                std::fwrite(zero.data(), 1, zero.size(), f);
+                        }
+                        std::fclose(f);
+                        std::printf("[gnm] dumped guest arena to work/guest768.bin\n");
+                    }
+                }
+                std::printf("[gnm] first frame: %zu draws\n", g_machine.draws().size());
+                for (const auto& d : g_machine.draws()) {
+                    if (d.kind != gnm::Draw::Kind::Indexed) continue;
+                    std::printf("  indexed base=0x%llx count=%u type=%u\n",
+                                static_cast<unsigned long long>(d.indexBase), d.indexCount,
+                                d.indexType);
+                    if (gnm::HostReadable(d.indexBase, 16)) {
+                        const auto* idx16 = reinterpret_cast<const uint16_t*>(d.indexBase);
+                        std::printf("    indices:");
+                        for (uint32_t k = 0; k < d.indexCount && k < 8; ++k)
+                            std::printf(" %u", idx16[k]);
+                        std::printf("\n");
+                    }
+                }
+                std::fflush(stdout);
+            }
+
+            if (first) {
+                DumpFrameState();
+            } else if ((g_submits % 300) == 0) {
+                std::printf("[gnm] frame %llu: %zu draws, %llu writes, %u errors\n",
+                            static_cast<unsigned long long>(g_submits),
+                            g_machine.draws().size(),
+                            static_cast<unsigned long long>(g_machine.memoryWrites()),
+                            g_machine.errors());
+
+                // What the guest asks the platform layer for, per frame.  Slots
+                // that never appear here are not the reason a frame is static;
+                // slots that appear sixty times a second are where the clock
+                // and the flip live.
+                for (int rank = 0; rank < 64; ++rank) {
+                    uint32_t best = 512, bestCalls = 0;
+                    for (uint32_t s = 0; s < 512; ++s) {
+                        if (g_slotCalls[s] > bestCalls) {
+                            bestCalls = static_cast<uint32_t>(g_slotCalls[s]);
+                            best = s;
+                        }
+                    }
+                    if (best == 512) break;
+                    const char* nm = SlotName(best);
+                    std::printf("    slot %3u  n=%6llu (%llu/frame)  %s\n", best,
+                                static_cast<unsigned long long>(g_slotCalls[best]),
+                                static_cast<unsigned long long>(g_slotCalls[best] / 300),
+                                nm ? nm : "unimplemented");
+                    g_slotCalls[best] = 0;
+                }
+                for (uint32_t s = 0; s < 512; ++s) g_slotCalls[s] = 0;
+                std::fflush(stdout);
+            }
+
+            ++g_videoOut.flipCount;
+            g_videoOut.lastFlipArg = static_cast<uint64_t>(flipArg);
+
+            // Hand the frame to the backend.  This is the whole point of the
+            // interpreter: the guest produced a command stream, the stream
+            // produced draw state, and the state becomes real GPU work here.
+            gnm::RenderFrame(g_videoOut.window, g_machine.draws());
+            return 0;
+        }
+
+        // ---- video out
+        // Called from the renderer constructor with (0, 0, 0, NULL): no param
+        // struct means "give me the default 1920x1080 display".
+        case 112: {
+            if (Readable(ptr(3), 0x20)) {
+                auto* p = reinterpret_cast<const uint32_t*>(r.gpr[3]);
+                if (p[2]) { g_videoOut.width = p[2]; g_videoOut.height = p[3]; }
+                g_videoOut.pitch = g_videoOut.width * 4;
+            }
+            CreatePortWindow(g_videoOut.width, g_videoOut.height);
+            g_videoOut.open = true;
+            std::printf("[videoout] open %ux%u handle=%d\n", g_videoOut.width,
+                        g_videoOut.height, 1);
+            std::fflush(stdout);
+            return 1;  // handle
+        }
+        case 113:  // sceVideoOutSetFlipRate(handle, rate)
+            g_videoOut.flipRate = static_cast<uint32_t>(r.gpr[1]);
+            return 0;
+        case 116:  // sceVideoOutSetBufferAttribute(attr, format, tiling, aspect, w, h, pitch)
+        {
+            auto* a = reinterpret_cast<uint32_t*>(r.gpr[0]);
+            if (!Readable(a, 0x20) || !Readable(stack, 8)) return 0;
+            const uint64_t pitch = stack[0];
+            a[0] = static_cast<uint32_t>(r.gpr[1]);  // pixel format
+            a[1] = static_cast<uint32_t>(r.gpr[2]);  // tiling mode
