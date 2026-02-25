@@ -478,3 +478,99 @@ bool DirectReserve() {
     void* p = nullptr;
     for (uint64_t a = kDirectArenaBase; !p && a < 0x0000008000000000ull; a += kDirectArenaSize)
         p = VirtualAlloc(reinterpret_cast<void*>(a), kDirectArenaSize, MEM_RESERVE, PAGE_NOACCESS);
+    if (!p) {
+        std::printf("[direct] reserve of 0x%llx failed: %lu\n",
+                    static_cast<unsigned long long>(kDirectArenaSize), GetLastError());
+        std::fflush(stdout);
+        return false;
+    }
+    g_directArena = static_cast<uint8_t*>(p);
+    std::printf("[direct] arena %p size 0x%llx\n", g_directArena,
+                static_cast<unsigned long long>(kDirectArenaSize));
+    std::fflush(stdout);
+    return true;
+}
+
+uint64_t DirectAllocate(uint64_t len, uint64_t align) {
+    if (!DirectReserve()) return 0;
+    if (align < 0x1000) align = 0x1000;
+    const uint64_t at = (g_directUsed + align - 1) & ~(align - 1);
+    if (at + len > kDirectArenaSize) return 0;
+    g_directUsed = at + len;
+    return at;
+}
+
+void* DirectMap(uint64_t phys, uint64_t len) {
+    if (!g_directArena) return nullptr;
+    if (phys + len > kDirectArenaSize) return nullptr;
+    void* p = VirtualAlloc(g_directArena + phys, len, MEM_COMMIT, PAGE_READWRITE);
+    return p;
+}
+
+// ------------------------------------------------------------------ files --
+
+// The image addresses its data as /app0/..., the mount point SCE gives a
+// game's own directory.  On this side that is the CUSA00920 tree; the env var
+// overrides the default so the host can be run from anywhere.
+const std::string& App0() {
+    static std::string root;
+    if (!root.empty()) return root;
+
+    char* v = nullptr;
+    size_t n = 0;
+    if (_dupenv_s(&v, &n, "NIDHOGG_APP0") == 0 && v && *v) {
+        root = v;
+        std::free(v);
+    } else {
+        std::free(v);
+        for (const char* cand : {"..\\CUSA00920", "CUSA00920", "..\\..\\CUSA00920"}) {
+            DWORD a = GetFileAttributesA(cand);
+            if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY)) {
+                root = cand;
+                break;
+            }
+        }
+        if (root.empty()) root = ".";
+    }
+    char full[MAX_PATH]{};
+    if (GetFullPathNameA(root.c_str(), MAX_PATH, full, nullptr)) root = full;
+    std::printf("[fios] app0 = %s\n", root.c_str());
+    std::fflush(stdout);
+    return root;
+}
+
+std::string g_saveMountDir;
+std::FILE* g_posixFds[64] = {};
+
+std::string SaveRoot(const char* dirName) {
+    char full[MAX_PATH]{};
+    GetFullPathNameA("savedata", MAX_PATH, full, nullptr);
+    std::string out = full[0] ? full : "savedata";
+    if (dirName && *dirName) {
+        out += '\\';
+        out += dirName;
+    }
+    return out;
+}
+
+std::string HostPath(const char* p) {
+    std::string s = p ? p : "";
+    if (s.rfind("/savedata0/", 0) == 0 || s == "/savedata0") {
+        std::string rest = s.size() > 11 ? s.substr(11) : "";
+        for (char& c : rest) {
+            if (c == '/') c = '\\';
+        }
+        std::string out = g_saveMountDir.empty() ? SaveRoot("00") : g_saveMountDir;
+        if (!rest.empty()) {
+            out += '\\';
+            out += rest;
+        }
+        return out;
+    }
+    std::string out = App0();
+    if (s.rfind("/app0/", 0) == 0) s.erase(0, 6);
+    else if (s.rfind("/app0", 0) == 0) s.erase(0, 5);
+    for (char& c : s) {
+        if (c == '/') c = '\\';
+    }
+    if (!s.empty() && s.front() != '\\') out += '\\';
