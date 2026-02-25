@@ -1390,3 +1390,99 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             std::string hostDir = SaveRoot((dirName && Readable(dirName, 1)) ? dirName : "00");
             DWORD attr = GetFileAttributesA(hostDir.c_str());
             if (mode == 1) {  // READ_ONLY
+                if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY))
+                    return 0x809f0008ull;  // SCE_SAVE_DATA_ERROR_NOT_FOUND
+            } else {
+                MakeParentDirs(hostDir + "\\_");
+            }
+            g_saveMountDir = hostDir;
+            char* dst = reinterpret_cast<char*>(r.gpr[1]);
+            std::memset(dst, 0, 0x20);
+            std::strcpy(dst, "/savedata0");
+            return 0;
+        }
+        case 128:    // sceKernelOpen(path, flags, mode)
+        case 359: {  // open(path, flags, ...)
+            std::string path = HostPath(str(0));
+            const uint32_t flags = static_cast<uint32_t>(r.gpr[1]);
+            const bool writing = (flags & 0x3u) != 0 || (flags & 0x200u) != 0;
+            if (writing) MakeParentDirs(path);
+            std::FILE* f = std::fopen(path.c_str(), writing ? "wb" : "rb");
+            if (!f) return slot == 359 ? static_cast<uint64_t>(static_cast<int64_t>(-1)) : 0x80020002ull;
+            for (int fd = 3; fd < 64; ++fd) {
+                if (!g_posixFds[fd]) {
+                    g_posixFds[fd] = f;
+                    return static_cast<uint64_t>(fd);
+                }
+            }
+            std::fclose(f);
+            return slot == 359 ? static_cast<uint64_t>(static_cast<int64_t>(-1)) : 0x80020018ull;
+        }
+        case 360: {  // lseek(fd, offset, whence)
+            const int fd = static_cast<int>(r.gpr[0]);
+            if (fd < 3 || fd >= 64 || !g_posixFds[fd])
+                return static_cast<uint64_t>(static_cast<int64_t>(-1));
+            if (_fseeki64(g_posixFds[fd], static_cast<int64_t>(r.gpr[1]),
+                          static_cast<int>(r.gpr[2])) != 0)
+                return static_cast<uint64_t>(static_cast<int64_t>(-1));
+            return static_cast<uint64_t>(_ftelli64(g_posixFds[fd]));
+        }
+        case 129: {  // sceKernelWrite(fd, buf, nbytes)
+            const int fd = static_cast<int>(r.gpr[0]);
+            if (fd < 3 || fd >= 64 || !g_posixFds[fd]) return 0x80020009ull;
+            const size_t n = std::fwrite(ptr(1), 1, static_cast<size_t>(r.gpr[2]), g_posixFds[fd]);
+            std::fflush(g_posixFds[fd]);
+            return static_cast<uint64_t>(n);
+        }
+        case 130:    // sceKernelClose(fd)
+        case 362: {  // close(fd)
+            const int fd = static_cast<int>(r.gpr[0]);
+            if (fd >= 3 && fd < 64 && g_posixFds[fd]) {
+                std::fclose(g_posixFds[fd]);
+                g_posixFds[fd] = nullptr;
+            }
+            return 0;
+        }
+        case 135: {  // sceKernelStat(path, sb)
+            std::string path = HostPath(str(0));
+            WIN32_FILE_ATTRIBUTE_DATA fad{};
+            if (!GetFileAttributesExA(path.c_str(), GetFileExInfoStandard, &fad))
+                return 0x80020002ull;
+            if (Readable(ptr(1), 0x78)) {
+                auto* sb = reinterpret_cast<uint8_t*>(r.gpr[1]);
+                std::memset(sb, 0, 0x78);
+                const uint64_t sz = (static_cast<uint64_t>(fad.nFileSizeHigh) << 32) |
+                                    fad.nFileSizeLow;
+                *reinterpret_cast<uint64_t*>(sb + 0x48) = sz;  // Orbis st_size
+            }
+            return 0;
+        }
+        case 136:    // sceKernelRead(fd, buf, nbytes)
+        case 361: {  // read(fd, buf, nbytes)
+            const int fd = static_cast<int>(r.gpr[0]);
+            if (fd < 3 || fd >= 64 || !g_posixFds[fd])
+                return slot == 361 ? static_cast<uint64_t>(static_cast<int64_t>(-1)) : 0x80020009ull;
+            const size_t n = std::fread(ptr(1), 1, static_cast<size_t>(r.gpr[2]), g_posixFds[fd]);
+            return static_cast<uint64_t>(n);
+        }
+
+        // ---- clock & pthreads
+        case 89: {  // sceKernelGettimeofday(timeval*)
+            if (Readable(ptr(0), 16)) {
+                const uint64_t us = NowUsec() + 1700000000ULL * 1000000ULL;
+                auto* tv = reinterpret_cast<uint64_t*>(ptr(0));
+                tv[0] = us / 1000000ULL;
+                tv[1] = us % 1000000ULL;
+            }
+            return 0;
+        }
+        case 140:
+        case 141:
+        case 143:
+            return 0;
+        case 142: {  // pthread_create(&thr, &attr, startRoutine, arg)
+            struct GuestThreadArgs {
+                uint64_t entry;
+                uint64_t arg;
+            };
+            auto* ta = new GuestThreadArgs{r.gpr[2], r.gpr[3]};
