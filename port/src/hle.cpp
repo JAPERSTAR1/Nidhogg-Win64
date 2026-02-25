@@ -94,3 +94,99 @@ double VaFp(VaList* v) {
 // Formats one SCE format string into `out`.  Conversions go through the host's
 // snprintf one at a time after the argument has been pulled off the SysV list,
 // which keeps the width/precision/flags handling in the CRT where it belongs.
+size_t FormatVa(char* out, size_t cap, const char* fmt, VaList* va) {
+    size_t n = 0;
+    auto put = [&](const char* s, size_t len) {
+        if (n + len >= cap) len = (n < cap) ? cap - n - 1 : 0;
+        std::memcpy(out + n, s, len);
+        n += len;
+    };
+    if (cap == 0) return 0;
+
+    for (const char* p = fmt; *p;) {
+        if (*p != '%') {
+            put(p, 1);
+            ++p;
+            continue;
+        }
+        const char* start = p++;
+        if (*p == '%') { put("%", 1); ++p; continue; }
+
+        std::string spec = "%";
+        while (*p && std::strchr("-+ #0'", *p)) { spec += *p++; }
+        while (*p >= '0' && *p <= '9') spec += *p++;
+
+        std::string prec;
+        if (*p == '.') {
+            prec += *p++;
+            while (*p >= '0' && *p <= '9') prec += *p++;
+        }
+        spec += prec;
+
+        int width = 0;
+        int precision = -1;
+        std::sscanf(spec.c_str() + 1, "%d.%d", &width, &precision);
+
+        // length modifiers
+        int lng = 0;  // 0 int, 1 long long, 2 char, 3 short
+        bool isSize = false, isPtrdiff = false;
+        if (*p == 'l') { lng = 1; ++p; if (*p == 'l') ++p; }
+        else if (*p == 'h') { lng = 3; ++p; if (*p == 'h') { lng = 2; ++p; } }
+        else if (*p == 'z' || *p == 'j' || *p == 't') { lng = 1; isSize = true; ++p; }
+        else if (*p == 'L') { ++p; }
+
+        char conv = *p;
+        if (!conv) { put(start, 1); break; }
+        ++p;
+
+        char tmp[1024];
+        tmp[0] = '\0';
+        std::string hostSpec = spec;
+        if (lng == 1) hostSpec += "ll";
+        else if (lng == 3) hostSpec += "h";
+        else if (lng == 2) hostSpec += "hh";
+
+        switch (conv) {
+            case 'd':
+            case 'i': {
+                long long v = static_cast<long long>(VaGp(va));
+                std::snprintf(tmp, sizeof(tmp), hostSpec.empty() ? "%lld" : (hostSpec + "d").c_str(), v);
+                break;
+            }
+            case 'u':
+            case 'o':
+            case 'x':
+            case 'X': {
+                unsigned long long v = VaGp(va);
+                std::snprintf(tmp, sizeof(tmp), (hostSpec + conv).c_str(), v);
+                break;
+            }
+            case 'c': {
+                int v = static_cast<int>(VaGp(va));
+                std::snprintf(tmp, sizeof(tmp), (hostSpec + "c").c_str(), v);
+                break;
+            }
+            case 's': {
+                const char* s = reinterpret_cast<const char*>(VaGp(va));
+                if (!s) s = "(null)";
+                if (precision >= 0 && static_cast<int>(std::strlen(s)) > precision) {
+                    std::string cut(s, static_cast<size_t>(precision));
+                    std::snprintf(tmp, sizeof(tmp), (hostSpec + "s").c_str(), cut.c_str());
+                } else {
+                    std::snprintf(tmp, sizeof(tmp), (hostSpec + "s").c_str(), s);
+                }
+                break;
+            }
+            case 'f':
+            case 'F':
+            case 'e':
+            case 'E':
+            case 'g':
+            case 'G':
+            case 'a':
+            case 'A': {
+                double v = VaFp(va);
+                std::snprintf(tmp, sizeof(tmp), (hostSpec + conv).c_str(), v);
+                break;
+            }
+            case 'p': {
