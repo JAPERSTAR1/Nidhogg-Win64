@@ -574,3 +574,99 @@ std::string HostPath(const char* p) {
         if (c == '/') c = '\\';
     }
     if (!s.empty() && s.front() != '\\') out += '\\';
+    out += s;
+    return out;
+}
+
+void MakeParentDirs(const std::string& path) {
+    for (size_t i = 1; i < path.size(); ++i) {
+        if (path[i] != '\\') continue;
+        std::string dir = path.substr(0, i);
+        DWORD a = GetFileAttributesA(dir.c_str());
+        if (a == INVALID_FILE_ATTRIBUTES) CreateDirectoryA(dir.c_str(), nullptr);
+    }
+}
+
+// ------------------------------------------------------------- gnm submit --
+
+bool Readable(const void* p, size_t n);
+
+// PS4 GPU addresses come in two encodings.  Resource descriptors (textures,
+// buffers) store `cpuAddress >> 8` in a 32-bit field; command-buffer lists in
+// the submit ABI carry full 64-bit pointers.  This recognises both by asking
+// which form is mapped, so a misread shows up as "not readable" instead of a
+// wild write.
+uint64_t GpuAddrToHost(uint64_t v) {
+    if (Readable(reinterpret_cast<void*>(v), 4)) return v;
+    if (Readable(reinterpret_cast<void*>(v << 8), 4)) return v << 8;
+    return 0;
+}
+
+uint64_t g_submits = 0;
+bool g_dumpedSubmit = false;
+
+void DumpPackets(uint64_t base, uint32_t bytes, const char* tag) {
+    auto* dw = reinterpret_cast<const uint32_t*>(base);
+    const uint32_t count = bytes / 4;
+    std::printf("[gnm] %s buffer %p size=0x%x dwords=%u\n", tag,
+                reinterpret_cast<void*>(base), bytes, count);
+    std::printf("[gnm]   first dwords:");
+    for (uint32_t i = 0; i < count && i < 24; ++i) std::printf(" %08x", dw[i]);
+    std::printf("\n");
+    // The full buffer goes to disk; the packet walk below is a quick look and
+    // an offline parse is how the stream gets understood.
+    char name[64];
+    std::snprintf(name, sizeof(name), "work/%s_%llx.bin", tag,
+                  static_cast<unsigned long long>(base));
+    if (std::FILE* f = std::fopen(name, "wb")) {
+        std::fwrite(dw, 4, count, f);
+        std::fclose(f);
+    }
+    for (uint32_t i = 0; i < count;) {
+        const uint32_t h = dw[i];
+        const uint32_t type = h >> 30;
+        if (type == 3) {
+            const uint32_t op = (h >> 8) & 0xff;
+            const uint32_t n = ((h >> 16) & 0x3fff) + 1;
+            if (op == 0x37) {  // WRITE_DATA
+                std::printf("[gnm]   %04u WRITE_DATA n=%u:", i, n);
+                for (uint32_t k = 0; k < n && i + 1 + k < count; ++k)
+                    std::printf(" %08x", dw[i + 1 + k]);
+                std::printf("\n");
+            }
+            i += 1 + n;
+        } else if (type == 2) {  // type-2 filler: 1 dword
+            i += 1;
+        } else {
+            // type-0 packets carry a dword count in the low half; the padding
+            // at the head of every buffer is a run of zero-count type-0 packets
+            i += 1 + (type == 0 ? (h & 0xffff) : 1);
+        }
+    }
+}
+
+gnm::Machine g_machine;
+
+// First frame only.  The register snapshot of each draw is what the D3D11 side
+// will consume, so it goes to disk in full; the console gets the handful of
+// registers whose values are inside the direct-memory arena, which is how the
+// shader program addresses and resource descriptors show themselves.
+void DumpFrameState() {
+    const auto& draws = g_machine.draws();
+    std::printf("[gnm] first frame: %zu draws, %llu memory writes, %u errors\n",
+                draws.size(),
+                static_cast<unsigned long long>(g_machine.memoryWrites()),
+                g_machine.errors());
+    std::fflush(stdout);
+    if (draws.empty()) return;
+
+    const char* spaces[4] = {"config", "context", "sh", "uconfig"};
+    for (size_t i = 0; i < draws.size(); ++i) {
+        char name[64];
+        std::snprintf(name, sizeof(name), "work/draw%zu_regs.txt", i);
+        std::FILE* f = std::fopen(name, "w");
+        if (!f) continue;
+        for (uint32_t s = 0; s < 4; ++s) {
+            std::fprintf(f, "[%s]\n", spaces[s]);
+            for (uint32_t r = 0; r < gnm::kSpaceSize; ++r) {
+                const uint32_t v = draws[i].regs.block[s][r];
