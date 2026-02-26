@@ -910,3 +910,99 @@ const char* SlotName(uint32_t s) {
         case 145: return "pthread_mutex_init";
         case 146: return "pthread_mutex_destroy";
         case 147: return "pthread_mutex_lock";
+        case 148: return "pthread_mutex_unlock";
+        case 149: return "_Stod";
+        case 150: return "atan2f";
+        case 151: return "realloc";
+        case 152: return "qsort";
+        case 153: return "rand";
+        case 154: return "fmodf";
+        case 155: return "strstr";
+        case 156: return "fmod";
+        case 157: return "strncmp";
+        case 354: return "scePthreadMutexLock";
+        case 355: return "scePthreadMutexUnlock";
+        case 359: return "open";
+        case 360: return "lseek";
+        case 361: return "read";
+        case 362: return "close";
+        case 410: return "sceKernelGetDirectMemorySize";
+        case 411: return "sceKernelAllocateDirectMemory";
+        case 412: return "sceKernelMapDirectMemory";
+        case 413: return "fprintf";
+        case 414: return "munmap";
+        case 415: return "ldexp";
+        case 416: return "fmax";
+        case 417: return "pow";
+        case 418: return "fmin";
+        case 420: return "sceGnmDrawInitDefaultHardwareState";
+        case 421: return "sceGnmSetPsShader";
+        case 422: return "sceGnmSetVsShader";
+        case 426: return "sceGnmSetCsShader";
+        case 427: return "sceGnmUpdateVsShader";
+        case 428: return "sceGnmInsertSetMarker";
+        case 429: return "sceGnmInsertSetColorMarker";
+        case 430: return "sceGnmInsertPushMarker";
+        case 431: return "sceGnmInsertPushColorMarker";
+        case 432: return "sceGnmInsertPopMarker";
+        case 433: return "sceGnmInsertWaitFlipDone";
+        case 437: return "sceGnmSubmitAndFlipCommandBuffers";
+        case 439: return "sceGnmAddEqEvent";
+        case 448: return "sceGnmSubmitDone";
+        case 463: return "sceGnmIsUserPaEnabled";
+        default: return nullptr;
+    }
+}
+
+uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_t* stack) {
+    Configure();
+    g_lastSlot = slot;
+    g_lastRet = ret;
+    if (slot < 512) ++g_slotCalls[slot];
+
+    auto ptr = [&](int i) { return reinterpret_cast<void*>(r.gpr[i]); };
+    auto str = [&](int i) { return C(r.gpr[i]); };
+
+    if (g_logLimit && g_submits >= g_traceFrom && g_calls++ < g_logLimit) {
+        const char* name = SlotName(slot);
+        std::printf("  [hle %03u %-24s] ret=+0x%06llx  rdi=%016llx rsi=%016llx rdx=%016llx rcx=%016llx r8=%016llx r9=%016llx\n",
+                    slot, name ? name : "?",
+                    static_cast<unsigned long long>(ret - g_base),
+                    static_cast<unsigned long long>(r.gpr[0]),
+                    static_cast<unsigned long long>(r.gpr[1]),
+                    static_cast<unsigned long long>(r.gpr[2]),
+                    static_cast<unsigned long long>(r.gpr[3]),
+                    static_cast<unsigned long long>(r.gpr[4]),
+                    static_cast<unsigned long long>(r.gpr[5]));
+    }
+
+    switch (slot) {
+        // ---- libc memory
+        case 0:
+        case 14:
+            std::free(ptr(0));
+            return 0;
+        case 3:
+        case 13:
+        case 16:
+            return reinterpret_cast<uint64_t>(std::malloc(static_cast<size_t>(r.gpr[0]) ? static_cast<size_t>(r.gpr[0]) : 1));
+        case 151:
+            return reinterpret_cast<uint64_t>(std::realloc(ptr(0), static_cast<size_t>(r.gpr[1]) ? static_cast<size_t>(r.gpr[1]) : 1));
+
+        // ---- libc string / stdlib
+        case 1: {
+            if (!r.gpr[0]) return 0;
+            const char* p = std::strchr(reinterpret_cast<const char*>(r.gpr[0]),
+                                        static_cast<int>(r.gpr[1]));
+            return reinterpret_cast<uint64_t>(p);
+        }
+        case 138: {
+            if (!r.gpr[0]) return 0;
+            const char* p = std::strrchr(reinterpret_cast<const char*>(r.gpr[0]),
+                                         static_cast<int>(r.gpr[1]));
+            return reinterpret_cast<uint64_t>(p);
+        }
+        case 59: {
+            const uint16_t x = static_cast<uint16_t>(r.gpr[0]);
+            return static_cast<uint64_t>((x >> 8) | ((x & 0xffu) << 8));
+        }
