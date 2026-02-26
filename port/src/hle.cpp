@@ -670,3 +670,147 @@ void DumpFrameState() {
             std::fprintf(f, "[%s]\n", spaces[s]);
             for (uint32_t r = 0; r < gnm::kSpaceSize; ++r) {
                 const uint32_t v = draws[i].regs.block[s][r];
+                if (v) std::fprintf(f, "  %03x = %08x\n", r, v);
+            }
+        }
+        std::fclose(f);
+    }
+
+    for (size_t i = 0; i < draws.size(); ++i) {
+        const auto& d = draws[i];
+        std::printf("[gnm] draw%zu kind=%d pos=+0x%llx count=%u max=%u base=%08x prim=%08x\n",
+                    i, static_cast<int>(d.kind),
+                    static_cast<unsigned long long>(d.streamPos * 4), d.indexCount,
+                    d.maxIndex, d.indexBase,
+                    d.regs[gnm::Space::UConfig][0x242]);
+        for (uint32_t r = 0; r < 0x400; ++r) {
+            const uint32_t v = d.regs[gnm::Space::Sh][r];
+            // A shader program address lands in PGM_LO as address >> 8, so the
+            // high half of the 40-bit arena address is what to look for.
+            if (v >= 0x40000000u && v < 0x40200000u)
+                std::printf("[gnm]   sh[0x%03x] = %08x  -> 0x%010llx\n", r, v,
+                            static_cast<unsigned long long>(
+                                static_cast<uint64_t>(v) << 8));
+        }
+    }
+    std::fflush(stdout);
+}
+
+// ---------------------------------------------------------------- fake IDs --
+
+// Handles handed back by the HLE layer: small integers, never real pointers, so
+// a stray dereference is obvious rather than quietly working.
+constexpr int kFakeFdBase = 0x100;
+
+// --------------------------------------------------------------- video out --
+
+struct VideoOutBuffer {
+    void* addr = nullptr;
+    uint32_t pitch = 0;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    int index = 0;
+};
+
+struct VideoOut {
+    bool open = false;
+    uint32_t width = 1920;
+    uint32_t height = 1080;
+    uint32_t pitch = 1920 * 4;
+    uint32_t flipRate = 60;
+    uint64_t frame = 0;
+    uint64_t flipCount = 0;
+    uint64_t lastFlipArg = 0;
+    VideoOutBuffer buffers[8];
+    int bufferCount = 0;
+    HWND window = nullptr;
+};
+
+VideoOut g_videoOut;
+
+const char* kClassName = "NidhoggPort";
+
+// True when [p, p+n) is committed memory the host can read.  The image is SysV
+// code, so registers the caller did not set up still hold whatever was there --
+// an import that takes fewer arguments than the slot's C prototype must never
+// trust them.
+//
+// Every HLE call validates its pointers, and so does the PM4 backend, which put
+// a few thousand VirtualQuery syscalls in every frame -- the profiler had the
+// main thread inside NtQueryVirtualMemory for 99% of its samples.  The guest
+// only ever touches a handful of large regions (the image, the direct-memory
+// arena, host allocations), so remembering the region each address landed in
+// turns the common case back into two comparisons.
+struct SpanCache {
+    static constexpr int kSlots = 64;
+    uintptr_t lo[kSlots] = {};
+    uintptr_t hi[kSlots] = {};
+};
+
+thread_local SpanCache g_spans;
+
+bool Readable(const void* p, size_t n) {
+    if (!p) return false;
+    auto a = reinterpret_cast<uintptr_t>(p);
+    const uintptr_t end = a + n;
+
+    const uint32_t slot = static_cast<uint32_t>((a >> 12) * 2654435761u) &
+                          (SpanCache::kSlots - 1);
+    if (a >= g_spans.lo[slot] && end <= g_spans.hi[slot]) return true;
+
+    while (a < end) {
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (!VirtualQuery(reinterpret_cast<void*>(a), &mbi, sizeof(mbi))) return false;
+        if (mbi.State != MEM_COMMIT) return false;
+        if (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) return false;
+        const uintptr_t base = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+        if (a == reinterpret_cast<uintptr_t>(p) && base + mbi.RegionSize >= end) {
+            g_spans.lo[slot] = base;
+            g_spans.hi[slot] = base + mbi.RegionSize;
+        }
+        a = base + mbi.RegionSize;
+    }
+    return true;
+}
+
+LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    switch (msg) {
+        case WM_CLOSE:
+            DestroyWindow(hwnd);
+            return 0;
+        case WM_DESTROY:
+            PostQuitMessage(0);
+            return 0;
+        default:
+            return DefWindowProcA(hwnd, msg, wp, lp);
+    }
+}
+
+HWND CreatePortWindow(uint32_t w, uint32_t h) {
+    if (g_videoOut.window) return g_videoOut.window;
+    HINSTANCE inst = GetModuleHandleA(nullptr);
+    WNDCLASSA wc{};
+    wc.style = CS_OWNDC;
+    wc.lpfnWndProc = WndProc;
+    wc.hInstance = inst;
+    wc.hCursor = LoadCursorA(nullptr, IDC_ARROW);
+    wc.lpszClassName = kClassName;
+    if (!RegisterClassA(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return nullptr;
+    RECT rc{0, 0, static_cast<LONG>(w), static_cast<LONG>(h)};
+    AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
+    HWND hwnd = CreateWindowExA(0, kClassName, "Nidhogg", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                                CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left,
+                                rc.bottom - rc.top, nullptr, nullptr, inst, nullptr);
+    g_videoOut.window = hwnd;
+    return hwnd;
+}
+
+}  // namespace
+
+uint32_t LastSlot() { return g_lastSlot; }
+uint64_t LastCallSite() { return g_lastRet; }
+void HleSetImageBase(uint64_t base) { g_base = base; }
+
+// ------------------------------------------------------------------ names --
+
+const char* SlotName(uint32_t s) {
