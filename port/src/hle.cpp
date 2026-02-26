@@ -1006,3 +1006,99 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             const uint16_t x = static_cast<uint16_t>(r.gpr[0]);
             return static_cast<uint64_t>((x >> 8) | ((x & 0xffu) << 8));
         }
+        case 2:
+            return static_cast<uint64_t>(static_cast<int64_t>(
+                NullSafeStricmp(reinterpret_cast<const char*>(r.gpr[0]),
+                                reinterpret_cast<const char*>(r.gpr[1]))));
+        case 4: return r.gpr[0] ? std::strlen(str(0)) : 0;
+        case 5:
+            if (!r.gpr[0]) return 0;
+            return reinterpret_cast<uint64_t>(std::strcpy(reinterpret_cast<char*>(r.gpr[0]), str(1)));
+        case 6:
+            if (!r.gpr[0]) return 0;
+            return reinterpret_cast<uint64_t>(std::strncpy(reinterpret_cast<char*>(r.gpr[0]), str(1), static_cast<size_t>(r.gpr[2])));
+        case 7: {  // sscanf(str, fmt, ...)
+            if (!r.gpr[0] || !r.gpr[1]) return 0;
+            const char* fmt = str(1);
+            VaList va = MakeVa(r, stack, 16);
+            void* args[8] = {};
+            int nArgs = 0;
+            for (const char* p = fmt; *p && nArgs < 8; ++p) {
+                if (*p != '%') continue;
+                ++p;
+                if (*p == '%' || !*p) continue;
+                if (*p == '*') continue;
+                args[nArgs++] = reinterpret_cast<void*>(VaGp(&va));
+            }
+            return static_cast<uint64_t>(static_cast<int64_t>(
+                std::sscanf(str(0), fmt, args[0], args[1], args[2], args[3],
+                            args[4], args[5], args[6], args[7])));
+        }
+        case 8: {
+            char* end = nullptr;
+            long long v = std::strtoll(str(0), &end, static_cast<int>(r.gpr[2]));
+            if (r.gpr[1]) *reinterpret_cast<char**>(r.gpr[1]) = end;
+            return static_cast<uint64_t>(v);
+        }
+        case 10: return reinterpret_cast<uint64_t>(std::memcpy(ptr(0), ptr(1), static_cast<size_t>(r.gpr[2])));
+        case 11: return reinterpret_cast<uint64_t>(std::memmove(ptr(0), ptr(1), static_cast<size_t>(r.gpr[2])));
+        case 12:
+            if (!r.gpr[0]) return 0;
+            return reinterpret_cast<uint64_t>(std::strcat(reinterpret_cast<char*>(r.gpr[0]), str(1)));
+        case 15: return reinterpret_cast<uint64_t>(std::memset(ptr(0), static_cast<int>(r.gpr[1]), static_cast<size_t>(r.gpr[2])));
+        case 68:
+            return static_cast<uint64_t>(static_cast<int64_t>(
+                NullSafeStrcmp(reinterpret_cast<const char*>(r.gpr[0]),
+                               reinterpret_cast<const char*>(r.gpr[1]))));
+        case 102:
+            if (!r.gpr[0] || !r.gpr[1]) return static_cast<uint64_t>(static_cast<int64_t>(r.gpr[0] == r.gpr[1] ? 0 : -1));
+            return static_cast<uint64_t>(static_cast<int64_t>(
+                std::memcmp(ptr(0), ptr(1), static_cast<size_t>(r.gpr[2]))));
+        case 152:
+            GuestQsort(reinterpret_cast<uint8_t*>(r.gpr[0]),
+                       static_cast<size_t>(r.gpr[1]),
+                       static_cast<size_t>(r.gpr[2]), r.gpr[3]);
+            return 0;
+        case 153:
+            return static_cast<uint64_t>(std::rand() & 0x7fff);
+        case 155: {
+            if (!r.gpr[0] || !r.gpr[1]) return 0;
+            const char* p = std::strstr(reinterpret_cast<const char*>(r.gpr[0]), str(1));
+            return reinterpret_cast<uint64_t>(p);
+        }
+        case 157: {
+            const char* a = reinterpret_cast<const char*>(r.gpr[0]);
+            const char* b = reinterpret_cast<const char*>(r.gpr[1]);
+            if (a == b) return 0;
+            if (!a) return static_cast<uint64_t>(static_cast<int64_t>(-1));
+            if (!b) return 1;
+            return static_cast<uint64_t>(static_cast<int64_t>(
+                std::strncmp(a, b, static_cast<size_t>(r.gpr[2]))));
+        }
+
+        // ---- libm / Dinkumware math
+        case 110: {  // _FSin(float x, unsigned int qoff, int n)
+            const float x = XmmF32(r, 0);
+            float out = 0.0f;
+            switch (r.gpr[0] & 3u) {
+                case 0: out = std::sinf(x); break;
+                case 1: out = std::cosf(x); break;
+                case 2: out = -std::sinf(x); break;
+                case 3: out = -std::cosf(x); break;
+            }
+            return RetF32(out);
+        }
+        case 149: {  // _Stod(const char* s, char** endptr, long pten)
+            if (!r.gpr[0]) return RetF64(0.0);
+            char* end = nullptr;
+            double v = std::strtod(str(0), &end);
+            if (r.gpr[1]) *reinterpret_cast<char**>(r.gpr[1]) = end;
+            const long pten = static_cast<long>(static_cast<int32_t>(r.gpr[2]));
+            if (pten != 0) v *= std::pow(10.0, static_cast<double>(pten));
+            return RetF64(v);
+        }
+        case 150:
+            return RetF32(std::atan2f(XmmF32(r, 0), XmmF32(r, 1)));
+        case 154: {
+            const float y = XmmF32(r, 1);
+            return RetF32(y != 0.0f ? std::fmodf(XmmF32(r, 0), y) : 0.0f);
