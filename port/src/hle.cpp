@@ -1582,3 +1582,99 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                         static_cast<unsigned long long>(phys));
             std::fflush(stdout);
             return 0;
+        }
+        case 412: {  // sceKernelMapDirectMemory(&addr, len, prot, flags, phys, align)
+            void* p = DirectMap(r.gpr[4], r.gpr[1]);
+            if (!p) return 0x80020016ull;  // SCE_KERNEL_ERROR_ENOMEM
+            if (Readable(ptr(0), 8)) *reinterpret_cast<uint64_t*>(r.gpr[0]) = reinterpret_cast<uint64_t>(p);
+            std::printf("[direct] map phys=0x%llx len=0x%llx prot=0x%llx -> %p\n",
+                        static_cast<unsigned long long>(r.gpr[4]),
+                        static_cast<unsigned long long>(r.gpr[1]),
+                        static_cast<unsigned long long>(r.gpr[2]), p);
+            std::fflush(stdout);
+            return 0;
+        }
+        case 413: {  // fprintf(stream, fmt, ...)
+            VaList va = MakeVa(r, stack, 16);
+            char buf[4096];
+            FormatVa(buf, sizeof(buf), str(1), &va);
+            Emit(buf, std::strlen(buf));
+            return 0;
+        }
+
+        // ---- libSceGnmDriver PM4 packet emitters
+        case 420: {  // sceGnmDrawInitDefaultHardwareState(cmdbuf, size)
+            auto* cmd = reinterpret_cast<uint32_t*>(r.gpr[0]);
+            const uint32_t size = static_cast<uint32_t>(r.gpr[1]);
+            if (!cmd || size < 0x100 || !Readable(cmd, 0x100 * 4)) return 0;
+            Pm4Nop(cmd, 0x100);
+            return 0x100;
+        }
+        case 421: {  // sceGnmSetPsShader(cmdbuf, size, ps_regs)
+            auto* cmd = reinterpret_cast<uint32_t*>(r.gpr[0]);
+            const uint32_t size = static_cast<uint32_t>(r.gpr[1]);
+            const auto* ps = reinterpret_cast<const uint32_t*>(r.gpr[2]);
+            if (!cmd || size < 0x28 || !Readable(cmd, 0x28 * 4)) return 0xffffffffull;
+            if (!ps || !Readable(ps, 12 * 4)) {
+                cmd = Pm4SetReg(cmd, 0x76, 0x08, {0u, 0u});
+                cmd = Pm4SetReg(cmd, 0x69, 0x203, {0u});
+                Pm4Nop(cmd, 33);
+            } else {
+                cmd = Pm4SetReg(cmd, 0x76, 0x08, {ps[0], ps[1]});
+                cmd = Pm4SetReg(cmd, 0x76, 0x0A, {ps[2], ps[3]});
+                cmd = Pm4SetReg(cmd, 0x69, 0x1C4, {ps[4], ps[5]});
+                cmd = Pm4SetReg(cmd, 0x69, 0x1B3, {ps[6], ps[7]});
+                cmd = Pm4SetReg(cmd, 0x69, 0x1B6, {ps[8]});
+                cmd = Pm4SetReg(cmd, 0x69, 0x1B8, {ps[9]});
+                cmd = Pm4SetReg(cmd, 0x69, 0x203, {ps[10]});
+                cmd = Pm4SetReg(cmd, 0x69, 0x08F, {ps[11]});
+                Pm4Nop(cmd, 12);
+            }
+            return 0;
+        }
+        case 422:    // sceGnmSetVsShader(cmdbuf, size, vs_regs, modifier)
+        case 427: {  // sceGnmUpdateVsShader(cmdbuf, size, vs_regs, modifier)
+            auto* cmd = reinterpret_cast<uint32_t*>(r.gpr[0]);
+            const uint32_t size = static_cast<uint32_t>(r.gpr[1]);
+            const auto* vs = reinterpret_cast<const uint32_t*>(r.gpr[2]);
+            const uint32_t mod = static_cast<uint32_t>(r.gpr[3]);
+            if (!cmd || size < 0x1D || !Readable(cmd, 0x1D * 4) || !vs || !Readable(vs, 7 * 4))
+                return 0xffffffffull;
+            const uint32_t rsrc1 = mod ? ((vs[2] & 0xFCFFFC3Fu) | mod) : vs[2];
+            cmd = Pm4SetReg(cmd, 0x76, 0x48, {vs[0], vs[1]});
+            cmd = Pm4SetReg(cmd, 0x76, 0x4A, {rsrc1, vs[3]});
+            cmd = Pm4SetReg(cmd, 0x69, 0x207, {vs[6]});
+            cmd = Pm4SetReg(cmd, 0x69, 0x1B1, {vs[4]});
+            cmd = Pm4SetReg(cmd, 0x69, 0x1C3, {vs[5]});
+            Pm4Nop(cmd, 12);
+            return 0;
+        }
+        case 426: {  // sceGnmSetCsShader(cmdbuf, size, cs_regs)
+            auto* cmd = reinterpret_cast<uint32_t*>(r.gpr[0]);
+            const uint32_t size = static_cast<uint32_t>(r.gpr[1]);
+            const auto* cs = reinterpret_cast<const uint32_t*>(r.gpr[2]);
+            if (!cmd || size < 0x19 || !Readable(cmd, 0x19 * 4) || !cs || !Readable(cs, 7 * 4))
+                return 0xffffffffull;
+            cmd = Pm4SetReg(cmd, 0x76, 0x20C, {cs[0], cs[1]});
+            cmd = Pm4SetReg(cmd, 0x76, 0x212, {cs[2], cs[3]});
+            cmd = Pm4SetReg(cmd, 0x76, 0x207, {cs[4], cs[5], cs[6]});
+            Pm4Nop(cmd, 12);
+            return 0;
+        }
+        case 428:  // sceGnmInsertSetMarker
+        case 429:  // sceGnmInsertSetColorMarker
+        case 430:  // sceGnmInsertPushMarker
+        case 431:  // sceGnmInsertPushColorMarker
+        case 432:  // sceGnmInsertPopMarker
+        case 433:  // sceGnmInsertWaitFlipDone
+        {
+            auto* cmd = reinterpret_cast<uint32_t*>(r.gpr[0]);
+            const uint32_t size = static_cast<uint32_t>(r.gpr[1]);
+            if (cmd && size && size <= 0x1000 && Readable(cmd, size * 4)) Pm4Nop(cmd, size);
+            return 0;
+        }
+        case 439:  // sceGnmAddEqEvent
+        case 448:  // sceGnmSubmitDone
+        case 463:  // sceGnmIsUserPaEnabled (false on retail)
+            return 0;
+
