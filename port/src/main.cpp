@@ -190,3 +190,147 @@ void DumpSamples() {
     for (int i = 0; i < n; ++i)
         for (int j = i + 1; j < n; ++j)
             if (rows[j].count > rows[i].count) {
+                const Row t = rows[i];
+                rows[i] = rows[j];
+                rows[j] = t;
+            }
+    std::printf("[sample] %llu samples, top:\n", static_cast<unsigned long long>(total));
+    for (int i = 0; i < n && i < 12; ++i) {
+        const uint64_t a = rows[i].addr;
+        char mod[MAX_PATH] = "?";
+        uint64_t modBase = 0;
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (VirtualQuery(reinterpret_cast<void*>(a), &mbi, sizeof(mbi))) {
+            modBase = reinterpret_cast<uint64_t>(mbi.AllocationBase);
+            GetModuleFileNameA(static_cast<HMODULE>(mbi.AllocationBase), mod, MAX_PATH);
+            const char* slash = std::strrchr(mod, '\\');
+            if (slash) std::memmove(mod, slash + 1, std::strlen(slash + 1) + 1);
+        }
+        if (a >= g_imageBase && a < g_imageBase + 0x41ec48)
+            std::printf("   %6.2f%%  image+0x%llx\n",
+                        100.0 * rows[i].count / (total ? total : 1),
+                        static_cast<unsigned long long>(a - g_imageBase));
+        else
+            std::printf("   %6.2f%%  %s+0x%llx\n", 100.0 * rows[i].count / (total ? total : 1),
+                        mod, static_cast<unsigned long long>(a - modBase));
+    }
+    std::fflush(stdout);
+    for (int i = 0; i < kSampleSlots; ++i) g_sampleCount[i] = 0;
+}
+
+DWORD WINAPI SamplerThread(LPVOID) {
+    std::printf("[sample] thread up, target %lu\n", g_mainThread);
+    std::fflush(stdout);
+    HANDLE th = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, g_mainThread);
+    if (!th) {
+        std::printf("[sample] OpenThread failed %lu\n", GetLastError());
+        std::fflush(stdout);
+        return 0;
+    }
+    int ticks = 0;
+    while (g_sampling) {
+        Sleep(1);
+        CONTEXT c{};
+        c.ContextFlags = CONTEXT_CONTROL;
+        if (SuspendThread(th) == static_cast<DWORD>(-1)) break;
+        GetThreadContext(th, &c);
+        ResumeThread(th);
+
+        // When the thread is inside a Windows wait, the interesting address is
+        // not the wait itself: it is the guest frame that asked for it.  Walk
+        // the stack a little and attribute the sample to the first image return
+        // address found, so a vsync block lands on its caller.
+        uint64_t at = c.Rip;
+        if (at < g_imageBase || at >= g_imageBase + 0x41ec48) {
+            MEMORY_BASIC_INFORMATION mbi{};
+            if (VirtualQuery(reinterpret_cast<void*>(c.Rsp), &mbi, sizeof(mbi)) &&
+                mbi.State == MEM_COMMIT && !(mbi.Protect & PAGE_NOACCESS)) {
+                uint64_t top = reinterpret_cast<uint64_t>(mbi.BaseAddress) + mbi.RegionSize;
+                for (int i = 0; i < 192 && c.Rsp + i * 8 + 8 <= top; ++i) {
+                    const uint64_t v = *reinterpret_cast<uint64_t*>(c.Rsp + i * 8);
+                    if (v >= g_imageBase && v < g_imageBase + 0x41ec48) {
+                        at = v;
+                        break;
+                    }
+                }
+            }
+        }
+
+        const uint32_t h = static_cast<uint32_t>((at >> 2) * 2654435761u) &
+                           (kSampleSlots - 1);
+        g_sampleAddr[h] = at;
+        ++g_sampleCount[h];
+        if (++ticks >= 256) {
+            ticks = 0;
+            DumpSamples();
+        }
+    }
+    CloseHandle(th);
+    return 0;
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+    SetConsoleOutputCP(CP_UTF8);
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+    std::printf("nidhogg x64 host\n");
+    g_mainThread = GetCurrentThreadId();
+
+    const char* elf = (argc > 1) ? argv[1] : "work/nidhogg.elf";
+    uint64_t callAt = 0;
+    if (argc > 3 && std::strcmp(argv[2], "--call") == 0)
+        callAt = std::strtoull(argv[3], nullptr, 0);
+
+    ps4::Image image;
+    if (!image.load(elf)) {
+        std::printf("load failed: %s\n", elf);
+        return 1;
+    }
+    g_imageBase = reinterpret_cast<uint64_t>(image.base());
+    std::printf("image   base=%p span=0x%llx entry=0x%llx\n", image.base(),
+                static_cast<unsigned long long>(image.size()),
+                static_cast<unsigned long long>(image.entry()));
+    for (const auto& s : image.segments())
+        std::printf("  seg vaddr=0x%llx filesz=0x%llx memsz=0x%llx flags=%u\n",
+                    (unsigned long long)s.vaddr, (unsigned long long)s.filesz,
+                    (unsigned long long)s.memsz, s.flags);
+
+    const size_t relocs = image.relocate();
+    std::printf("relocs  %zu applied\n", relocs);
+
+    // PS4 libc stores a *pointer* to the stack-guard slot in .bss; the real
+    // __libc_init seeds it.  Stand in for that here so every function with a
+    // stack-protector prologue can read a valid guard.
+    auto* guard = static_cast<uint64_t*>(
+        VirtualAlloc(nullptr, 0x1000, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+    *guard = 0x8f3a5c17d2e94b60ull;
+    *reinterpret_cast<uint64_t*>(image.at(0x33DAC8)) = reinterpret_cast<uint64_t>(guard);
+
+    ps4::Thunks thunks;
+    thunks.install(image);
+    std::printf("imports %zu slots wired to stubs\n", thunks.count());
+
+    if (std::getenv("NIDHOGG_PROBE_ONLY")) {
+        std::printf("probe only, not entering\n");
+        return 0;
+    }
+
+    AddVectoredExceptionHandler(1, OnFault);
+
+    if (callAt) {
+        // Smoke test: run one function out of the mapped image.  Proves the
+        // segment map, the relocations and the ABI handoff all work, without
+        // dragging the SCE layer into it.
+        using Fn = uint64_t (*)();
+        auto fn = reinterpret_cast<Fn>(image.at(callAt));
+        std::printf("calling 0x%llx ...\n", static_cast<unsigned long long>(callAt));
+        const uint64_t r = fn();
+        std::printf("returned 0x%llx (%llu)\n", static_cast<unsigned long long>(r),
+                    static_cast<unsigned long long>(r));
+        return 0;
+    }
+
+    // The image's _start takes (arg_block, fini) where arg_block is the
+    // kernel's initial process block: argc at +0 and the argv array inline at
+    // +8, followed by envp.  Build one so the SysV startup path can read it.
