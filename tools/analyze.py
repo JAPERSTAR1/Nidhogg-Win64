@@ -94,3 +94,67 @@ def main():
     rw = [s for s in segs if s["flags"] & 2]
     def in_image(va):
         return any(s["vaddr"] <= va < s["vaddr"] + len(s["data"]) for s in segs)
+
+    got = {}
+    for slot in plt_slots:
+        if in_image(slot) and not (base <= slot < base + len(code)):
+            got[slot] = read_at(segs, slot, 8)
+
+    # ---- strings
+    strings = []
+    for s in segs:
+        for m in re.finditer(rb"[\x20-\x7e]{5,}", s["data"]):
+            strings.append((s["vaddr"] + m.start(), m.group().decode("ascii", "replace")))
+
+    OUT.mkdir(exist_ok=True)
+    with open(OUT / "functions.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["vaddr", "calls"])
+        for a in sorted(funcs):
+            w.writerow([f"0x{a:x}", calls.get(a, 0)])
+
+    with open(OUT / "imports.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["got_slot", "initial_qword", "stub_count", "first_stub"])
+        for slot in sorted(got):
+            w.writerow([f"0x{slot:x}", got[slot].hex(),
+                        plt_slots[slot], f"0x{min(plt_sites[slot]):x}"])
+
+    with open(OUT / "strings.txt", "w", encoding="utf-8") as f:
+        for va, s in strings:
+            f.write(f"{va:08x}  {s}\n")
+
+    # ---- report
+    stub_run = sorted(a for a in plt_sites if a < base + len(code))
+    report = []
+    report.append("# Nidhogg (CUSA00920) image survey\n")
+    report.append(f"- image: `work/nidhogg.elf` from `eboot.bin`")
+    report.append(f"- entry: `0x{entry:x}`  (ET_SCE_RELEXEC, x86-64)")
+    for s in segs:
+        report.append(f"- LOAD vaddr `0x{s['vaddr']:x}`  filesz `0x{s['filesz']:x}`"
+                      f"  memsz `0x{s['memsz']:x}`  flags `{s['flags']}`")
+    report.append("")
+    report.append("## Code\n")
+    report.append(f"- decoded {insn_count:,} instructions over {len(code):,} bytes")
+    report.append(f"- {len(funcs):,} candidate function entry points")
+    report.append(f"- {len(plt_slots):,} external call sites -> {len(got):,} GOT slots")
+    report.append("")
+    report.append("## Import trampolines\n")
+    slots = sorted(got)
+    report.append(f"GOT range: `0x{min(slots):x}` .. `0x{max(slots):x}`" if slots else "none found")
+    report.append("")
+    report.append("| slot | init | refs | first stub |")
+    report.append("|---|---|---|---|")
+    for slot in slots[:60]:
+        report.append(f"| 0x{slot:x} | {got[slot].hex()} | {plt_slots[slot]} | 0x{min(plt_sites[slot]):x} |")
+    report.append("")
+    (OUT / "report.md").write_text("\n".join(report), encoding="utf-8")
+
+    print("\n".join(report[:14]))
+    print(f"\nfunctions  {len(funcs):,}")
+    print(f"got slots  {len(got):,}")
+    print(f"strings    {len(strings):,}")
+
+
+if __name__ == "__main__":
+    main()
