@@ -334,3 +334,45 @@ int main(int argc, char** argv) {
     // The image's _start takes (arg_block, fini) where arg_block is the
     // kernel's initial process block: argc at +0 and the argv array inline at
     // +8, followed by envp.  Build one so the SysV startup path can read it.
+    const char* exe = "nidhogg";
+    const char* env[] = {"LANG=en_US.UTF-8", "HOME=/app0", nullptr};
+    uint8_t* block = static_cast<uint8_t*>(
+        VirtualAlloc(nullptr, 0x400, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+    *reinterpret_cast<uint32_t*>(block) = 1;
+    *reinterpret_cast<uint32_t*>(block + 4) = 0;
+    const char** av = reinterpret_cast<const char**>(block + 8);
+    av[0] = exe;
+    av[1] = nullptr;
+    const char** ev = av + 2;
+    for (int i = 0; env[i]; ++i) ev[i] = env[i];
+    ev[2] = nullptr;
+
+    std::printf("entering 0x%llx\n\n", static_cast<unsigned long long>(image.entry()));
+    std::fflush(stdout);
+
+    // Watchdog: the image is a blocking game loop, so when it stops making
+    // progress the useful question is "where is it parked", not "what did it
+    // call last".  NIDHOGG_WATCHDOG=<ms> changes the delay, 0 disables.
+    DWORD watchdogMs = 10000;
+    if (const char* w = std::getenv("NIDHOGG_WATCHDOG"))
+        watchdogMs = static_cast<DWORD>(std::strtoul(w, nullptr, 0));
+    if (watchdogMs) {
+        auto* ms = new DWORD(watchdogMs);
+        CreateThread(nullptr, 0, [](LPVOID p) -> DWORD {
+            const DWORD wait = *static_cast<DWORD*>(p);
+            delete static_cast<DWORD*>(p);
+            Sleep(wait);
+            DumpMainStack("no progress, parked at");
+            return 0;
+        }, ms, 0, nullptr);
+    }
+
+    if (std::getenv("NIDHOGG_SAMPLE"))
+        CreateThread(nullptr, 0, SamplerThread, nullptr, 0, nullptr);
+
+    auto call = MakeSysvCall();
+    call(reinterpret_cast<uint64_t>(image.at(image.entry())),
+         reinterpret_cast<uint64_t>(block), 0);
+    std::printf("\nentry returned\n");
+    return 0;
+}
