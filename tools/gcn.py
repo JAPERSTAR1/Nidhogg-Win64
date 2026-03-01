@@ -334,3 +334,83 @@ def decode(dw, i):
                 f"{' unorm' if (w >> 12) & 1 else ''}"), 2
 
     if t6 == 0x38:                                    # MUBUF
+        op = (w >> 18) & 0x7F
+        d1 = dw[i + 1]
+        return (f"{MUBUF.get(op, f'mubuf_{op}')} vdata=v{(d1 >> 8) & 0xFF}, "
+                f"vaddr=v{d1 & 0xFF}, srsrc=s{(d1 >> 16) & 0x1F}, "
+                f"soffset={sop((w >> 24) & 0xFF)}, offset={w & 0xFFF}"
+                f"{' offen' if (w >> 12) & 1 else ''}"
+                f"{' idxen' if (w >> 13) & 1 else ''}"
+                f"{' addr64' if (w >> 14) & 1 else ''}"), 2
+
+    if w >> 27 == 0x18:                               # SMRD
+        op = (w >> 22) & 0x1F
+        sdst = (w >> 15) & 0x7F
+        sbase = (w >> 9) & 0x3F
+        width = SMRD_WIDTH.get(op, 1)
+        imm = (w >> 8) & 1
+        off = f"0x{w & 0xFF:x}" if imm else sop(w & 0xFF)
+        return (f"{SMRD.get(op, f'smrd_{op}')} s[{sdst}:{sdst + width - 1}], "
+                f"s[{sbase}:{sbase + 1}], {off}"), 1
+
+    if w >> 28 == 0xB:                                # SOPK
+        op = (w >> 23) & 0x1F
+        return (f"{SOPK.get(op, f'sopk_{op}')} s{(w >> 16) & 0x7F}, "
+                f"{se(w & 0xFFFF, 16)}"), 1
+
+    if w >> 30 == 0x2:                                # SOP2
+        op = (w >> 23) & 0x7F
+        s0 = w & 0xFF
+        size = 2 if s0 == 255 else 1
+        lit = f" 0x{dw[i + 1]:08x}" if size == 2 else ""
+        return (f"{SOP2.get(op, f'sop2_{op:#04x}')} s{(w >> 16) & 0x7F}, "
+                f"{sop(s0)}, {sop((w >> 8) & 0xFF)}{lit}"), size
+
+    if not (w >> 31):                                 # VOP2
+        op = (w >> 25) & 0x3F
+        s0 = w & 0x1FF
+        if op in (32, 33):
+            return (f"{VOP2[op]} v{(w >> 17) & 0xFF}, {vsop(s0)}, "
+                    f"v{(w >> 9) & 0xFF}, 0x{dw[i + 1]:08x}"), 2
+        size = 2 if s0 == 255 else 1
+        lit = f" 0x{dw[i + 1]:08x}" if size == 2 else ""
+        return (f"{VOP2.get(op, f'vop2_{op:#04x}')} v{(w >> 17) & 0xFF}, "
+                f"{vsop(s0)}, v{(w >> 9) & 0xFF}{lit}"), size
+
+    return f"??? {w:08x}", 1
+
+
+def disasm(dw, start, end, base):
+    i = start
+    out = []
+    while i < end:
+        text, size = decode(dw, i)
+        out.append((base + i * 4, text))
+        i += size
+    return out
+
+
+def main():
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    path = args[0] if args else r"C:\Users\puy12\Downloads\g\nidhogg-port\work\arena_probe.bin"
+    raw = open(path, "rb").read()
+    dw = list(struct.unpack("<%dI" % (len(raw) // 4), raw))
+    base = 0x4010000000
+
+    if "--blobs" in sys.argv:
+        starts = [i for i in range(len(dw)) if dw[i] == 0xBEEB03FF]
+        for st in starts:
+            print(f"\n===== marker at +0x{st * 4:x} =====")
+            for addr, text in disasm(dw, st + 2, min(st + 2 + 40, len(dw)), base):
+                print(f"  {addr:012x}  {text}")
+        return
+
+    at = int(next(a for a in sys.argv[1:] if a.startswith("--at=")).split("=")[1], 16)
+    endarg = next((a for a in sys.argv[1:] if a.startswith("--end=")), None)
+    stop = int(endarg.split("=")[1], 16) if endarg else at + 0x100
+    for addr, text in disasm(dw, at // 4, stop // 4, base):
+        print(f"  {addr:012x}  {text}")
+
+
+if __name__ == "__main__":
+    main()
