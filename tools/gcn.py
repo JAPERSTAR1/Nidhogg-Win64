@@ -190,3 +190,147 @@ MUBUF = {0: "buffer_load_format_x", 1: "buffer_load_format_xy",
          22: "buffer_store_dwordx4", 23: "buffer_store_dwordx3",
          24: "buffer_load_ubyte_d16?", 48: "buffer_atomic_swap",
          49: "buffer_atomic_cmpswap", 50: "buffer_atomic_add"}
+
+EXP_TGT = {0: "mrt0", 1: "mrt1", 2: "mrt2", 3: "mrt3", 4: "mrt4",
+           5: "mrt5", 6: "mrt6", 7: "mrt7", 8: "mrtz", 9: "pos0",
+           10: "pos1", 11: "pos2", 12: "pos3", 13: "param0", 14: "param1",
+           15: "param2", 16: "param3", 17: "param4", 18: "param5",
+           19: "param6", 20: "param7", 21: "param8", 22: "param9",
+           23: "param10", 24: "param11", 25: "param12", 26: "param13",
+           27: "param14", 28: "param15", 32: "pos0_hi", 33: "pos1_hi",
+           34: "pos2_hi", 35: "pos3_hi", 36: "param0_hi"}
+
+FLT = {240: 0.5, 241: -0.5, 242: 1.0, 243: -1.0, 244: 2.0, 245: -2.0,
+       246: 4.0, 247: -4.0, 248: 0.15915494}
+
+SREG = {102: "flat_scratch_lo", 103: "flat_scratch_hi",
+        104: "xnack_lo", 105: "xnack_hi", 106: "vcc_lo", 107: "vcc_hi",
+        108: "tba_lo", 109: "tba_hi", 110: "tba_hi", 124: "m0",
+        126: "exec_lo", 127: "exec_hi"}
+
+
+def sreg(c):
+    return SREG.get(c, f"s{c}")
+
+
+def sop(c):
+    """Scalar source operand, 8-bit field."""
+    if c < 104:
+        return sreg(c)
+    if c == 255:
+        return "lit"
+    if c < 128:
+        return sreg(c)
+    if c <= 192:
+        return str(c - 128)
+    if c <= 208:
+        return str(-(c - 192))
+    if c in FLT:
+        v = FLT[c]
+        return f"{v:g}"
+    return {249: "0.15915494", 250: "1.0", 251: "0.5", 252: "2.0",
+            253: "0x7fffffff", 254: "-1.0"}.get(c, f"const{c}")
+
+
+def vsop(c):
+    """9-bit source: VGPR when >= 256."""
+    return f"v{c - 256}" if c >= 256 else sop(c & 0xFF) if c < 256 else "?"
+
+
+def se(v, bits):
+    return v - (1 << bits) if v & (1 << (bits - 1)) else v
+
+
+def swz(c, neg, ab, k):
+    t = vsop(c)
+    if ab & (1 << k):
+        t = f"|{t}|"
+    if neg & (1 << k):
+        t = f"-{t}"
+    return t
+
+
+def decode(dw, i):
+    w = dw[i]
+    t9 = w >> 23
+    t6 = w >> 26
+
+    if t9 == 0x17D:                                   # SOP1
+        op = (w >> 8) & 0xFF
+        sdst = (w >> 16) & 0x7F
+        s0 = w & 0xFF
+        size = 2 if (s0 == 255 and op in (3, 4, 11, 12)) else 1
+        lit = f" 0x{dw[i + 1]:08x}" if size == 2 else ""
+        return f"{SOP1.get(op, f'sop1_{op:#04x}')} {sreg(sdst)}, {sop(s0)}{lit}", size
+    if t9 == 0x17E:                                   # SOPC
+        op = (w >> 16) & 0x7F
+        return f"{SOPC.get(op, f'sopc_{op:#04x}')} {sop(w & 0xFF)}, {sop((w >> 8) & 0xFF)}", 1
+    if t9 == 0x17F:                                   # SOPP
+        op = (w >> 16) & 0x7F
+        simm = se(w & 0xFFFF, 16)
+        if op == 12:
+            return (f"s_waitcnt vmcnt({simm & 0xF}) expcnt({(simm >> 4) & 0x7}) "
+                    f"lgkmcnt({(simm >> 8) & 0xF})"), 1
+        return f"{SOPP.get(op, f'sopp_{op:#04x}')} {simm}", 1
+
+    if (w >> 25) & 0x7F == 0x3F:                      # VOP1
+        op = (w >> 9) & 0xFF
+        s0 = w & 0x1FF
+        size = 2 if s0 == 255 else 1
+        lit = f" 0x{dw[i + 1]:08x}" if size == 2 else ""
+        return f"{VOP1.get(op, f'vop1_{op:#04x}')} v{(w >> 17) & 0xFF}, {vsop(s0)}{lit}", size
+    if (w >> 25) & 0x7F == 0x3E:                      # VOPC
+        op = (w >> 17) & 0xFF
+        s0 = w & 0x1FF
+        size = 2 if s0 == 255 else 1
+        lit = f" 0x{dw[i + 1]:08x}" if size == 2 else ""
+        return f"{vopc_name(op)} vcc, {vsop(s0)}, v{(w >> 9) & 0xFF}{lit}", size
+
+    if t6 == 0x34:                                    # VOP3
+        op = (w >> 16) & 0x3FF
+        d1 = dw[i + 1]
+        if op < 256:
+            name = vopc_name(op)
+        elif op < 320:
+            name = VOP2.get(op - 256, f"vop2_{op - 256:#04x}")
+        elif op < 384:
+            name = VOP3N.get(op, f"vop3_{op:#04x}")
+        else:
+            name = VOP1.get(op - 384, f"vop1_{op - 384:#04x}")
+        ab = (w >> 8) & 7
+        neg = (d1 >> 29) & 7
+        s0, s1, s2 = d1 & 0x1FF, (d1 >> 9) & 0x1FF, (d1 >> 18) & 0x1FF
+        parts = [swz(s0, neg, ab, 0), swz(s1, neg, ab, 1), swz(s2, neg, ab, 2)]
+        return f"{name} v{w & 0xFF}, {', '.join(parts)}", 2
+
+    if t6 == 0x3E:                                    # EXP
+        en = w & 0xF
+        tgt = (w >> 4) & 0x3F
+        d1 = dw[i + 1]
+        vs = [d1 & 0xFF, (d1 >> 8) & 0xFF, (d1 >> 16) & 0xFF, (d1 >> 24) & 0xFF]
+        f = []
+        if (w >> 10) & 1:
+            f.append("compr")
+        if (w >> 11) & 1:
+            f.append("done")
+        if (w >> 12) & 1:
+            f.append("vm")
+        n = bin(en).count("1")
+        return (f"exp {EXP_TGT.get(tgt, f'tgt{tgt}')} en={en:x} {' '.join(f)} "
+                f"[{', '.join('v%d' % v for v in vs[:n])}]"), 2
+
+    if t6 == 0x32:                                    # VINTRP
+        return (f"{VINTRP.get((w >> 16) & 3, 'vintrp')} v{(w >> 18) & 0xFF}, "
+                f"v{w & 0xFF}, attr{(w >> 10) & 0x3F}.{(w >> 8) & 3}"), 1
+
+    if t6 == 0x3C:                                    # MIMG
+        op = (w >> 18) & 0x7F
+        d1 = dw[i + 1]
+        vaddr = w & 0xFF
+        dmask = (w >> 8) & 0xF
+        return (f"{MIMG.get(op, f'image_{op}')} v[{vaddr}:{vaddr + 3}] "
+                f"vdata=v{d1 & 0xFF} srsrc=s{(d1 >> 16) & 0x1F} "
+                f"ssamp=s{(d1 >> 8) & 0x1F} dmask={dmask:x}"
+                f"{' unorm' if (w >> 12) & 1 else ''}"), 2
+
+    if t6 == 0x38:                                    # MUBUF
