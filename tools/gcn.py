@@ -94,3 +94,99 @@ VOP1 = {
 }
 
 VOP2 = {
+    0: "v_cndmask_b32", 1: "v_readlane_b32", 2: "v_writelane_b32",
+    3: "v_add_f32", 4: "v_sub_f32", 5: "v_subrev_f32", 6: "v_mac_legacy_f32",
+    7: "v_mul_legacy_f32", 8: "v_mul_f32", 9: "v_mul_i32_i24",
+    10: "v_mul_hi_i32_i24", 11: "v_mul_u32_u24", 12: "v_mul_hi_u32_u24",
+    13: "v_min_legacy_f32", 14: "v_max_legacy_f32", 15: "v_min_f32",
+    16: "v_max_f32", 17: "v_min_i32", 18: "v_max_i32", 19: "v_min_u32",
+    20: "v_max_u32", 21: "v_lshr_b32", 22: "v_lshrrev_b32",
+    23: "v_ashr_i32", 24: "v_ashrrev_i32", 25: "v_lshl_b32",
+    26: "v_lshlrev_b32", 27: "v_and_b32", 28: "v_or_b32", 29: "v_xor_b32",
+    30: "v_bfm_b32", 31: "v_mac_f32", 32: "v_madmk_f32", 33: "v_madak_f32",
+    34: "v_bcnt_u32_b32", 35: "v_mbcnt_lo_u32_b32", 36: "v_mbcnt_hi_u32_b32",
+    37: "v_add_i32", 38: "v_sub_i32", 39: "v_subrev_i32", 40: "v_addc_u32",
+    41: "v_subb_u32", 42: "v_subbrev_u32", 43: "v_ldexp_f32",
+    44: "v_cvt_pkaccum_u8_f32", 45: "v_cvt_pknorm_i16_f32",
+    46: "v_cvt_pknorm_u16_f32", 47: "v_cvt_pkrtz_f16_f32",
+    48: "v_cvt_pk_u16_u32", 49: "v_cvt_pk_i16_i32",
+}
+
+VOP3N = {320: "v_mad_legacy_f32", 321: "v_mad_f32", 322: "v_mad_i32_i24",
+         323: "v_mad_u32_u24", 324: "v_cubeid_f32", 325: "v_cubesc_f32",
+         326: "v_cubetc_f32", 327: "v_cubema_f32", 328: "v_bfe_u32",
+         329: "v_bfe_i32", 330: "v_bfi_b32", 331: "v_fma_f32",
+         332: "v_fma_f64", 333: "v_lerp_u8", 334: "v_alignbit_b32",
+         335: "v_alignbyte_b32", 336: "v_mullit_f32", 337: "v_min3_f32",
+         338: "v_min3_i32", 339: "v_min3_u32", 340: "v_max3_f32",
+         341: "v_max3_i32", 342: "v_max3_u32", 343: "v_med3_f32",
+         344: "v_med3_i32", 345: "v_med3_u32", 346: "v_sad_u8",
+         347: "v_sad_hi_u8", 348: "v_sad_u16", 349: "v_sad_u32",
+         350: "v_cvt_pk_u8_f32", 351: "v_div_fixup_f32", 353: "v_lshl_b64",
+         354: "v_lshr_b64", 355: "v_ashr_i64", 356: "v_add_f64",
+         357: "v_mul_f64", 358: "v_min_f64", 359: "v_max_f64",
+         360: "v_ldexp_f64", 361: "v_mul_lo_u32", 362: "v_mul_hi_u32",
+         363: "v_mul_lo_i32", 364: "v_mul_hi_i32", 365: "v_div_scale_f32",
+         366: "v_div_scale_f64", 367: "v_div_fmas_f32", 368: "v_div_fmas_f64",
+         369: "v_msad_u8", 370: "v_qsad_u8", 371: "v_mqsad_u8",
+         372: "v_trig_preop_f64", 373: "v_mqsad_u32_u8", 374: "v_mad_u64_u32",
+         375: "v_mad_i64_i32"}
+
+CMP_F = ["f", "lt", "eq", "le", "gt", "lg", "ge", "o",
+         "u", "nge", "nlg", "ngt", "nle", "neq", "nlt", "tru"]
+
+
+def vopc_name(op):
+    block = op & 0xC0
+    low = op & 0x3F
+    kind = {0x00: "f32", 0x40: "f16", 0x80: "i32", 0xC0: "u32"}.get(block)
+    if kind is None or low > 0x0F:
+        return f"v_cmp_{op:#04x}"
+    name = "tru" if low == 0x0F else CMP_F[low]
+    if low == 0x00:
+        name = "f"
+    return f"v_cmp_{name}_{kind}"
+
+
+VINTRP = {0: "v_interp_p1_f32", 1: "v_interp_p2_f32", 2: "v_interp_mov_f32"}
+
+SMRD = {0: "s_load_dword", 1: "s_load_dwordx2", 2: "s_load_dwordx4",
+        3: "s_load_dwordx8", 4: "s_load_dwordx16", 8: "s_buffer_load_dword",
+        9: "s_buffer_load_dwordx2", 10: "s_buffer_load_dwordx4",
+        11: "s_buffer_load_dwordx8", 12: "s_buffer_load_dwordx16",
+        29: "s_dcache_inv_vol", 30: "s_memtime", 31: "s_dcache_inv"}
+
+SMRD_WIDTH = {0: 1, 1: 2, 2: 4, 3: 8, 4: 16, 8: 1, 9: 2, 10: 4, 11: 8, 12: 16}
+
+MIMG = {0: "image_load", 1: "image_load_mip", 2: "image_load_pck",
+        3: "image_load_pck_sgn", 4: "image_load_mip_pck",
+        5: "image_load_mip_pck_sgn", 8: "image_store", 9: "image_store_mip",
+        10: "image_store_pck", 11: "image_store_mip_pck",
+        14: "image_get_resinfo", 15: "image_atomic_swap",
+        16: "image_atomic_cmpswap", 17: "image_atomic_add",
+        18: "image_atomic_sub", 27: "image_atomic_smin",
+        28: "image_atomic_umin", 29: "image_atomic_smax",
+        30: "image_atomic_umax", 31: "image_atomic_and",
+        32: "image_sample", 33: "image_sample_cl", 34: "image_sample_d",
+        35: "image_sample_d_cl", 36: "image_sample_l", 37: "image_sample_b",
+        38: "image_sample_b_cl", 39: "image_sample_lz",
+        40: "image_sample_c", 41: "image_sample_c_cl",
+        42: "image_sample_c_d", 43: "image_sample_c_d_cl",
+        44: "image_sample_c_l", 45: "image_sample_c_b",
+        46: "image_sample_c_b_cl", 47: "image_sample_c_lz",
+        48: "image_sample_o", 64: "image_gather4", 65: "image_gather4_cl",
+        96: "image_get_lod"}
+
+MUBUF = {0: "buffer_load_format_x", 1: "buffer_load_format_xy",
+         2: "buffer_load_format_xyz", 3: "buffer_load_format_xyzw",
+         4: "buffer_store_format_x", 5: "buffer_store_format_xy",
+         6: "buffer_store_format_xyz", 7: "buffer_store_format_xyzw",
+         8: "buffer_load_ubyte", 9: "buffer_load_sbyte",
+         10: "buffer_load_ushort", 11: "buffer_load_sshort",
+         12: "buffer_load_dword", 13: "buffer_load_dwordx2",
+         14: "buffer_load_dwordx4", 15: "buffer_load_dwordx3",
+         16: "buffer_store_byte", 18: "buffer_store_short",
+         20: "buffer_store_dword", 21: "buffer_store_dwordx2",
+         22: "buffer_store_dwordx4", 23: "buffer_store_dwordx3",
+         24: "buffer_load_ubyte_d16?", 48: "buffer_atomic_swap",
+         49: "buffer_atomic_cmpswap", 50: "buffer_atomic_add"}
