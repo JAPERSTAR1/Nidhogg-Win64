@@ -94,3 +94,56 @@ def main():
                 if ins is None:
                     break
                 steps += 1
+                end = max(end, ptr + ins.size)
+                m = ins.mnemonic
+                if m == "call":
+                    op = ins.operands[0]
+                    if op.type == X86_OP_IMM:
+                        t = op.imm
+                        if PLT_VA <= t < PLT_END:
+                            plt.add((t - PLT_VA - 0x10) // 0x10)
+                        elif TEXT_VA <= t < TEXT_VA + TEXT_SZ:
+                            work.append(t)
+                elif m == "jmp":
+                    op = ins.operands[0]
+                    if op.type == X86_OP_IMM:
+                        t = op.imm
+                        if PLT_VA <= t < PLT_END:
+                            plt.add((t - PLT_VA - 0x10) // 0x10)
+                        elif TEXT_VA <= t < TEXT_VA + TEXT_SZ:
+                            work.append(t)
+                    break
+                elif m.startswith("j") and m != "jmp":
+                    op = ins.operands[0]
+                    if op.type == X86_OP_IMM and TEXT_VA <= op.imm < TEXT_VA + TEXT_SZ:
+                        work.append(op.imm)
+                elif m in ("ret", "ud2", "int3", "hlt"):
+                    break
+                ptr += ins.size
+        return end, plt
+
+    funcs = []
+    for r in sorted(roots):
+        e, plt = walk(r)
+        funcs.append((r, e, sorted(plt)))
+
+    OUT.mkdir(exist_ok=True)
+    with open(OUT / "functions.csv", "w", newline="") as f:
+        f.write("vaddr,size,plt_calls,callers\n")
+        for r, e, plt in funcs:
+            f.write(f"0x{r:x},0x{max(e - r, 0):x},{len(plt)},{call_targets.get(r, 0)}\n")
+
+    roots_only = [f for f in funcs if call_targets.get(f[0], 0) == 0]
+    with open(OUT / "roots.txt", "w") as f:
+        for r, e, plt in sorted(roots_only, key=lambda x: len(x[2]), reverse=True):
+            f.write(f"0x{r:08x} size=0x{max(e-r,0):05x} plt={len(plt)} {[hex(p) for p in plt[:10]]}\n")
+
+    print(f"functions  {len(funcs):,}")
+    print(f"roots      {len(roots_only):,}")
+    print("top roots by distinct import calls:")
+    for r, e, plt in sorted(roots_only, key=lambda x: len(x[2]), reverse=True)[:12]:
+        print(f"  0x{r:08x}  size=0x{max(e-r,0):05x}  plt={len(plt)}  first={[hex(p) for p in plt[:8]]}")
+
+
+if __name__ == "__main__":
+    main()
