@@ -46,3 +46,53 @@ def main():
             body = dw[i + 1:i + 1 + n]
             on = OPS.get(op, f"op{op:#04x}")
             print(f"[{i:4d}] {on} n={n}")
+            if op in (0x76, 0x69, 0x68, 0x79):
+                base = body[0]
+                names = CFG if op == 0x68 else CTX
+                for k, v in enumerate(body[1:]):
+                    nm = names.get(base + k)
+                    print(f"        base={base:#04x}  [{base + k:04x}] = {v:08x}"
+                          + (f"   {nm}" if nm else ""))
+                if op == 0x68:
+                    for k, v in enumerate(body[1:]):
+                        cfg[base + k] = v
+            elif op == 0x2D:
+                print(f"        count={body[0]} init={body[1]:#x} "
+                      f"prim={PRIMS.get(cfg.get(0, 0), cfg.get(0, 0))}   <-- draw{draw}")
+                draw += 1
+            elif op == 0x27:
+                mx, blo, bhi, cnt, init = body[:5]
+                print(f"        max={mx} base={(bhi << 32) | blo:#x} count={cnt} "
+                      f"prim={PRIMS.get(cfg.get(0, 0), cfg.get(0, 0))}   <-- draw{draw}")
+                draw += 1
+            elif op == 0x15:
+                print(f"        {body[0]}x{body[1]}x{body[2]} init={body[3]:#x}")
+            elif op == 0x2A:
+                print(f"        type={body[0]}")
+            elif op == 0x37:
+                print(f"        {[hex(x) for x in body]}")
+            elif op == 0x47:
+                print(f"        cntl={body[0]:#x} addr={(body[2] << 32) | body[1]:#x} "
+                      f"data={(body[4] << 32) | body[3]:#x}")
+            elif op == 0x48:
+                print(f"        cntl={body[0]:#x} addr={(body[2] << 32) | body[1]:#x} "
+                      f"data={body[3]:#x}")
+            elif n <= 8:
+                print(f"        {[hex(x) for x in body]}")
+            else:
+                print(f"        [{len(body)} dwords]")
+            i += 1 + n
+        elif typ == 0:
+            n = 1 + (h & 0xFFFF)
+            print(f"[{i:4d}] T0 n={n}")
+            i += 1 + n
+        elif typ == 1:
+            print(f"[{i:4d}] T1 {h:#x} {dw[i + 1]:#x}")
+            i += 2
+        else:
+            print(f"[{i:4d}] T2 {h:#x}")
+            i += 1
+
+
+if __name__ == "__main__":
+    main()
