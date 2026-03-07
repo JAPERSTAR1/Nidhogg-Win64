@@ -94,3 +94,64 @@ def main() -> int:
         loads.append(p2)
         print(f"LOAD vaddr 0x{p['vaddr']:x} filesz 0x{p['filesz']:x} "
               f"-> self 0x{cand[0]['offset']:x}")
+
+    if not loads:
+        raise SystemExit("no LOAD segments")
+
+    # Fresh layout: headers at 0, LOADs page aligned, dynlib chunk appended.
+    out_off = 0x1000
+    layout = []
+    for p in loads:
+        s = p["self"]
+        align = max(p["align"], 0x10)
+        out_off = (out_off + align - 1) & ~(align - 1)
+        layout.append((p, s, out_off))
+        print(f"  place LOAD vaddr 0x{p['vaddr']:x} at out 0x{out_off:x}")
+        out_off += p["filesz"]
+
+    # dynlib chunk holds the RELA table; keep it in the file but unmapped.
+    dyn = next((s for s in ssegs if s["filesz"] == 0x38200), None)
+    dyn_off = 0
+    if dyn:
+        dyn_off = (out_off + 0xFFF) & ~0xFFF
+        print(f"  append dynlib 0x{dyn['offset']:x} (0x{dyn['filesz']:x}) at out 0x{dyn_off:x}")
+        out_off = dyn_off + dyn["filesz"]
+
+    out = bytearray(out_off)
+    # ELF header
+    hdr = bytearray(eh)
+    struct.pack_into("<Q", hdr, 0x20, 0x40)   # e_phoff
+    struct.pack_into("<Q", hdr, 0x28, 0)      # e_shoff
+    struct.pack_into("<H", hdr, 0x3A, 0)      # e_shnum
+    struct.pack_into("<H", hdr, 0x3C, 0)      # e_shstrndx
+    struct.pack_into("<H", hdr, 0x38, 2)      # e_phnum
+    out[0:64] = hdr
+
+    for i, (p, s, o) in enumerate(layout):
+        struct.pack_into("<IIQQQQQQ", out, 0x40 + i * 56,
+                         p["type"], p["flags"], o, p["vaddr"], p["paddr"],
+                         p["filesz"], p["memsz"], p["align"])
+        out[o:o + p["filesz"]] = data[s["offset"]:s["offset"] + p["filesz"]]
+
+    if dyn:
+        out[dyn_off:dyn_off + dyn["filesz"]] = data[dyn["offset"]:dyn["offset"] + dyn["filesz"]]
+
+    outpath = Path(a.out)
+    outpath.parent.mkdir(parents=True, exist_ok=True)
+    outpath.write_bytes(bytes(out))
+    print(f"\nwrote       {outpath}  ({len(out):,} bytes)")
+    print(f"sha256      {sha256(outpath)}")
+
+    if a.json:
+        meta = dict(elf_offset=eh_off, entry=e_entry, phdrs=[
+            dict(type=p["type"], flags=p["flags"], offset=o, vaddr=p["vaddr"],
+                 filesz=p["filesz"], memsz=p["memsz"], align=p["align"])
+            for p, s, o in layout],
+            rela_source=dict(offset=dyn["offset"], size=dyn["filesz"]) if dyn else None,
+            rela_output=dict(offset=dyn_off, size=dyn["filesz"]) if dyn else None)
+        Path(a.json).write_text(json.dumps(meta, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
