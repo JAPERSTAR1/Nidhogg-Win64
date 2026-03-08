@@ -94,3 +94,5 @@ def main() -> None:
               " | ".join(s[:52] for s, _ in top))
 
 
+if __name__ == "__main__":
+    main()
