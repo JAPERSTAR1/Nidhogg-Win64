@@ -920,12 +920,18 @@ const char* SlotName(uint32_t s) {
         case 155: return "strstr";
         case 156: return "fmod";
         case 157: return "strncmp";
+        case 352: return "scePthreadMutexInit";
+        case 353: return "scePthreadMutexDestroy";
         case 354: return "scePthreadMutexLock";
         case 355: return "scePthreadMutexUnlock";
+        case 356: return "scePthreadMutexTrylock";
         case 359: return "open";
         case 360: return "lseek";
         case 361: return "read";
         case 362: return "close";
+        case 373: return "scePthreadMutexattrInit";
+        case 374: return "scePthreadMutexattrSettype";
+        case 375: return "scePthreadMutexattrDestroy";
         case 410: return "sceKernelGetDirectMemorySize";
         case 411: return "sceKernelAllocateDirectMemory";
         case 412: return "sceKernelMapDirectMemory";
