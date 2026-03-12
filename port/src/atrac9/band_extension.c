@@ -142,3 +142,99 @@ static void ApplyBandExtensionChannel(Channel* channel)
 		}
 	}
 }
+
+static void ScaleBexQuantUnits(double* spectra, double* scales, int startUnit, int totalUnits)
+{
+	for (int i = startUnit; i < totalUnits; i++)
+	{
+		for (int k = QuantUnitToCoeffIndex[i]; k < QuantUnitToCoeffIndex[i + 1]; k++)
+		{
+			spectra[k] *= scales[i - startUnit];
+		}
+	}
+}
+
+static void FillHighFrequencies(double* spectra, int groupABin, int groupBBin, int groupCBin, int totalBins)
+{
+	for (int i = 0; i < groupBBin - groupABin; i++)
+	{
+		spectra[groupABin + i] = spectra[groupABin - i - 1];
+	}
+
+	for (int i = 0; i < groupCBin - groupBBin; i++)
+	{
+		spectra[groupBBin + i] = spectra[groupBBin - i - 1];
+	}
+
+	for (int i = 0; i < totalBins - groupCBin; i++)
+	{
+		spectra[groupCBin + i] = spectra[groupCBin - i - 1];
+	}
+}
+
+static void AddNoiseToSpectrum(Channel* channel, int index, int count)
+{
+	if (!channel->Rng.Initialized)
+	{
+		int* sf = channel->ScaleFactors;
+		const unsigned short seed = (unsigned short)(543 * (sf[8] + sf[12] + sf[15] + 1));
+		RngInit(&channel->Rng, seed);
+	}
+	for (int i = 0; i < count; i++)
+	{
+		channel->Spectra[i + index] = RngNext(&channel->Rng) / 65535.0 * 2.0 - 1.0;
+	}
+}
+
+static void RngInit(RngCxt* rng, unsigned short seed)
+{
+	const int startValue = 0x4D93 * (seed ^ (seed >> 14));
+
+	rng->StateA = (unsigned short)(3 - startValue);
+	rng->StateB = (unsigned short)(2 - startValue);
+	rng->StateC = (unsigned short)(1 - startValue);
+	rng->StateD = (unsigned short)(0 - startValue);
+	rng->Initialized = TRUE;
+}
+
+static unsigned short RngNext(RngCxt* rng)
+{
+	const unsigned short t = (unsigned short)(rng->StateD ^ (rng->StateD << 5));
+	rng->StateD = rng->StateC;
+	rng->StateC = rng->StateB;
+	rng->StateB = rng->StateA;
+	rng->StateA = (unsigned short)(t ^ rng->StateA ^ ((t ^ (rng->StateA >> 5)) >> 4));
+	return rng->StateA;
+}
+
+const BexGroup BexGroupInfo[8] =
+{
+	{ 16, 21, 0 },
+	{ 18, 22, 1 },
+	{ 20, 22, 2 },
+	{ 21, 22, 3 },
+	{ 21, 22, 3 },
+	{ 23, 24, 4 },
+	{ 23, 24, 4 },
+	{ 24, 24, 5 }
+};
+
+const char BexEncodedValueCounts[5][6] =
+{
+	{0, 0, 0, 4, 4, 2},
+	{0, 0, 0, 0, 0, 0},
+	{0, 0, 0, 2, 2, 1},
+	{0, 0, 0, 2, 2, 2},
+	{1, 1, 1, 0, 0, 0}
+};
+
+// [mode][bands][valueIndex]
+const char BexDataLengths[5][6][4] =
+{
+	{
+		{0, 0, 0, 0},
+		{0, 0, 0, 0},
+		{0, 0, 0, 0},
+		{5, 4, 3, 3},
+		{4, 4, 3, 4},
+		{4, 5, 0, 0}
