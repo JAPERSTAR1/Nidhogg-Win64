@@ -1479,6 +1479,9 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
         case 140:
         case 141:
         case 143:
+        case 373:
+        case 374:
+        case 375:
             return 0;
         case 142: {  // pthread_create(&thr, &attr, startRoutine, arg)
             struct GuestThreadArgs {
@@ -1508,7 +1511,8 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             else if (us) Sleep(1);
             return 0;
         }
-        case 145: {  // pthread_mutex_init(mtx, attr)
+        case 145:    // pthread_mutex_init(mtx, attr)
+        case 352: {  // scePthreadMutexInit(mtx, attr, name)
             if (Readable(ptr(0), 8)) {
                 auto* cs = new CRITICAL_SECTION{};
                 InitializeCriticalSection(cs);
