@@ -142,3 +142,69 @@ static void InitMdctTables(int frameSizePower)
 		GenerateTrigTables(i);
 		GenerateShuffleTable(i);
 	}
+	GenerateMdctWindow(frameSizePower);
+	GenerateImdctWindow(frameSizePower);
+}
+
+static void GenerateTrigTables(int sizeBits)
+{
+	const int size = 1 << sizeBits;
+	double* sinTab = SinTables[sizeBits];
+	double* cosTab = CosTables[sizeBits];
+
+	for (int i = 0; i < size; i++)
+	{
+		const double value = M_PI * (4 * i + 1) / (4 * size);
+		sinTab[i] = sin(value);
+		cosTab[i] = cos(value);
+	}
+}
+
+static void GenerateShuffleTable(int sizeBits)
+{
+	const int size = 1 << sizeBits;
+	int* table = ShuffleTables[sizeBits];
+
+	for (int i = 0; i < size; i++)
+	{
+		table[i] = BitReverse32(i ^ (i / 2), sizeBits);
+	}
+}
+
+static void GenerateMdctWindow(int frameSizePower)
+{
+	const int frameSize = 1 << frameSizePower;
+	double* mdct = MdctWindow[frameSizePower - 6];
+
+	for (int i = 0; i < frameSize; i++)
+	{
+		mdct[i] = (sin(((i + 0.5) / frameSize - 0.5) * M_PI) + 1.0) * 0.5;
+	}
+}
+
+static void GenerateImdctWindow(int frameSizePower)
+{
+	const int frameSize = 1 << frameSizePower;
+	double* imdct = ImdctWindow[frameSizePower - 6];
+	double* mdct = MdctWindow[frameSizePower - 6];
+
+	for (int i = 0; i < frameSize; i++)
+	{
+		imdct[i] = mdct[i] / (mdct[frameSize - 1 - i] * mdct[frameSize - 1 - i] + mdct[i] * mdct[i]);
+	}
+}
+
+static int BlockTypeToChannelCount(BlockType blockType)
+{
+	switch (blockType)
+	{
+	case Mono:
+		return 1;
+	case Stereo:
+		return 2;
+	case LFE:
+		return 1;
+	default:
+		return 0;
+	}
+}
