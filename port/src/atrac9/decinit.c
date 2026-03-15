@@ -46,3 +46,99 @@ static At9Status InitConfigData(ConfigData* config, unsigned char* configData)
 
 	config->ChannelConfig = ChannelConfigs[config->ChannelConfigIndex];
 	config->ChannelCount = config->ChannelConfig.ChannelCount;
+	config->SampleRate = SampleRates[config->SampleRateIndex];
+	config->HighSampleRate = config->SampleRateIndex > 7;
+	config->FrameSamplesPower = SamplingRateIndexToFrameSamplesPower[config->SampleRateIndex];
+	config->FrameSamples = 1 << config->FrameSamplesPower;
+	config->SuperframeSamples = config->FrameSamples * config->FramesPerSuperframe;
+
+	return ERR_SUCCESS;
+}
+
+static At9Status ReadConfigData(ConfigData* config)
+{
+	BitReaderCxt br;
+	InitBitReaderCxt(&br, &config->ConfigData);
+
+	const int header = ReadInt(&br, 8);
+	config->SampleRateIndex = ReadInt(&br, 4);
+	config->ChannelConfigIndex = ReadInt(&br, 3);
+	const int validationBit = ReadInt(&br, 1);
+	config->FrameBytes = ReadInt(&br, 11) + 1;
+	config->SuperframeIndex = ReadInt(&br, 2);
+
+	if (header != 0xFE || validationBit != 0)
+	{
+		return ERR_BAD_CONFIG_DATA;
+	}
+
+	return ERR_SUCCESS;
+}
+
+static At9Status InitFrame(Atrac9Handle* handle)
+{
+	const int blockCount = handle->Config.ChannelConfig.BlockCount;
+	handle->Frame.Config = &handle->Config;
+	int channelNum = 0;
+
+	for (int i = 0; i < blockCount; i++)
+	{
+		ERROR_CHECK(InitBlock(&handle->Frame.Blocks[i], &handle->Frame, i));
+
+		for (int c = 0; c < handle->Frame.Blocks[i].ChannelCount; c++)
+		{
+			handle->Frame.Channels[channelNum++] = &handle->Frame.Blocks[i].Channels[c];
+		}
+	}
+
+	return ERR_SUCCESS;
+}
+
+static At9Status InitBlock(Block* block, Frame* parentFrame, int blockIndex)
+{
+	block->Frame = parentFrame;
+	block->BlockIndex = blockIndex;
+	block->Config = parentFrame->Config;
+	block->BlockType = block->Config->ChannelConfig.Types[blockIndex];
+	block->ChannelCount = BlockTypeToChannelCount(block->BlockType);
+
+	for (int i = 0; i < block->ChannelCount; i++)
+	{
+		ERROR_CHECK(InitChannel(&block->Channels[i], block, i));
+	}
+
+	return ERR_SUCCESS;
+}
+
+static At9Status InitChannel(Channel* channel, Block* parentBlock, int channelIndex)
+{
+	channel->Block = parentBlock;
+	channel->Frame = parentBlock->Frame;
+	channel->Config = parentBlock->Config;
+	channel->ChannelIndex = channelIndex;
+	channel->Mdct.Bits = parentBlock->Config->FrameSamplesPower;
+	return ERR_SUCCESS;
+}
+
+static void InitHuffmanCodebooks()
+{
+	InitHuffmanSet(HuffmanScaleFactorsUnsigned, sizeof(HuffmanScaleFactorsUnsigned) / sizeof(HuffmanCodebook));
+	InitHuffmanSet(HuffmanScaleFactorsSigned, sizeof(HuffmanScaleFactorsSigned) / sizeof(HuffmanCodebook));
+	InitHuffmanSet((HuffmanCodebook*)HuffmanSpectrum, sizeof(HuffmanSpectrum) / sizeof(HuffmanCodebook));
+}
+
+static void InitHuffmanSet(const HuffmanCodebook* codebooks, int count)
+{
+	for (int i = 0; i < count; i++)
+	{
+		InitHuffmanCodebook(&codebooks[i]);
+	}
+}
+
+static void InitMdctTables(int frameSizePower)
+{
+	for (int i = 0; i < 9; i++)
+	{
+		GenerateTrigTables(i);
+		GenerateShuffleTable(i);
+	}
