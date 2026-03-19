@@ -1246,3 +1246,99 @@ static const uint8_t SpectrumB74Bits[128] =
 	3,  4,  5,  5,  5,  5,  6,  6,  6,  6,  6,  6,  7,  7,  7,  7,
 	7,  7,  7,  7,  8,  8,  8,  8,  8,  8,  8,  8,  8,  9,  9,  9,
 	8,  8,  8,  8,  8,  9,  9,  9,  9,  9,  9,  9, 10, 10, 10, 10,
+	10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+	0, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+	10, 10, 10, 10, 10,  9,  9,  9,  9,  9,  9,  9,  8,  8,  8,  8,
+	8,  9,  9,  9,  8,  8,  8,  8,  8,  8,  8,  8,  8,  7,  7,  7,
+	7,  7,  7,  7,  7,  6,  6,  6,  6,  6,  6,  5,  5,  5,  5,  4
+};
+
+static const uint16_t SpectrumB74Codes[128] =
+{
+	0x001, 0x008, 0x01E, 0x018, 0x00C, 0x002, 0x03A, 0x034, 0x02C, 0x01E, 0x016, 0x012,
+	0x072, 0x06E, 0x05E, 0x056, 0x050, 0x038, 0x022, 0x004, 0x0E2, 0x0DA, 0x0BA, 0x0A8,
+	0x076, 0x054, 0x050, 0x002, 0x000, 0x1C0, 0x1B0, 0x156, 0x0A4, 0x0A6, 0x074, 0x052,
+	0x004, 0x1C2, 0x1B2, 0x170, 0x154, 0x0AE, 0x0AC, 0x086, 0x2E6, 0x2E4, 0x10A, 0x108,
+	0x106, 0x104, 0x102, 0x100, 0x03E, 0x03A, 0x03C, 0x038, 0x036, 0x034, 0x032, 0x030,
+	0x01E, 0x01A, 0x01C, 0x018, 0x000, 0x019, 0x01D, 0x01B, 0x01F, 0x031, 0x033, 0x035,
+	0x037, 0x039, 0x03D, 0x03B, 0x03F, 0x101, 0x103, 0x105, 0x107, 0x109, 0x10B, 0x2E5,
+	0x2E7, 0x087, 0x0AD, 0x0AF, 0x155, 0x171, 0x1B3, 0x1C3, 0x005, 0x053, 0x075, 0x0A7,
+	0x0A5, 0x157, 0x1B1, 0x1C1, 0x001, 0x003, 0x051, 0x055, 0x077, 0x0A9, 0x0BB, 0x0DB,
+	0x0E3, 0x005, 0x023, 0x039, 0x051, 0x057, 0x05F, 0x06F, 0x073, 0x013, 0x017, 0x01F,
+	0x02D, 0x035, 0x03B, 0x003, 0x00D, 0x019, 0x01F, 0x009
+};
+
+static uint8_t ScaleFactorsA1Lookup[2];
+static uint8_t ScaleFactorsA2Lookup[8];
+static uint8_t ScaleFactorsA3Lookup[64];
+static uint8_t ScaleFactorsA4Lookup[256];
+static uint8_t ScaleFactorsA5Lookup[256];
+static uint8_t ScaleFactorsA6Lookup[256];
+static uint8_t ScaleFactorsB2Lookup[4];
+static uint8_t ScaleFactorsB3Lookup[64];
+static uint8_t ScaleFactorsB4Lookup[256];
+static uint8_t ScaleFactorsB5Lookup[256];
+static uint8_t SpectrumA21Lookup[8];
+static uint8_t SpectrumA22Lookup[256];
+static uint8_t SpectrumA23Lookup[512];
+static uint8_t SpectrumA24Lookup[1024];
+static uint8_t SpectrumA31Lookup[128];
+static uint8_t SpectrumA32Lookup[128];
+static uint8_t SpectrumA33Lookup[256];
+static uint8_t SpectrumA34Lookup[1024];
+static uint8_t SpectrumA41Lookup[512];
+static uint8_t SpectrumA42Lookup[1024];
+static uint8_t SpectrumA43Lookup[1024];
+static uint8_t SpectrumA44Lookup[1024];
+static uint8_t SpectrumA51Lookup[64];
+static uint8_t SpectrumA52Lookup[64];
+static uint8_t SpectrumA53Lookup[128];
+static uint8_t SpectrumA54Lookup[256];
+static uint8_t SpectrumA61Lookup[128];
+static uint8_t SpectrumA62Lookup[128];
+static uint8_t SpectrumA63Lookup[256];
+static uint8_t SpectrumA64Lookup[512];
+static uint8_t SpectrumA71Lookup[256];
+static uint8_t SpectrumA72Lookup[256];
+static uint8_t SpectrumA73Lookup[512];
+static uint8_t SpectrumA74Lookup[1024];
+static uint8_t SpectrumB22Lookup[1024];
+static uint8_t SpectrumB23Lookup[1024];
+static uint8_t SpectrumB24Lookup[1024];
+static uint8_t SpectrumB32Lookup[512];
+static uint8_t SpectrumB33Lookup[1024];
+static uint8_t SpectrumB34Lookup[1024];
+static uint8_t SpectrumB42Lookup[1024];
+static uint8_t SpectrumB43Lookup[1024];
+static uint8_t SpectrumB44Lookup[1024];
+static uint8_t SpectrumB52Lookup[128];
+static uint8_t SpectrumB53Lookup[256];
+static uint8_t SpectrumB54Lookup[512];
+static uint8_t SpectrumB62Lookup[256];
+static uint8_t SpectrumB63Lookup[512];
+static uint8_t SpectrumB64Lookup[1024];
+static uint8_t SpectrumB72Lookup[512];
+static uint8_t SpectrumB73Lookup[1024];
+static uint8_t SpectrumB74Lookup[1024];
+
+HuffmanCodebook HuffmanScaleFactorsUnsigned[7] = {
+	{0},
+	{ScaleFactorsA1Bits, ScaleFactorsA1Codes, ScaleFactorsA1Lookup, 2, 1, 0, 1, 2, 1},
+	{ScaleFactorsA2Bits, ScaleFactorsA2Codes, ScaleFactorsA2Lookup, 4, 1, 0, 2, 4, 3},
+	{ScaleFactorsA3Bits, ScaleFactorsA3Codes, ScaleFactorsA3Lookup, 8, 1, 0, 3, 8, 6},
+	{ScaleFactorsA4Bits, ScaleFactorsA4Codes, ScaleFactorsA4Lookup, 16, 1, 0, 4, 16, 8},
+	{ScaleFactorsA5Bits, ScaleFactorsA5Codes, ScaleFactorsA5Lookup, 32, 1, 0, 5, 32, 8},
+	{ScaleFactorsA6Bits, ScaleFactorsA6Codes, ScaleFactorsA6Lookup, 64, 1, 0, 6, 64, 8},
+};
+
+HuffmanCodebook HuffmanScaleFactorsSigned[6] = {
+	{0},
+	{0},
+	{ScaleFactorsB2Bits, ScaleFactorsB2Codes, ScaleFactorsB2Lookup, 4, 1, 0, 2, 4, 2},
+	{ScaleFactorsB3Bits, ScaleFactorsB3Codes, ScaleFactorsB3Lookup, 8, 1, 0, 3, 8, 6},
+	{ScaleFactorsB4Bits, ScaleFactorsB4Codes, ScaleFactorsB4Lookup, 16, 1, 0, 4, 16, 8},
+	{ScaleFactorsB5Bits, ScaleFactorsB5Codes, ScaleFactorsB5Lookup, 32, 1, 0, 5, 32, 8},
+};
+
+HuffmanCodebook HuffmanSpectrum[2][8][4] = {
+	{
