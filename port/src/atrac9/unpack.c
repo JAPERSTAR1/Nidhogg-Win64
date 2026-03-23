@@ -142,3 +142,99 @@ static At9Status ReadBandParams(Block* block, BitReaderCxt* br)
 	{
 		block->ExtensionBand = ReadInt(br, 4);
 		block->ExtensionBand += minBandCount;
+
+		if (block->ExtensionBand < block->BandCount || block->ExtensionBand > maxExtensionBand)
+		{
+			return ERR_UNPACK_BAND_PARAMS_INVALID;
+		}
+
+		block->ExtensionUnit = BandToQuantUnitCount[block->ExtensionBand];
+	}
+	else
+	{
+		block->ExtensionBand = block->BandCount;
+		block->ExtensionUnit = block->QuantizationUnitCount;
+	}
+
+	return ERR_SUCCESS;
+}
+
+static At9Status ReadGradientParams(Block* block, BitReaderCxt* br)
+{
+	block->GradientMode = ReadInt(br, 2);
+	if (block->GradientMode > 0)
+	{
+		block->GradientEndUnit = 31;
+		block->GradientEndValue = 31;
+		block->GradientStartUnit = ReadInt(br, 5);
+		block->GradientStartValue = ReadInt(br, 5);
+	}
+	else
+	{
+		block->GradientStartUnit = ReadInt(br, 6);
+		block->GradientEndUnit = ReadInt(br, 6) + 1;
+		block->GradientStartValue = ReadInt(br, 5);
+		block->GradientEndValue = ReadInt(br, 5);
+	}
+	block->GradientBoundary = ReadInt(br, 4);
+
+	if (block->GradientBoundary > block->QuantizationUnitCount)
+	{
+		return ERR_UNPACK_GRAD_BOUNDARY_INVALID;
+	}
+	if (block->GradientStartUnit < 0 || block->GradientStartUnit >= 48)
+	{
+		return ERR_UNPACK_GRAD_START_UNIT_OOB;
+	}
+	if (block->GradientEndUnit < 0 || block->GradientEndUnit >= 48)
+	{
+		return ERR_UNPACK_GRAD_END_UNIT_OOB;
+	}
+	if (block->GradientStartUnit > block->GradientEndUnit)
+	{
+		return ERR_UNPACK_GRAD_END_UNIT_INVALID;
+	}
+	if (block->GradientStartValue < 0 || block->GradientStartValue >= 32)
+	{
+		return ERR_UNPACK_GRAD_START_VALUE_OOB;
+	}
+	if (block->GradientEndValue < 0 || block->GradientEndValue >= 32)
+	{
+		return ERR_UNPACK_GRAD_END_VALUE_OOB;
+	}
+
+	return ERR_SUCCESS;
+}
+
+static At9Status ReadStereoParams(Block* block, BitReaderCxt* br)
+{
+	if (block->BlockType != Stereo) return ERR_SUCCESS;
+
+	block->PrimaryChannelIndex = ReadInt(br, 1);
+	block->HasJointStereoSigns = ReadInt(br, 1);
+	if (block->HasJointStereoSigns)
+	{
+		for (int i = block->StereoQuantizationUnit; i < block->QuantizationUnitCount; i++)
+		{
+			block->JointStereoSigns[i] = ReadInt(br, 1);
+		}
+	}
+	else
+	{
+		memset(block->JointStereoSigns, 0, sizeof(block->JointStereoSigns));
+	}
+
+	return ERR_SUCCESS;
+}
+
+static void BexReadHeader(Channel* channel, BitReaderCxt* br, int bexBand)
+{
+	const int bexMode = ReadInt(br, 2);
+	channel->BexMode = bexBand > 2 ? bexMode : 4;
+	channel->BexValueCount = BexEncodedValueCounts[channel->BexMode][bexBand];
+}
+
+static void BexReadData(Channel* channel, BitReaderCxt* br, int bexBand)
+{
+	for (int i = 0; i < channel->BexValueCount; i++)
+	{
