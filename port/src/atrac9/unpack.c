@@ -334,3 +334,99 @@ static void CalculateSpectrumCodebookIndex(Channel* channel)
 		const int minSf = Min(prevSf, nextSf);
 		if (sf[i] - minSf >= 3 || sf[i] - prevSf + sf[i] - nextSf >= 3)
 		{
+			channel->CodebookSet[i] = 1;
+		}
+	}
+
+	for (int i = 12; i < quantUnits; i++)
+	{
+		if (channel->CodebookSet[i] == 0)
+		{
+			const int minSf = Min(sf[i - 1], sf[i + 1]);
+			if (sf[i] - minSf >= 2 && sf[i] >= avg - (QuantUnitToCoeffCount[i] == 16 ? 1 : 0))
+			{
+				channel->CodebookSet[i] = 1;
+			}
+		}
+	}
+
+	sf[quantUnits] = originalScaleTmp;
+}
+
+static At9Status ReadSpectra(Channel* channel, BitReaderCxt* br)
+{
+	int values[16];
+	memset(channel->QuantizedSpectra, 0, sizeof(channel->QuantizedSpectra));
+	const int maxHuffPrecision = MaxHuffPrecision[channel->Config->HighSampleRate];
+
+	for (int i = 0; i < channel->CodedQuantUnits; i++)
+	{
+		const int subbandCount = QuantUnitToCoeffCount[i];
+		const int precision = channel->Precisions[i] + 1;
+		if (precision <= maxHuffPrecision)
+		{
+			const HuffmanCodebook* huff = &HuffmanSpectrum[channel->CodebookSet[i]][precision][QuantUnitToCodebookIndex[i]];
+			const int groupCount = subbandCount >> huff->ValueCountPower;
+			for (int j = 0; j < groupCount; j++)
+			{
+				values[j] = ReadHuffmanValue(huff, br, FALSE);
+			}
+
+			DecodeHuffmanValues(channel->QuantizedSpectra, QuantUnitToCoeffIndex[i], subbandCount, huff, values);
+		}
+		else
+		{
+			const int subbandIndex = QuantUnitToCoeffIndex[i];
+			for (int j = subbandIndex; j < QuantUnitToCoeffIndex[i + 1]; j++)
+			{
+				channel->QuantizedSpectra[j] = ReadSignedInt(br, precision);
+			}
+		}
+	}
+
+	return ERR_SUCCESS;
+}
+
+static At9Status ReadSpectraFine(Channel* channel, BitReaderCxt* br)
+{
+	memset(channel->QuantizedSpectraFine, 0, sizeof(channel->QuantizedSpectraFine));
+
+	for (int i = 0; i < channel->CodedQuantUnits; i++)
+	{
+		if (channel->PrecisionsFine[i] > 0)
+		{
+			const int overflowBits = channel->PrecisionsFine[i] + 1;
+			const int startSubband = QuantUnitToCoeffIndex[i];
+			const int endSubband = QuantUnitToCoeffIndex[i + 1];
+
+			for (int j = startSubband; j < endSubband; j++)
+			{
+				channel->QuantizedSpectraFine[j] = ReadSignedInt(br, overflowBits);
+			}
+		}
+	}
+	return ERR_SUCCESS;
+}
+
+static At9Status UnpackLfeBlock(Block* block, BitReaderCxt* br)
+{
+	Channel* channel = &block->Channels[0];
+	block->QuantizationUnitCount = 2;
+
+	DecodeLfeScaleFactors(channel, br);
+	CalculateLfePrecision(channel);
+	channel->CodedQuantUnits = block->QuantizationUnitCount;
+	ReadLfeSpectra(channel, br);
+
+	return ERR_SUCCESS;
+}
+
+static void DecodeLfeScaleFactors(Channel* channel, BitReaderCxt* br)
+{
+	memset(channel->ScaleFactors, 0, sizeof(channel->ScaleFactors));
+	for (int i = 0; i < channel->Block->QuantizationUnitCount; i++)
+	{
+		channel->ScaleFactors[i] = ReadInt(br, 5);
+	}
+}
+
