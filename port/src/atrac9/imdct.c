@@ -46,3 +46,37 @@ static void Dct4(Mdct* mdct, double* input, double* output)
 		dctTemp[i2 + 1] = a * sin - b * cos;
 	}
 	int stageCount = MdctBits - 1;
+
+	for (int stage = 0; stage < stageCount; stage++)
+	{
+		int blockCount = 1 << stage;
+		int blockSizeBits = stageCount - stage;
+		int blockHalfSizeBits = blockSizeBits - 1;
+		int blockSize = 1 << blockSizeBits;
+		int blockHalfSize = 1 << blockHalfSizeBits;
+		sinTable = SinTables[blockHalfSizeBits];
+		cosTable = CosTables[blockHalfSizeBits];
+
+		for (int block = 0; block < blockCount; block++)
+		{
+			for (int i = 0; i < blockHalfSize; i++)
+			{
+				int frontPos = (block * blockSize + i) * 2;
+				int backPos = frontPos + blockSize;
+				double a = dctTemp[frontPos] - dctTemp[backPos];
+				double b = dctTemp[frontPos + 1] - dctTemp[backPos + 1];
+				double sin = sinTable[i];
+				double cos = cosTable[i];
+				dctTemp[frontPos] += dctTemp[backPos];
+				dctTemp[frontPos + 1] += dctTemp[backPos + 1];
+				dctTemp[backPos] = a * cos + b * sin;
+				dctTemp[backPos + 1] = a * sin - b * cos;
+			}
+		}
+	}
+
+	for (int i = 0; i < MdctSize; i++)
+	{
+		output[i] = dctTemp[shuffleTable[i]];
+	}
+}
