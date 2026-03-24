@@ -142,3 +142,10 @@ static void ReadVlcDeltaOffsetWithBaseline(Channel* channel, BitReaderCxt* br, c
 	for (int i = 0; i < unitCount; i++)
 	{
 		sf[i] += baseValue + baseline[i];
+	}
+
+	for (int i = unitCount; i < channel->Block->ExtensionUnit; i++)
+	{
+		sf[i] = ReadInt(br, 5);
+	}
+}
