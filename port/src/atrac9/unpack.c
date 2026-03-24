@@ -430,3 +430,29 @@ static void DecodeLfeScaleFactors(Channel* channel, BitReaderCxt* br)
 	}
 }
 
+static void CalculateLfePrecision(Channel* channel)
+{
+	Block* block = channel->Block;
+	const int precision = block->ReuseBandParams ? 8 : 4;
+	for (int i = 0; i < block->QuantizationUnitCount; i++)
+	{
+		channel->Precisions[i] = precision;
+		channel->PrecisionsFine[i] = 0;
+	}
+}
+
+static void ReadLfeSpectra(Channel* channel, BitReaderCxt* br)
+{
+	memset(channel->QuantizedSpectra, 0, sizeof(channel->QuantizedSpectra));
+
+	for (int i = 0; i < channel->CodedQuantUnits; i++)
+	{
+		if (channel->Precisions[i] <= 0) continue;
+
+		const int precision = channel->Precisions[i] + 1;
+		for (int j = QuantUnitToCoeffIndex[i]; j < QuantUnitToCoeffIndex[i + 1]; j++)
+		{
+			channel->QuantizedSpectra[j] = ReadSignedInt(br, precision);
+		}
+	}
+}
