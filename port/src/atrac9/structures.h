@@ -94,3 +94,68 @@ typedef struct {
 } Channel;
 
 struct Block {
+	Frame* Frame;
+	ConfigData* Config;
+	enum BlockType BlockType;
+	int BlockIndex;
+	Channel Channels[MAX_BLOCK_CHANNEL_COUNT];
+	int ChannelCount;
+	int FirstInSuperframe;
+	int ReuseBandParams;
+
+	int BandCount;
+	int StereoBand;
+	int ExtensionBand;
+	int QuantizationUnitCount;
+	int StereoQuantizationUnit;
+	int ExtensionUnit;
+	int QuantizationUnitsPrev;
+
+	int Gradient[31];
+	int GradientMode;
+	int GradientStartUnit;
+	int GradientStartValue;
+	int GradientEndUnit;
+	int GradientEndValue;
+	int GradientBoundary;
+
+	int PrimaryChannelIndex;
+	int HasJointStereoSigns;
+	int JointStereoSigns[MAX_QUANT_UNITS];
+
+	int BandExtensionEnabled;
+	int HasExtensionData;
+	int BexDataLength;
+	int BexMode;
+};
+
+struct Frame {
+	int IndexInSuperframe;
+	ConfigData* Config;
+	Channel* Channels[MAX_CHANNEL_COUNT];
+	Block Blocks[MAX_BLOCK_COUNT];
+};
+
+typedef struct {
+	int Initialized;
+	int Wlength;
+	ConfigData Config;
+	Frame Frame;
+} Atrac9Handle;
+
+typedef struct {
+	char GroupBUnit;
+	char GroupCUnit;
+	char BandCount;
+} BexGroup;
+
+typedef struct {
+	int Channels;
+	int ChannelConfigIndex;
+	int SamplingRate;
+	int SuperframeSize;
+	int FramesInSuperframe;
+	int FrameSamples;
+	int Wlength;
+	unsigned char ConfigData[CONFIG_DATA_SIZE];
+} CodecInfo;
