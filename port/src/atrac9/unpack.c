@@ -238,3 +238,99 @@ static void BexReadData(Channel* channel, BitReaderCxt* br, int bexBand)
 {
 	for (int i = 0; i < channel->BexValueCount; i++)
 	{
+		const int dataLength = BexDataLengths[channel->BexMode][bexBand][i];
+		channel->BexValues[i] = ReadInt(br, dataLength);
+	}
+}
+
+static At9Status ReadExtensionParams(Block* block, BitReaderCxt* br)
+{
+	int bexBand = 0;
+	if (block->BandExtensionEnabled)
+	{
+		bexBand = BexGroupInfo[block->QuantizationUnitCount - 13].BandCount;
+		if (block->BlockType == Stereo)
+		{
+			BexReadHeader(&block->Channels[1], br, bexBand);
+		}
+		else
+		{
+			br->Position += 1;
+		}
+	}
+	block->HasExtensionData = ReadInt(br, 1);
+
+	if (!block->HasExtensionData) return ERR_SUCCESS;
+	if (!block->BandExtensionEnabled)
+	{
+		block->BexMode = ReadInt(br, 2);
+		block->BexDataLength = ReadInt(br, 5);
+		br->Position += block->BexDataLength;
+		return ERR_SUCCESS;
+	}
+
+	BexReadHeader(&block->Channels[0], br, bexBand);
+
+	block->BexDataLength = ReadInt(br, 5);
+	if (block->BexDataLength == 0) return ERR_SUCCESS;
+	const int bexDataEnd = br->Position + block->BexDataLength;
+
+	BexReadData(&block->Channels[0], br, bexBand);
+
+	if (block->BlockType == Stereo)
+	{
+		BexReadData(&block->Channels[1], br, bexBand);
+	}
+
+	// Make sure we didn't read too many bits
+	if (br->Position > bexDataEnd)
+	{
+		return ERR_UNPACK_EXTENSION_DATA_INVALID;
+	}
+
+	return ERR_SUCCESS;
+}
+
+static void UpdateCodedUnits(Channel* channel)
+{
+	if (channel->Block->PrimaryChannelIndex == channel->ChannelIndex)
+	{
+		channel->CodedQuantUnits = channel->Block->QuantizationUnitCount;
+	}
+	else
+	{
+		channel->CodedQuantUnits = channel->Block->StereoQuantizationUnit;
+	}
+}
+
+static void CalculateSpectrumCodebookIndex(Channel* channel)
+{
+	memset(channel->CodebookSet, 0, sizeof(channel->CodebookSet));
+	const int quantUnits = channel->CodedQuantUnits;
+	int* sf = channel->ScaleFactors;
+
+	if (quantUnits <= 1) return;
+	if (channel->Config->HighSampleRate) return;
+
+	// Temporarily setting this value allows for simpler code by
+	// making the last value a non-special case.
+	const int originalScaleTmp = sf[quantUnits];
+	sf[quantUnits] = sf[quantUnits - 1];
+
+	int avg = 0;
+	if (quantUnits > 12)
+	{
+		for (int i = 0; i < 12; i++)
+		{
+			avg += sf[i];
+		}
+		avg = (avg + 6) / 12;
+	}
+
+	for (int i = 8; i < quantUnits; i++)
+	{
+		const int prevSf = sf[i - 1];
+		const int nextSf = sf[i + 1];
+		const int minSf = Min(prevSf, nextSf);
+		if (sf[i] - minSf >= 3 || sf[i] - prevSf + sf[i] - nextSf >= 3)
+		{
