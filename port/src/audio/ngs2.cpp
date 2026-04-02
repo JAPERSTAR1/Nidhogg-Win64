@@ -286,3 +286,99 @@ bool DecodeNextChunk(Voice& v) {
                 ++v.totalDecodedSamples;
             }
             if (endFlag) b.curByteOff = b.dataSize;
+            if (!v.pcmL.empty()) return true;
+        }
+    }
+    return false;
+}
+
+// ------------------------------------------------------------ AudioOut waveOut --
+
+struct WavePort {
+    static constexpr int kNumBufs = 6;
+    bool inUse = false;
+    uint32_t grainSamples = 512;
+    uint32_t channels = 8;
+    bool isFloat = true;
+    float volL = 1.0f;
+    float volR = 1.0f;
+
+    HWAVEOUT hwo = nullptr;
+    HANDLE ev = nullptr;
+    WAVEHDR hdrs[kNumBufs]{};
+    std::vector<int16_t> bufs[kNumBufs];
+    int nextBuf = 0;
+};
+
+std::mutex g_audioOutMtx;
+WavePort g_ports[16];
+
+}  // namespace
+
+int32_t Ngs2SystemCreate(const void* option, const void* /*allocator*/, uint64_t* outHandle) {
+    std::scoped_lock lk(g_mtx);
+    System sys;
+    sys.handle = g_nextHandle++;
+    if (HostOk(option, 0x28)) {
+        const auto* u32 = reinterpret_cast<const uint32_t*>(
+            static_cast<const uint8_t*>(option) + 24);
+        if (u32[2] >= 64 && u32[2] <= 2048) sys.grainSamples = u32[2];
+        if (u32[3] >= 8000 && u32[3] <= 192000) sys.sampleRate = u32[3];
+    }
+    if (HostOk(outHandle, 8)) *outHandle = sys.handle;
+    g_systems.emplace(sys.handle, std::move(sys));
+    return 0;
+}
+
+int32_t Ngs2RackCreate(uint64_t systemHandle, uint32_t rackId, const void* option,
+                       const void* /*allocator*/, uint64_t* outHandle) {
+    std::scoped_lock lk(g_mtx);
+    auto sysIt = g_systems.find(systemHandle);
+    if (sysIt == g_systems.end()) return -1;
+
+    uint32_t maxVoices = 32;
+    if (HostOk(option, 0x28)) {
+        const uint32_t v = *reinterpret_cast<const uint32_t*>(
+            static_cast<const uint8_t*>(option) + 32);
+        if (v > 0 && v <= 1024) maxVoices = v;
+    }
+
+    Rack rack;
+    rack.handle = g_nextHandle++;
+    rack.rackId = rackId;
+    rack.voiceHandles.reserve(maxVoices);
+    for (uint32_t i = 0; i < maxVoices; ++i) {
+        auto v = std::make_unique<Voice>();
+        v->handle = g_nextHandle++;
+        v->rackId = rackId;
+        rack.voiceHandles.push_back(v->handle);
+        g_voices.emplace(v->handle, std::move(v));
+    }
+
+    if (HostOk(outHandle, 8)) *outHandle = rack.handle;
+    sysIt->second.rackHandles.push_back(rack.handle);
+    g_racks.emplace(rack.handle, std::move(rack));
+    return 0;
+}
+
+int32_t Ngs2RackGetVoiceHandle(uint64_t rackHandle, uint32_t voiceIndex, uint64_t* outHandle) {
+    std::scoped_lock lk(g_mtx);
+    auto it = g_racks.find(rackHandle);
+    if (it == g_racks.end() || voiceIndex >= it->second.voiceHandles.size()) return -1;
+    if (HostOk(outHandle, 8)) *outHandle = it->second.voiceHandles[voiceIndex];
+    return 0;
+}
+
+int32_t Ngs2GetWaveformFrameInfo(const void* format, uint32_t* outFrameSize,
+                                 uint32_t* outNumFrameSamples, uint32_t* outUnitsPerFrame,
+                                 uint32_t* outNumDelaySamples) {
+    if (!HostOk(format, sizeof(WaveformFormat))) return -1;
+    const auto* fmt = static_cast<const WaveformFormat*>(format);
+
+    uint32_t frameSize = 4;
+    uint32_t frameSamples = 1;
+    uint32_t unitsPerFrame = 1;
+    uint32_t delaySamples = 0;
+
+    if (fmt->waveformType == 0x40) {
+        void* h = Atrac9GetHandle();
