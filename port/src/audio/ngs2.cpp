@@ -574,3 +574,147 @@ int32_t Ngs2VoiceGetState(uint64_t voiceHandle, void* outState, size_t stateSize
         *reinterpret_cast<float*>(b + 0x04) = v.playing ? 1.0f : 0.0f;
         *reinterpret_cast<float*>(b + 0x08) = v.playing ? 0.5f : 0.0f;
         *reinterpret_cast<uint64_t*>(b + 0x10) = v.totalDecodedSamples;
+        *reinterpret_cast<uint64_t*>(b + 0x18) = v.totalDecodedBytes;
+        *reinterpret_cast<uint64_t*>(b + 0x20) = v.currentUserData;
+        *reinterpret_cast<const void**>(b + 0x28) = v.currentWavePtr;
+    }
+    return 0;
+}
+
+int32_t Ngs2SystemRender(uint64_t systemHandle, const void* bufferInfos, uint32_t numBuffers) {
+    std::scoped_lock lk(g_mtx);
+    auto sysIt = g_systems.find(systemHandle);
+    const uint32_t slotCount = (numBuffers > 0 && numBuffers <= 16) ? numBuffers : 14;
+    if (sysIt == g_systems.end() ||
+        !HostOk(bufferInfos, slotCount * sizeof(RenderBufferInfo)))
+        return -1;
+
+    const System& sys = sysIt->second;
+    const uint32_t grain = sys.grainSamples;
+    const double outRate = static_cast<double>(sys.sampleRate ? sys.sampleRate : 48000u);
+
+    std::vector<float> mixL(grain, 0.0f);
+    std::vector<float> mixR(grain, 0.0f);
+    uint32_t activeCount = 0;
+
+    for (uint64_t rh : sys.rackHandles) {
+        auto rIt = g_racks.find(rh);
+        if (rIt == g_racks.end() || rIt->second.rackId != 0x1000) continue;
+
+        for (uint64_t vh : rIt->second.voiceHandles) {
+            auto vIt = g_voices.find(vh);
+            if (vIt == g_voices.end()) continue;
+            Voice& v = *vIt->second;
+            if (!v.playing || v.paused) continue;
+
+            const uint32_t srcRate = v.at9Valid && v.at9Info.samplingRate > 0
+                                         ? static_cast<uint32_t>(v.at9Info.samplingRate)
+                                         : (v.fmt.sampleRate ? v.fmt.sampleRate : 48000u);
+            const double step = (static_cast<double>(srcRate) / outRate) * v.pitchRatio;
+
+            bool alive = true;
+            for (uint32_t s = 0; s < grain; ++s) {
+                while (static_cast<size_t>(v.readPos) + 1 >= v.pcmL.size()) {
+                    const size_t drop = static_cast<size_t>(v.readPos);
+                    if (drop > 0 && drop <= v.pcmL.size()) {
+                        v.pcmL.erase(v.pcmL.begin(), v.pcmL.begin() + static_cast<ptrdiff_t>(drop));
+                        v.pcmR.erase(v.pcmR.begin(), v.pcmR.begin() + static_cast<ptrdiff_t>(drop));
+                        v.readPos -= static_cast<double>(drop);
+                    }
+                    if (!DecodeNextChunk(v)) {
+                        if (static_cast<size_t>(v.readPos) >= v.pcmL.size()) {
+                            alive = false;
+                        }
+                        break;
+                    }
+                }
+                if (!alive || static_cast<size_t>(v.readPos) >= v.pcmL.size()) {
+                    v.playing = false;
+                    v.pcmL.clear();
+                    v.pcmR.clear();
+                    v.readPos = 0.0;
+                    break;
+                }
+
+                const size_t idx0 = static_cast<size_t>(v.readPos);
+                const size_t idx1 = std::min(idx0 + 1, v.pcmL.size() - 1);
+                const float frac = static_cast<float>(v.readPos - static_cast<double>(idx0));
+                const float inL = v.pcmL[idx0] + (v.pcmL[idx1] - v.pcmL[idx0]) * frac;
+                const float inR = v.pcmR[idx0] + (v.pcmR[idx1] - v.pcmR[idx0]) * frac;
+
+                float outL, outR;
+                if (v.isStereoMat) {
+                    outL = (inL * v.matLL + inR * v.matRL) * v.portVol;
+                    outR = (inL * v.matLR + inR * v.matRR) * v.portVol;
+                } else {
+                    outL = inL * v.matLL * v.portVol;
+                    outR = inL * v.matLR * v.portVol;
+                }
+                mixL[s] += outL;
+                mixR[s] += outR;
+                v.readPos += step;
+            }
+            if (v.playing) ++activeCount;
+        }
+    }
+
+    g_activeVoices.store(activeCount, std::memory_order_relaxed);
+    g_mixedFrames.fetch_add(grain, std::memory_order_relaxed);
+
+    float peak = 0.0f;
+    for (uint32_t s = 0; s < grain; ++s) {
+        mixL[s] = std::clamp(mixL[s], -1.0f, 1.0f);
+        mixR[s] = std::clamp(mixR[s], -1.0f, 1.0f);
+        peak = std::max(peak, std::max(std::fabs(mixL[s]), std::fabs(mixR[s])));
+    }
+    if (peak > 0.0f) g_peakAmp.store(peak, std::memory_order_relaxed);
+
+    const auto* infos = static_cast<const RenderBufferInfo*>(bufferInfos);
+    bool wroteMaster = false;
+    for (uint32_t b = 0; b < slotCount; ++b) {
+        const RenderBufferInfo& bi = infos[b];
+        if (!bi.buffer || !bi.numChannels) continue;
+        const bool isI16 = (bi.waveformType == 0x12 || bi.waveformType == 0x13);
+        const size_t elemBytes = isI16 ? 2 : 4;
+        const size_t need = elemBytes * bi.numChannels * grain;
+        if (bi.bufferSize < need || !HostOk(bi.buffer, need)) continue;
+
+        std::memset(bi.buffer, 0, need);
+        if (wroteMaster) continue;
+        wroteMaster = true;
+
+        if (isI16) {
+            auto* dst = static_cast<int16_t*>(bi.buffer);
+            for (uint32_t s = 0; s < grain; ++s) {
+                dst[s * bi.numChannels + 0] = static_cast<int16_t>(mixL[s] * 32767.0f);
+                if (bi.numChannels > 1)
+                    dst[s * bi.numChannels + 1] = static_cast<int16_t>(mixR[s] * 32767.0f);
+            }
+        } else {
+            auto* dst = static_cast<float*>(bi.buffer);
+            for (uint32_t s = 0; s < grain; ++s) {
+                dst[s * bi.numChannels + 0] = mixL[s];
+                if (bi.numChannels > 1)
+                    dst[s * bi.numChannels + 1] = mixR[s];
+            }
+        }
+    }
+    return 0;
+}
+
+int32_t Ngs2Destroy(uint64_t /*handle*/) { return 0; }
+
+// ------------------------------------------------------------ AudioOut --
+
+int32_t AudioOutOpen(int32_t /*userId*/, int32_t /*type*/, int32_t /*index*/, uint32_t len,
+                     uint32_t freq, uint32_t param) {
+    std::scoped_lock lk(g_audioOutMtx);
+    int slot = -1;
+    for (int i = 1; i < 16; ++i) {
+        if (!g_ports[i].inUse) { slot = i; break; }
+    }
+    if (slot < 0) return -1;
+
+    WavePort& p = g_ports[slot];
+    p.inUse = true;
+    p.grainSamples = (len >= 64 && len <= 4096) ? len : 512;
