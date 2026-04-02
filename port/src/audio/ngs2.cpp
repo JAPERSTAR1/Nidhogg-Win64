@@ -190,3 +190,99 @@ bool DecodeNextChunk(Voice& v) {
                 v.blocks.pop_front();
                 continue;
             }
+        }
+
+        const uint8_t* src = b.base + b.dataOffset + b.curByteOff;
+        const uint32_t avail = b.dataSize - b.curByteOff;
+
+        if (v.fmt.waveformType == 0x40) {  // ATRAC9
+            if (!v.at9Valid || v.at9Info.superframeSize <= 0) {
+                v.blocks.clear();
+                return false;
+            }
+            const uint32_t sfBytes = static_cast<uint32_t>(v.at9Info.superframeSize);
+            if (avail < sfBytes || !HostOk(src, sfBytes)) {
+                b.curByteOff = b.dataSize;
+                continue;
+            }
+            const int ch = std::max(1, v.at9Info.channels);
+            const int fSamples = v.at9Info.frameSamples;
+            const int nFrames = v.at9Info.framesInSuperframe;
+            std::vector<int16_t> temp(static_cast<size_t>(fSamples * nFrames * ch));
+
+            int subOff = 0;
+            for (int f = 0; f < nFrames; ++f) {
+                if (subOff >= static_cast<int>(sfBytes)) break;
+                int used = 0;
+                if (Atrac9Decode(v.at9, src + subOff,
+                                 temp.data() + static_cast<size_t>(f * fSamples * ch), &used) != 0)
+                    break;
+                subOff += used;
+            }
+
+            b.curByteOff += sfBytes;
+            v.totalDecodedBytes += sfBytes;
+            v.currentWavePtr = b.base + b.dataOffset + b.curByteOff;
+
+            const int totalFrames = fSamples * nFrames;
+            for (int i = 0; i < totalFrames; ++i) {
+                if (b.skipRemaining > 0) {
+                    --b.skipRemaining;
+                    continue;
+                }
+                if (b.numSamples > 0 && b.samplesEmitted >= b.numSamples) break;
+                const float l = temp[static_cast<size_t>(i * ch)] / 32768.0f;
+                const float r = ch > 1 ? (temp[static_cast<size_t>(i * ch + 1)] / 32768.0f) : l;
+                v.pcmL.push_back(l);
+                v.pcmR.push_back(r);
+                ++b.samplesEmitted;
+                ++v.totalDecodedSamples;
+            }
+            if (!v.pcmL.empty()) return true;
+        } else if (v.fmt.waveformType == 0x12) {  // PCM16LE
+            const uint32_t ch = std::max(1u, v.fmt.numChannels);
+            const uint32_t frameBytes = 2u * ch;
+            const uint32_t framesToRead = std::min(avail / frameBytes, 256u);
+            if (!framesToRead || !HostOk(src, framesToRead * frameBytes)) {
+                b.curByteOff = b.dataSize;
+                continue;
+            }
+            const auto* pcm = reinterpret_cast<const int16_t*>(src);
+            for (uint32_t i = 0; i < framesToRead; ++i) {
+                if (b.skipRemaining > 0) { --b.skipRemaining; continue; }
+                const float l = pcm[i * ch] / 32768.0f;
+                const float r = ch > 1 ? (pcm[i * ch + 1] / 32768.0f) : l;
+                v.pcmL.push_back(l);
+                v.pcmR.push_back(r);
+                ++b.samplesEmitted;
+                ++v.totalDecodedSamples;
+            }
+            b.curByteOff += framesToRead * frameBytes;
+            v.totalDecodedBytes += framesToRead * frameBytes;
+            v.currentWavePtr = b.base + b.dataOffset + b.curByteOff;
+            if (!v.pcmL.empty()) return true;
+        } else {  // Sony 16-byte VAG ADPCM
+            const uint32_t ch = std::max(1u, v.fmt.numChannels);
+            const uint32_t blockBytes = 16u * ch;
+            if (avail < blockBytes || !HostOk(src, blockBytes)) {
+                b.curByteOff = b.dataSize;
+                continue;
+            }
+            float ch0[28]{}, ch1[28]{};
+            DecodeVagBlock(src, v.vagHist1[0], v.vagHist2[0], ch0);
+            if (ch > 1) DecodeVagBlock(src + 16, v.vagHist1[1], v.vagHist2[1], ch1);
+            const bool endFlag = (src[1] & 1u) != 0 && (src[1] & 2u) == 0;
+            b.curByteOff += blockBytes;
+            v.totalDecodedBytes += blockBytes;
+            v.currentWavePtr = b.base + b.dataOffset + b.curByteOff;
+
+            for (int i = 0; i < 28; ++i) {
+                if (b.skipRemaining > 0) { --b.skipRemaining; continue; }
+                const float l = ch0[i];
+                const float r = ch > 1 ? ch1[i] : l;
+                v.pcmL.push_back(l);
+                v.pcmR.push_back(r);
+                ++b.samplesEmitted;
+                ++v.totalDecodedSamples;
+            }
+            if (endFlag) b.curByteOff = b.dataSize;
