@@ -478,3 +478,99 @@ int32_t Ngs2VoiceControl(uint64_t voiceHandle, const void* paramList) {
                     std::memcpy(&v.fmt, cur + 0x08, sizeof(WaveformFormat));
                     v.blocks.clear();
                     v.pcmL.clear();
+                    v.pcmR.clear();
+                    v.readPos = 0.0;
+                    v.vagHist1[0] = v.vagHist1[1] = 0.0;
+                    v.vagHist2[0] = v.vagHist2[1] = 0.0;
+                    v.totalDecodedSamples = 0;
+                    v.totalDecodedBytes = 0;
+                    v.currentWavePtr = nullptr;
+                    v.at9Valid = false;
+                    if (v.fmt.waveformType == 0x40) {
+                        if (!v.at9) v.at9 = Atrac9GetHandle();
+                        uint8_t cfg[4];
+                        std::memcpy(cfg, &v.fmt.configData, 4);
+                        if (v.at9 && Atrac9InitDecoder(v.at9, cfg) == 0) {
+                            Atrac9GetCodecInfo(v.at9, &v.at9Info);
+                            v.at9Valid = true;
+                        }
+                    }
+                }
+                break;
+            }
+            case 0x10000001u: {  // SamplerVoiceWaveformBlocksParam
+                if (hdr->size >= 0x20 && HostOk(cur, 0x20)) {
+                    const auto* data = *reinterpret_cast<const uint8_t* const*>(cur + 0x08);
+                    const uint32_t nBlocks = *reinterpret_cast<const uint32_t*>(cur + 0x14);
+                    const auto* aBlock = *reinterpret_cast<const WaveformBlock* const*>(cur + 0x18);
+                    if (data && aBlock && nBlocks > 0 && nBlocks <= 16 &&
+                        HostOk(aBlock, nBlocks * sizeof(WaveformBlock))) {
+                        for (uint32_t i = 0; i < nBlocks; ++i) {
+                            if (!aBlock[i].dataSize) continue;
+                            QueuedBlock qb;
+                            qb.base = data;
+                            qb.dataOffset = aBlock[i].dataOffset;
+                            qb.dataSize = aBlock[i].dataSize;
+                            qb.numRepeats = aBlock[i].numRepeats;
+                            qb.numSkipSamples = aBlock[i].numSkipSamples;
+                            qb.numSamples = aBlock[i].numSamples;
+                            qb.userData = aBlock[i].userData;
+                            qb.skipRemaining = aBlock[i].numSkipSamples;
+                            if (v.blocks.empty())
+                                v.currentWavePtr = data + qb.dataOffset;
+                            v.blocks.push_back(qb);
+                        }
+                    }
+                }
+                break;
+            }
+            case 0x10000005u: {  // SamplerVoicePitchParam
+                if (hdr->size >= 0x10 && HostOk(cur, 0x10)) {
+                    const float r = *reinterpret_cast<const float*>(cur + 0x08);
+                    if (std::isfinite(r) && r > 0.01f) v.pitchRatio = std::clamp(r, 0.05f, 8.0f);
+                }
+                break;
+            }
+            default:
+                break;
+        }
+        if (hdr->next == 0) break;
+        cur += hdr->next;
+    }
+    return 0;
+}
+
+int32_t Ngs2VoiceGetStateFlags(uint64_t voiceHandle, uint32_t* outFlags) {
+    std::scoped_lock lk(g_mtx);
+    uint32_t flags = 0;
+    auto it = g_voices.find(voiceHandle);
+    if (it != g_voices.end()) {
+        const Voice& v = *it->second;
+        if (v.playing) {
+            flags = 0x05u;
+            if (v.paused) flags |= 0x20u;
+        }
+    }
+    if (HostOk(outFlags, 4)) *outFlags = flags;
+    return 0;
+}
+
+int32_t Ngs2VoiceGetState(uint64_t voiceHandle, void* outState, size_t stateSize) {
+    std::scoped_lock lk(g_mtx);
+    if (!HostOk(outState, stateSize) || stateSize < 4) return -1;
+    std::memset(outState, 0, stateSize);
+    auto it = g_voices.find(voiceHandle);
+    if (it == g_voices.end()) return 0;
+
+    const Voice& v = *it->second;
+    uint32_t flags = 0;
+    if (v.playing) {
+        flags = 0x05u;
+        if (v.paused) flags |= 0x20u;
+    }
+    auto* b = static_cast<uint8_t*>(outState);
+    *reinterpret_cast<uint32_t*>(b + 0x00) = flags;
+    if (stateSize >= 0x30 && v.rackId == 0x1000) {
+        *reinterpret_cast<float*>(b + 0x04) = v.playing ? 1.0f : 0.0f;
+        *reinterpret_cast<float*>(b + 0x08) = v.playing ? 0.5f : 0.0f;
+        *reinterpret_cast<uint64_t*>(b + 0x10) = v.totalDecodedSamples;
