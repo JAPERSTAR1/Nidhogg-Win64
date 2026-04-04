@@ -718,3 +718,99 @@ int32_t AudioOutOpen(int32_t /*userId*/, int32_t /*type*/, int32_t /*index*/, ui
     WavePort& p = g_ports[slot];
     p.inUse = true;
     p.grainSamples = (len >= 64 && len <= 4096) ? len : 512;
+    const uint32_t fmt = param & 0xffu;
+    if (fmt == 0) { p.channels = 1; p.isFloat = false; }
+    else if (fmt == 1) { p.channels = 2; p.isFloat = false; }
+    else if (fmt == 2) { p.channels = 8; p.isFloat = false; }
+    else if (fmt == 3) { p.channels = 1; p.isFloat = true; }
+    else if (fmt == 4) { p.channels = 2; p.isFloat = true; }
+    else { p.channels = 8; p.isFloat = true; }
+
+    p.ev = CreateEventA(nullptr, FALSE, FALSE, nullptr);
+    WAVEFORMATEX wfx{};
+    wfx.wFormatTag = WAVE_FORMAT_PCM;
+    wfx.nChannels = 2;
+    wfx.nSamplesPerSec = freq ? freq : 48000;
+    wfx.wBitsPerSample = 16;
+    wfx.nBlockAlign = 4;
+    wfx.nAvgBytesPerSec = wfx.nSamplesPerSec * wfx.nBlockAlign;
+
+    if (waveOutOpen(&p.hwo, WAVE_MAPPER, &wfx, reinterpret_cast<DWORD_PTR>(p.ev), 0,
+                    CALLBACK_EVENT) == MMSYSERR_NOERROR) {
+        for (int i = 0; i < WavePort::kNumBufs; ++i) {
+            p.bufs[i].assign(static_cast<size_t>(p.grainSamples * 2), 0);
+            std::memset(&p.hdrs[i], 0, sizeof(WAVEHDR));
+            p.hdrs[i].lpData = reinterpret_cast<LPSTR>(p.bufs[i].data());
+            p.hdrs[i].dwBufferLength = p.grainSamples * 4;
+            waveOutPrepareHeader(p.hwo, &p.hdrs[i], sizeof(WAVEHDR));
+        }
+    } else {
+        p.hwo = nullptr;
+    }
+    return slot;
+}
+
+int32_t AudioOutSetVolume(int32_t handle, uint32_t /*flag*/, const int32_t* vols) {
+    std::scoped_lock lk(g_audioOutMtx);
+    if (handle <= 0 || handle >= 16 || !g_ports[handle].inUse) return -1;
+    if (HostOk(vols, 8)) {
+        g_ports[handle].volL = std::clamp(vols[0] / 32768.0f, 0.0f, 2.0f);
+        g_ports[handle].volR = std::clamp(vols[1] / 32768.0f, 0.0f, 2.0f);
+    }
+    return 0;
+}
+
+int32_t AudioOutOutput(int32_t handle, const void* ptr) {
+    struct SingleParam {
+        int32_t h;
+        int32_t pad;
+        const void* p;
+    } sp{handle, 0, ptr};
+    return AudioOutOutputs(&sp, 1);
+}
+
+int32_t AudioOutOutputs(const void* params, uint32_t count) {
+    struct OutParam {
+        int32_t handle;
+        int32_t pad;
+        const void* ptr;
+    };
+    if (!count || count > 16 || !HostOk(params, count * sizeof(OutParam))) return 0;
+    const auto* list = static_cast<const OutParam*>(params);
+
+    WavePort* primary = nullptr;
+    uint32_t grain = 512;
+    {
+        std::scoped_lock lk(g_audioOutMtx);
+        for (uint32_t i = 0; i < count; ++i) {
+            const int32_t h = list[i].handle;
+            if (h > 0 && h < 16 && g_ports[h].inUse) {
+                primary = &g_ports[h];
+                grain = primary->grainSamples;
+                break;
+            }
+        }
+    }
+    if (!primary) {
+        Sleep(10);
+        return 0;
+    }
+
+    std::vector<float> sumL(grain, 0.0f);
+    std::vector<float> sumR(grain, 0.0f);
+    for (uint32_t i = 0; i < count; ++i) {
+        const int32_t h = list[i].handle;
+        const void* src = list[i].ptr;
+        if (h <= 0 || h >= 16 || !g_ports[h].inUse || !src) continue;
+        const WavePort& wp = g_ports[h];
+        const uint32_t ch = wp.channels;
+        if (wp.isFloat) {
+            if (!HostOk(src, grain * ch * sizeof(float))) continue;
+            const auto* f = static_cast<const float*>(src);
+            for (uint32_t s = 0; s < grain; ++s) {
+                const float l = f[s * ch + 0];
+                const float r = ch > 1 ? f[s * ch + 1] : l;
+                sumL[s] += l * wp.volL;
+                sumR[s] += r * wp.volR;
+            }
+        } else {
