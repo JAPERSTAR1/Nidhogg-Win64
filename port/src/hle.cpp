@@ -2069,7 +2069,10 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                             static_cast<unsigned long long>(g_submits),
                             g_machine.draws().size(),
                             static_cast<unsigned long long>(g_machine.memoryWrites()),
-                            g_machine.errors());
+                            g_machine.errors(),
+                            static_cast<unsigned long long>(audio::MixedFrames()),
+                            audio::ActiveVoices(),
+                            audio::PeakAmplitude());
 
                 // What the guest asks the platform layer for, per frame.  Slots
                 // that never appear here are not the reason a frame is static;
