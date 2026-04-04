@@ -382,3 +382,99 @@ int32_t Ngs2GetWaveformFrameInfo(const void* format, uint32_t* outFrameSize,
 
     if (fmt->waveformType == 0x40) {
         void* h = Atrac9GetHandle();
+        uint8_t cfg[4];
+        std::memcpy(cfg, &fmt->configData, 4);
+        if (h && Atrac9InitDecoder(h, cfg) == 0) {
+            Atrac9CodecInfo ci{};
+            Atrac9GetCodecInfo(h, &ci);
+            if (ci.superframeSize > 0) frameSize = static_cast<uint32_t>(ci.superframeSize);
+            if (ci.frameSamples > 0 && ci.framesInSuperframe > 0) {
+                frameSamples = static_cast<uint32_t>(ci.frameSamples * ci.framesInSuperframe);
+                unitsPerFrame = static_cast<uint32_t>(ci.framesInSuperframe);
+                delaySamples = static_cast<uint32_t>(ci.frameSamples);
+            }
+        }
+        if (h) Atrac9ReleaseHandle(h);
+    } else if (fmt->waveformType == 0x12) {
+        frameSize = 2u * std::max(1u, fmt->numChannels);
+        frameSamples = 1;
+    } else {
+        frameSize = 16u * std::max(1u, fmt->numChannels);
+        frameSamples = 28;
+    }
+
+    if (HostOk(outFrameSize, 4)) *outFrameSize = frameSize;
+    if (HostOk(outNumFrameSamples, 4)) *outNumFrameSamples = frameSamples;
+    if (HostOk(outUnitsPerFrame, 4)) *outUnitsPerFrame = unitsPerFrame;
+    if (HostOk(outNumDelaySamples, 4)) *outNumDelaySamples = delaySamples;
+    return 0;
+}
+
+int32_t Ngs2VoiceControl(uint64_t voiceHandle, const void* paramList) {
+    std::scoped_lock lk(g_mtx);
+    auto it = g_voices.find(voiceHandle);
+    if (it == g_voices.end() || !paramList) return 0;
+    Voice& v = *it->second;
+
+    const auto* cur = static_cast<const uint8_t*>(paramList);
+    for (int guard = 0; guard < 64 && HostOk(cur, sizeof(VoiceParamHeader)); ++guard) {
+        const auto* hdr = reinterpret_cast<const VoiceParamHeader*>(cur);
+        switch (hdr->id) {
+            case 1: {  // MatrixLevelsParam
+                if (hdr->size >= 0x18 && HostOk(cur, 0x18)) {
+                    const uint32_t nLevels = *reinterpret_cast<const uint32_t*>(cur + 0x0C);
+                    const float* lv = *reinterpret_cast<const float* const*>(cur + 0x10);
+                    if (lv && nLevels >= 2 && HostOk(lv, nLevels * sizeof(float))) {
+                        if (nLevels >= 64) {
+                            v.isStereoMat = true;
+                            v.matLL = lv[0];
+                            v.matLR = lv[1];
+                            v.matRL = lv[8];
+                            v.matRR = lv[9];
+                        } else {
+                            v.isStereoMat = false;
+                            v.matLL = lv[0];
+                            v.matLR = lv[1];
+                        }
+                    }
+                }
+                break;
+            }
+            case 2: {  // PortVolumeParam
+                if (hdr->size >= 0x10 && HostOk(cur, 0x10)) {
+                    const uint32_t port = *reinterpret_cast<const uint32_t*>(cur + 0x08);
+                    const float level = *reinterpret_cast<const float*>(cur + 0x0C);
+                    if (port == 0) v.portVol = std::clamp(level, 0.0f, 4.0f);
+                }
+                break;
+            }
+            case 6: {  // EventParam
+                if (hdr->size >= 0x0C && HostOk(cur, 0x0C)) {
+                    const uint32_t ev = *reinterpret_cast<const uint32_t*>(cur + 0x08);
+                    if (ev == 0) {         // Play
+                        v.playing = true;
+                        v.paused = false;
+                        v.keyedOff = false;
+                    } else if (ev == 1) {  // KeyOff
+                        v.keyedOff = true;
+                    } else if (ev == 3) {  // Kill
+                        v.playing = false;
+                        v.paused = false;
+                        v.keyedOff = false;
+                        v.blocks.clear();
+                        v.pcmL.clear();
+                        v.pcmR.clear();
+                        v.readPos = 0.0;
+                    } else if (ev == 4) {  // Pause
+                        v.paused = true;
+                    } else if (ev == 5) {  // Resume
+                        v.paused = false;
+                    }
+                }
+                break;
+            }
+            case 0x10000000u: {  // SamplerVoiceSetupParam
+                if (hdr->size >= 0x28 && HostOk(cur, 0x28)) {
+                    std::memcpy(&v.fmt, cur + 0x08, sizeof(WaveformFormat));
+                    v.blocks.clear();
+                    v.pcmL.clear();
