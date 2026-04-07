@@ -814,3 +814,60 @@ int32_t AudioOutOutputs(const void* params, uint32_t count) {
                 sumR[s] += r * wp.volR;
             }
         } else {
+            if (!HostOk(src, grain * ch * sizeof(int16_t))) continue;
+            const auto* pcm = static_cast<const int16_t*>(src);
+            for (uint32_t s = 0; s < grain; ++s) {
+                const float l = (pcm[s * ch + 0] / 32768.0f);
+                const float r = ch > 1 ? (pcm[s * ch + 1] / 32768.0f) : l;
+                sumL[s] += l * wp.volL;
+                sumR[s] += r * wp.volR;
+            }
+        }
+    }
+
+    if (!primary->hwo) {
+        Sleep((grain * 1000) / 48000);
+        return static_cast<int32_t>(grain);
+    }
+
+    const int idx = primary->nextBuf;
+    primary->nextBuf = (idx + 1) % WavePort::kNumBufs;
+    WAVEHDR& hdr = primary->hdrs[idx];
+
+    while (hdr.dwFlags & WHDR_INQUEUE) {
+        WaitForSingleObject(primary->ev, 15);
+    }
+
+    int16_t* dst = primary->bufs[idx].data();
+    for (uint32_t s = 0; s < grain; ++s) {
+        dst[s * 2 + 0] = static_cast<int16_t>(std::clamp(sumL[s], -1.0f, 1.0f) * 32767.0f);
+        dst[s * 2 + 1] = static_cast<int16_t>(std::clamp(sumR[s], -1.0f, 1.0f) * 32767.0f);
+    }
+    waveOutWrite(primary->hwo, &hdr, sizeof(WAVEHDR));
+    return static_cast<int32_t>(grain);
+}
+
+int32_t AudioOutClose(int32_t handle) {
+    std::scoped_lock lk(g_audioOutMtx);
+    if (handle <= 0 || handle >= 16 || !g_ports[handle].inUse) return 0;
+    WavePort& p = g_ports[handle];
+    if (p.hwo) {
+        waveOutReset(p.hwo);
+        for (int i = 0; i < WavePort::kNumBufs; ++i)
+            waveOutUnprepareHeader(p.hwo, &p.hdrs[i], sizeof(WAVEHDR));
+        waveOutClose(p.hwo);
+        p.hwo = nullptr;
+    }
+    if (p.ev) {
+        CloseHandle(p.ev);
+        p.ev = nullptr;
+    }
+    p.inUse = false;
+    return 0;
+}
+
+uint64_t MixedFrames() { return g_mixedFrames.load(std::memory_order_relaxed); }
+float PeakAmplitude() { return g_peakAmp.exchange(0.0f, std::memory_order_relaxed); }
+uint32_t ActiveVoices() { return g_activeVoices.load(std::memory_order_relaxed); }
+
+}  // namespace ps4::audio
