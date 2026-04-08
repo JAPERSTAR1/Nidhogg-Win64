@@ -1559,6 +1559,77 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                     WakeAllConditionVariable(&tc->cv);
             }
             return 0;
+        }
+        case 350:    // scePthreadCondTimedwait(&cond, &mtx, usec)
+        case 351: {  // scePthreadCondWait(&cond, &mtx)
+            if (ret - g_base < 0xF0000) return 0;  // NpToolkit non-blocking fallback
+            struct TaggedCond {
+                uint64_t magic;
+                CONDITION_VARIABLE cv;
+            };
+            if (!Readable(ptr(0), 8) || !Readable(ptr(1), 8)) return 0;
+            auto* tc = *reinterpret_cast<TaggedCond**>(ptr(0));
+            auto* cs = *reinterpret_cast<CRITICAL_SECTION**>(ptr(1));
+            if (!tc || !cs || !Readable(tc, sizeof(TaggedCond)) || tc->magic != 0xC04D564152ULL)
+                return 0;
+            DWORD ms = 50;
+            if (slot == 350) {
+                const uint32_t us = static_cast<uint32_t>(r.gpr[2]);
+                ms = us >= 1000 ? (us / 1000) : 1;
+            }
+            if (!SleepConditionVariableCS(&tc->cv, cs, ms))
+                return slot == 350 ? 0x8002003Cull : 0;
+            return 0;
+        }
+
+        // ---- libSceNgs2 & libSceAudioOut
+        case 367:
+            return static_cast<uint64_t>(static_cast<int64_t>(
+                audio::Ngs2SystemCreate(ptr(0), ptr(1), reinterpret_cast<uint64_t*>(r.gpr[2]))));
+        case 368:
+            return static_cast<uint64_t>(static_cast<int64_t>(
+                audio::Ngs2RackCreate(r.gpr[0], static_cast<uint32_t>(r.gpr[1]), ptr(2), ptr(3),
+                                      reinterpret_cast<uint64_t*>(r.gpr[4]))));
+        case 369:
+            return static_cast<uint64_t>(static_cast<int64_t>(
+                audio::Ngs2RackGetVoiceHandle(r.gpr[0], static_cast<uint32_t>(r.gpr[1]),
+                                              reinterpret_cast<uint64_t*>(r.gpr[2]))));
+        case 363:
+            return static_cast<uint64_t>(static_cast<int64_t>(
+                audio::Ngs2VoiceControl(r.gpr[0], ptr(1))));
+        case 364:
+            return static_cast<uint64_t>(static_cast<int64_t>(
+                audio::Ngs2VoiceGetStateFlags(r.gpr[0], reinterpret_cast<uint32_t*>(r.gpr[1]))));
+        case 365:
+            return static_cast<uint64_t>(static_cast<int64_t>(
+                audio::Ngs2VoiceGetState(r.gpr[0], ptr(1), static_cast<size_t>(r.gpr[2]))));
+        case 366:
+            return static_cast<uint64_t>(static_cast<int64_t>(
+                audio::Ngs2SystemRender(r.gpr[0], ptr(1), static_cast<uint32_t>(r.gpr[2]))));
+        case 383:
+        case 384:
+            return static_cast<uint64_t>(static_cast<int64_t>(audio::Ngs2Destroy(r.gpr[0])));
+        case 385:
+            return static_cast<uint64_t>(static_cast<int64_t>(
+                audio::Ngs2GetWaveformFrameInfo(
+                    ptr(0), reinterpret_cast<uint32_t*>(r.gpr[1]),
+                    reinterpret_cast<uint32_t*>(r.gpr[2]),
+                    reinterpret_cast<uint32_t*>(r.gpr[3]),
+                    reinterpret_cast<uint32_t*>(r.gpr[4]))));
+        case 381:
+            return static_cast<uint64_t>(static_cast<int64_t>(
+                audio::AudioOutOpen(static_cast<int32_t>(r.gpr[0]), static_cast<int32_t>(r.gpr[1]),
+                                    static_cast<int32_t>(r.gpr[2]), static_cast<uint32_t>(r.gpr[3]),
+                                    static_cast<uint32_t>(r.gpr[4]),
+                                    static_cast<uint32_t>(r.gpr[5]))));
+        case 382:
+            return static_cast<uint64_t>(static_cast<int64_t>(
+                audio::AudioOutSetVolume(static_cast<int32_t>(r.gpr[0]),
+                                         static_cast<uint32_t>(r.gpr[1]),
+                                         reinterpret_cast<const int32_t*>(r.gpr[2]))));
+        case 386:
+            return static_cast<uint64_t>(static_cast<int64_t>(
+                audio::AudioOutOutputs(ptr(0), static_cast<uint32_t>(r.gpr[1]))));
         case 144: {  // usleep(usec)
             const uint32_t us = static_cast<uint32_t>(r.gpr[0]);
             if (us >= 1000) Sleep(us / 1000);
