@@ -1511,6 +1511,54 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                 *reinterpret_cast<uint64_t*>(ptr(0)) = reinterpret_cast<uint64_t>(h);
             return 0;
         }
+        case 223:  // scePthreadExit
+        case 387:
+            ExitThread(0);
+        case 224: {  // scePthreadJoin(thr, &status)
+            HANDLE h = reinterpret_cast<HANDLE>(r.gpr[0]);
+            if (h) WaitForSingleObject(h, 2000);
+            if (Readable(ptr(1), 8)) *reinterpret_cast<uint64_t*>(ptr(1)) = 0;
+            return 0;
+        }
+        case 345: {  // scePthreadCondInit(&cond, &attr, name)
+            struct TaggedCond {
+                uint64_t magic = 0xC04D564152ULL;
+                CONDITION_VARIABLE cv{};
+            };
+            if (Readable(ptr(0), 8)) {
+                auto* tc = new TaggedCond{};
+                InitializeConditionVariable(&tc->cv);
+                *reinterpret_cast<TaggedCond**>(ptr(0)) = tc;
+            }
+            return 0;
+        }
+        case 347: {  // scePthreadCondDestroy(&cond)
+            struct TaggedCond {
+                uint64_t magic;
+                CONDITION_VARIABLE cv;
+            };
+            if (Readable(ptr(0), 8)) {
+                auto** pp = reinterpret_cast<TaggedCond**>(ptr(0));
+                if (*pp && Readable(*pp, sizeof(TaggedCond)) && (*pp)->magic == 0xC04D564152ULL) {
+                    (*pp)->magic = 0;
+                    delete *pp;
+                    *pp = nullptr;
+                }
+            }
+            return 0;
+        }
+        case 348:    // scePthreadCondSignal(&cond)
+        case 349: {  // scePthreadCondBroadcast(&cond)
+            struct TaggedCond {
+                uint64_t magic;
+                CONDITION_VARIABLE cv;
+            };
+            if (Readable(ptr(0), 8)) {
+                auto* tc = *reinterpret_cast<TaggedCond**>(ptr(0));
+                if (tc && Readable(tc, sizeof(TaggedCond)) && tc->magic == 0xC04D564152ULL)
+                    WakeAllConditionVariable(&tc->cv);
+            }
+            return 0;
         case 144: {  // usleep(usec)
             const uint32_t us = static_cast<uint32_t>(r.gpr[0]);
             if (us >= 1000) Sleep(us / 1000);
@@ -2065,7 +2113,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             if (first) {
                 DumpFrameState();
             } else if ((g_submits % 300) == 0) {
-                std::printf("[gnm] frame %llu: %zu draws, %llu writes, %u errors\n",
+                std::printf("[gnm] frame %llu: %zu draws, %llu writes, %u errors | [audio] mixed=%llu voices=%u peak=%.4f\n",
                             static_cast<unsigned long long>(g_submits),
                             g_machine.draws().size(),
                             static_cast<unsigned long long>(g_machine.memoryWrites()),
