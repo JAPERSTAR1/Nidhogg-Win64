@@ -1424,7 +1424,8 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             std::fclose(f);
             return slot == 359 ? static_cast<uint64_t>(static_cast<int64_t>(-1)) : 0x80020018ull;
         }
-        case 360: {  // lseek(fd, offset, whence)
+        case 360:    // lseek(fd, offset, whence)
+        case 397: {  // sceKernelLseek(fd, offset, whence)
             const int fd = static_cast<int>(r.gpr[0]);
             if (fd < 3 || fd >= 64 || !g_posixFds[fd])
                 return static_cast<uint64_t>(static_cast<int64_t>(-1));
@@ -1482,6 +1483,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             }
             return 0;
         }
+        case 137:  // sceFiosInitialize
         case 140:
         case 141:
         case 143:
