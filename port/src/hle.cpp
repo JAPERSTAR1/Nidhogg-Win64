@@ -1489,7 +1489,8 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
         case 374:
         case 375:
             return 0;
-        case 142: {  // pthread_create(&thr, &attr, startRoutine, arg)
+        case 142:    // pthread_create(&thr, &attr, startRoutine, arg)
+        case 222: {  // scePthreadCreate(&thr, &attr, startRoutine, arg, name)
             struct GuestThreadArgs {
                 uint64_t entry;
                 uint64_t arg;
@@ -1497,7 +1498,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             auto* ta = new GuestThreadArgs{r.gpr[2], r.gpr[3]};
             DWORD tid = 0;
             HANDLE h = CreateThread(
-                nullptr, 1u << 20,
+                nullptr, 2u << 20,
                 [](LPVOID p) -> DWORD {
                     auto* a = static_cast<GuestThreadArgs*>(p);
                     const uint64_t entry = a->entry;
