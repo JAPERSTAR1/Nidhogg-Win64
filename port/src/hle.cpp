@@ -1083,6 +1083,14 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
         }
 
         // ---- libm / Dinkumware math
+        case 139: {  // _FLog(float x, int flag): flag == -1 -> log2f, 1 -> log10f, 0 -> logf
+            const float x = XmmF32(r, 0);
+            if (x <= 0.0f) return RetF32(0.0f);
+            const int32_t flag = static_cast<int32_t>(r.gpr[0]);
+            if (flag == -1) return RetF32(std::log2f(x));
+            if (flag == 1) return RetF32(std::log10f(x));
+            return RetF32(std::logf(x));
+        }
         case 110: {  // _FSin(float x, unsigned int qoff, int n)
             const float x = XmmF32(r, 0);
             float out = 0.0f;
@@ -1222,6 +1230,12 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
         case 55: {  // vsprintf(dst, fmt, va)
             auto* va = reinterpret_cast<VaList*>(r.gpr[2]);
             size_t n = FormatVa(reinterpret_cast<char*>(r.gpr[0]), 0x10000, str(1), va);
+            return n;
+        }
+        case 357: {  // vsnprintf(dst, cap, fmt, va)
+            auto* va = reinterpret_cast<VaList*>(r.gpr[3]);
+            size_t n = FormatVa(reinterpret_cast<char*>(r.gpr[0]),
+                                static_cast<size_t>(r.gpr[1]), str(2), va);
             return n;
         }
         case 115: {  // puts(s)
