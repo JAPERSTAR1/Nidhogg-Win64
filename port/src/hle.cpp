@@ -1506,9 +1506,10 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                     GetSysvCompar()(entry, reinterpret_cast<const void*>(arg), nullptr);
                     return 0;
                 },
-                ta, 0, &tid);
+                ta, CREATE_SUSPENDED, &tid);
             if (Readable(ptr(0), 8))
                 *reinterpret_cast<uint64_t*>(ptr(0)) = reinterpret_cast<uint64_t>(h);
+            if (h) ResumeThread(h);
             return 0;
         }
         case 223:  // scePthreadExit
