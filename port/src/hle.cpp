@@ -1485,9 +1485,17 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
         case 140:
         case 141:
         case 143:
+        case 344:  // scePthreadCondattrInit
+        case 346:  // scePthreadCondattrDestroy
+        case 372:  // sceAudioOutInit
         case 373:
         case 374:
         case 375:
+        case 376:
+        case 377:
+        case 378:
+        case 379:
+        case 380:
             return 0;
         case 142:    // pthread_create(&thr, &attr, startRoutine, arg)
         case 222: {  // scePthreadCreate(&thr, &attr, startRoutine, arg, name)
