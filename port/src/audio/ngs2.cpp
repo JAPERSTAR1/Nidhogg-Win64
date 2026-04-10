@@ -433,8 +433,8 @@ int32_t Ngs2VoiceControl(uint64_t voiceHandle, const void* paramList) {
                             v.matRR = lv[9];
                         } else {
                             v.isStereoMat = false;
-                            v.matLL = lv[0];
-                            v.matLR = lv[1];
+                            v.matLL = downmixL(0);
+                            v.matLR = downmixR(0);
                         }
                     }
                 }
@@ -461,6 +461,7 @@ int32_t Ngs2VoiceControl(uint64_t voiceHandle, const void* paramList) {
                         v.playing = false;
                         v.paused = false;
                         v.keyedOff = false;
+                        v.hasBlocks = false;
                         v.blocks.clear();
                         v.pcmL.clear();
                         v.pcmR.clear();
