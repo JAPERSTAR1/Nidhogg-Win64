@@ -1,5 +1,6 @@
 #include "hle.h"
 
+#include "audio/ngs2.h"
 #include "gnm/d3d11.h"
 #include "gnm/pm4.h"
 
@@ -901,7 +902,9 @@ const char* SlotName(uint32_t s) {
         case 134: return "sceSaveDataLoadIcon";
         case 135: return "sceKernelStat";
         case 136: return "sceKernelRead";
+        case 137: return "sceFiosInitialize";
         case 138: return "strrchr";
+        case 139: return "_FLog";
         case 140: return "pthread_attr_init";
         case 141: return "pthread_attr_setdetachstate";
         case 142: return "pthread_create";
