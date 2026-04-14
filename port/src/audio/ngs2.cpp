@@ -424,13 +424,27 @@ int32_t Ngs2VoiceControl(uint64_t voiceHandle, const void* paramList) {
                 if (hdr->size >= 0x18 && HostOk(cur, 0x18)) {
                     const uint32_t nLevels = *reinterpret_cast<const uint32_t*>(cur + 0x0C);
                     const float* lv = *reinterpret_cast<const float* const*>(cur + 0x10);
-                    if (lv && nLevels >= 2 && HostOk(lv, nLevels * sizeof(float))) {
-                        if (nLevels >= 64) {
+                    if (lv && nLevels >= 8 && (nLevels % 8) == 0 &&
+                        HostOk(lv, nLevels * sizeof(float))) {
+                        // Notice 0x100fd0da passes nLevels = 64 with only lv[0..7] populated
+                        // for direct 1-to-8 broadcast when channel-mask routing is used.
+                        const uint32_t rawIn = nLevels / 8;
+                        const uint32_t nIn = (rawIn == 2) ? 2u : 1u;
+                        const uint32_t stride = (rawIn == 2) ? 2u : 1u;
+                        auto downmixL = [&](uint32_t c) {
+                            return lv[0 * stride + c] + 0.7071f * lv[2 * stride + c] +
+                                   0.7071f * lv[4 * stride + c] + 0.7071f * lv[6 * stride + c];
+                        };
+                        auto downmixR = [&](uint32_t c) {
+                            return lv[1 * stride + c] + 0.7071f * lv[2 * stride + c] +
+                                   0.7071f * lv[5 * stride + c] + 0.7071f * lv[7 * stride + c];
+                        };
+                        if (nIn == 2) {
                             v.isStereoMat = true;
-                            v.matLL = lv[0];
-                            v.matLR = lv[1];
-                            v.matRL = lv[8];
-                            v.matRR = lv[9];
+                            v.matLL = downmixL(0);
+                            v.matLR = downmixR(0);
+                            v.matRL = downmixL(1);
+                            v.matRR = downmixR(1);
                         } else {
                             v.isStereoMat = false;
                             v.matLL = downmixL(0);
