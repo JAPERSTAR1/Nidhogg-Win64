@@ -519,6 +519,7 @@ int32_t Ngs2VoiceControl(uint64_t voiceHandle, const void* paramList) {
                             if (v.blocks.empty())
                                 v.currentWavePtr = data + qb.dataOffset;
                             v.blocks.push_back(qb);
+                            v.hasBlocks = true;
                         }
                     }
                 }
@@ -606,6 +607,10 @@ int32_t Ngs2SystemRender(uint64_t systemHandle, const void* bufferInfos, uint32_
             if (vIt == g_voices.end()) continue;
             Voice& v = *vIt->second;
             if (!v.playing || v.paused) continue;
+            if (!v.hasBlocks) {
+                ++activeCount;
+                continue;
+            }
 
             const uint32_t srcRate = v.at9Valid && v.at9Info.samplingRate > 0
                                          ? static_cast<uint32_t>(v.at9Info.samplingRate)
