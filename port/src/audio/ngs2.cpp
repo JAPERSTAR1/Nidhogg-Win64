@@ -384,6 +384,7 @@ int32_t Ngs2GetWaveformFrameInfo(const void* format, uint32_t* outFrameSize,
         void* h = Atrac9GetHandle();
         uint8_t cfg[4];
         std::memcpy(cfg, &fmt->configData, 4);
+        if (cfg[0] != 0xFE && cfg[3] == 0xFE) std::reverse(cfg, cfg + 4);
         if (h && Atrac9InitDecoder(h, cfg) == 0) {
             Atrac9CodecInfo ci{};
             Atrac9GetCodecInfo(h, &ci);
@@ -420,7 +421,7 @@ int32_t Ngs2VoiceControl(uint64_t voiceHandle, const void* paramList) {
     for (int guard = 0; guard < 64 && HostOk(cur, sizeof(VoiceParamHeader)); ++guard) {
         const auto* hdr = reinterpret_cast<const VoiceParamHeader*>(cur);
         switch (hdr->id) {
-            case 1: {  // MatrixLevelsParam
+            case 1: {  // MatrixLevelsParam ([outCh * nIn + inCh], 8 output channels)
                 if (hdr->size >= 0x18 && HostOk(cur, 0x18)) {
                     const uint32_t nLevels = *reinterpret_cast<const uint32_t*>(cur + 0x0C);
                     const float* lv = *reinterpret_cast<const float* const*>(cur + 0x10);
