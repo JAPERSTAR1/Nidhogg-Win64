@@ -476,6 +476,7 @@ int32_t Ngs2VoiceControl(uint64_t voiceHandle, const void* paramList) {
             case 0x10000000u: {  // SamplerVoiceSetupParam
                 if (hdr->size >= 0x28 && HostOk(cur, 0x28)) {
                     std::memcpy(&v.fmt, cur + 0x08, sizeof(WaveformFormat));
+                    v.hasBlocks = false;
                     v.blocks.clear();
                     v.pcmL.clear();
                     v.pcmR.clear();
@@ -490,6 +491,7 @@ int32_t Ngs2VoiceControl(uint64_t voiceHandle, const void* paramList) {
                         if (!v.at9) v.at9 = Atrac9GetHandle();
                         uint8_t cfg[4];
                         std::memcpy(cfg, &v.fmt.configData, 4);
+                        if (cfg[0] != 0xFE && cfg[3] == 0xFE) std::reverse(cfg, cfg + 4);
                         if (v.at9 && Atrac9InitDecoder(v.at9, cfg) == 0) {
                             Atrac9GetCodecInfo(v.at9, &v.at9Info);
                             v.at9Valid = true;
