@@ -74,6 +74,7 @@ struct Voice {
     bool playing = false;
     bool paused = false;
     bool keyedOff = false;
+    bool hasBlocks = false;
 
     WaveformFormat fmt{};
     void* at9 = nullptr;
