@@ -2070,7 +2070,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             // once.  The descriptor conventions come from GNM's own tables, but
             // the only way to be sure the decode is right is to print the data
             // the descriptors point at.
-            if (g_submits == 2) {
+            if (g_verbose && g_submits == 2) {
                 const gnm::Draw* d = nullptr;
                 for (const auto& c : g_machine.draws())
                     if (c.kind == gnm::Draw::Kind::Indexed) d = &c;
@@ -2159,7 +2159,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             // image hash over hundreds of frames means the game loop is
             // replanting a cached command buffer and its logic is not running
             // at all, which is a completely different bug from a wrong draw.
-            if ((g_submits % 60) == 0) {
+            if (g_verbose && (g_submits % 60) == 0) {
                 static uint64_t prev = 0;
                 uint64_t h = 1469598103934665603ull;
                 auto mix = [&](uint64_t addr, size_t n) {
