@@ -671,8 +671,8 @@ int32_t Ngs2SystemRender(uint64_t systemHandle, const void* bufferInfos, uint32_
                     outL = (inL * v.matLL + inR * v.matRL) * v.portVol;
                     outR = (inL * v.matLR + inR * v.matRR) * v.portVol;
                 } else {
-                    outL = inL * v.matLL * v.portVol;
-                    outR = inL * v.matLR * v.portVol;
+                    outL = inL * v.matLL * vGain;
+                    outR = inL * v.matLR * vGain;
                 }
                 mixL[s] += outL;
                 mixR[s] += outR;
@@ -742,6 +742,7 @@ int32_t AudioOutOpen(int32_t /*userId*/, int32_t /*type*/, int32_t /*index*/, ui
     WavePort& p = g_ports[slot];
     p.inUse = true;
     p.grainSamples = (len >= 64 && len <= 4096) ? len : 512;
+    p.sampleRate = freq ? freq : 48000;
     const uint32_t fmt = param & 0xffu;
     if (fmt == 0) { p.channels = 1; p.isFloat = false; }
     else if (fmt == 1) { p.channels = 2; p.isFloat = false; }
