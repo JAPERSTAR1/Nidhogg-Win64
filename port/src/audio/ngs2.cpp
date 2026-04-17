@@ -667,9 +667,10 @@ int32_t Ngs2SystemRender(uint64_t systemHandle, const void* bufferInfos, uint32_
                 const float inR = v.pcmR[idx0] + (v.pcmR[idx1] - v.pcmR[idx0]) * frac;
 
                 float outL, outR;
+                const float vGain = v.portVol * catGain;
                 if (v.isStereoMat) {
-                    outL = (inL * v.matLL + inR * v.matRL) * v.portVol;
-                    outR = (inL * v.matLR + inR * v.matRR) * v.portVol;
+                    outL = (inL * v.matLL + inR * v.matRL) * vGain;
+                    outR = (inL * v.matLR + inR * v.matRR) * vGain;
                 } else {
                     outL = inL * v.matLL * vGain;
                     outR = inL * v.matLR * vGain;
