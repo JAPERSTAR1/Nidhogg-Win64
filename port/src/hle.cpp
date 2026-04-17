@@ -2286,6 +2286,29 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             // interpreter: the guest produced a command stream, the stream
             // produced draw state, and the state becomes real GPU work here.
             gnm::RenderFrame(g_videoOut.window, g_machine.draws());
+
+            // Hardware flip-rate pacing (0 = 60 Hz, 1 = 30 Hz, 2 = 20 Hz) so the
+            // fixed-timestep simulation runs at original PS4 speed on high-Hz
+            // displays or when DXGI windowed Present does not block on vblank.
+            if (!g_uncapped) {
+                static bool s_timerInit = false;
+                static uint64_t s_nextFlipUsec = 0;
+                if (!s_timerInit) {
+                    s_timerInit = true;
+                    timeBeginPeriod(1);
+                    s_nextFlipUsec = NowUsec();
+                }
+                const uint64_t periodUsec =
+                    (g_videoOut.flipRate == 1) ? 33333ULL :
+                    (g_videoOut.flipRate == 2) ? 50000ULL : 16667ULL;
+                s_nextFlipUsec += periodUsec;
+                uint64_t now = NowUsec();
+                if (now > s_nextFlipUsec + 100000ULL) s_nextFlipUsec = now;
+                while ((now = NowUsec()) < s_nextFlipUsec) {
+                    if (s_nextFlipUsec - now > 2500ULL) Sleep(1);
+                    else YieldProcessor();
+                }
+            }
             return 0;
         }
 
