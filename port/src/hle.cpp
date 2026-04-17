@@ -1149,6 +1149,8 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
         }
         case 150:
             return RetF32(std::atan2f(XmmF32(r, 0), XmmF32(r, 1)));
+        case 388:
+            return RetF32(std::exp2f(XmmF32(r, 0)));
         case 154: {
             const float y = XmmF32(r, 1);
             return RetF32(y != 0.0f ? std::fmodf(XmmF32(r, 0), y) : 0.0f);
@@ -1551,6 +1553,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             return 0;
         case 142:    // pthread_create(&thr, &attr, startRoutine, arg)
         case 222: {  // scePthreadCreate(&thr, &attr, startRoutine, arg, name)
+            if (slot == 222 && (ret - g_base) < 0xF0000) return 0;  // Skip NpToolkit PSN threads
             struct GuestThreadArgs {
                 uint64_t entry;
                 uint64_t arg;
