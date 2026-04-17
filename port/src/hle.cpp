@@ -2009,7 +2009,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             // itself against vblank but has stopped producing new work.  One
             // hash per submit, printed on change, is the shortest way to tell
             // "still loading" from "stuck".
-            {
+            if (g_verbose) {
                 static uint64_t prevHash = 0;
                 static int printed = 0;
                 uint64_t h = 1469598103934665603ull;
@@ -2032,13 +2032,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             (void)ccbAddrs;
             (void)ccbSizes;
 
-            // Does the frame loop actually move?  The first frame's quads are
-            // the whole 320x200 screen with uv (0,0) and the texture they name
-            // is still zeroed, so the picture at t=0 is black no matter how
-            // correct the backend is.  What matters is whether the guest ever
-            // rewrites that data: hash the vertex block and report the texture
-            // the last indexed draw samples from.
-            if (g_submits % 60 == 1) {
+            if (g_verbose && g_submits % 60 == 1) {
                 const auto& ds = g_machine.draws();
                 uint32_t vhash = 2166136261u;
                 if (gnm::HostReadable(0x4011408000ull, 0x240)) {
