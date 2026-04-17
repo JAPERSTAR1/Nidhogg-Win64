@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -31,6 +32,8 @@ uint64_t g_logLimit = 0;   // per-call trace budget; 0 turns it off
 uint64_t g_traceFrom = 0;  // frame to begin tracing from
 uint64_t g_calls = 0;
 bool g_configured = false;
+bool g_verbose = false;
+bool g_uncapped = false;
 bool g_seen[512] = {};
 uint64_t g_slotCalls[512] = {};   // since the last histogram reset
 
