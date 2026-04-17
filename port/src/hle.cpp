@@ -1692,6 +1692,85 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
         case 386:
             return static_cast<uint64_t>(static_cast<int64_t>(
                 audio::AudioOutOutputs(ptr(0), static_cast<uint32_t>(r.gpr[1]))));
+
+        // ---- libSceFios2 async streaming ops & process clock
+        case 398:
+            return NowUsec() * 1000ULL;
+        case 399:
+            return r.gpr[0];
+        case 400: {  // sceFiosFHOpen(attr, &outFH, path, openParams)
+            std::scoped_lock lk(g_fiosMtx);
+            std::string path = HostPath(str(2));
+            std::FILE* f = std::fopen(path.c_str(), "rb");
+            if (!f) {
+                if (Readable(ptr(1), 4)) *reinterpret_cast<int32_t*>(r.gpr[1]) = 0;
+                return 0;
+            }
+            int fd = -1;
+            for (int i = 3; i < 64; ++i) {
+                if (!g_posixFds[i]) { g_posixFds[i] = f; fd = i; break; }
+            }
+            if (fd < 0) {
+                std::fclose(f);
+                if (Readable(ptr(1), 4)) *reinterpret_cast<int32_t*>(r.gpr[1]) = 0;
+                return 0;
+            }
+            if (Readable(ptr(1), 4)) *reinterpret_cast<int32_t*>(r.gpr[1]) = fd;
+            for (uint32_t op = 1; op < 128; ++op) {
+                if (!g_fiosOps[op].inUse) {
+                    g_fiosOps[op] = {true, 0, 0};
+                    return op;
+                }
+            }
+            return 1;
+        }
+        case 401:  // sceFiosOpWait
+            return 0;
+        case 402: {  // sceFiosOpDelete(op)
+            std::scoped_lock lk(g_fiosMtx);
+            const uint32_t op = static_cast<uint32_t>(r.gpr[0]);
+            if (op > 0 && op < 128) g_fiosOps[op].inUse = false;
+            return 0;
+        }
+        case 403: {  // sceFiosFHPread(attr, fh, buf, length, offset)
+            const int fh = static_cast<int>(r.gpr[1]);
+            void* dst = ptr(2);
+            const uint32_t len = static_cast<uint32_t>(r.gpr[3]);
+            const int64_t off = static_cast<int64_t>(r.gpr[4]);
+            if (fh < 3 || fh >= 64 || !g_posixFds[fh] || !Readable(dst, len)) return 0;
+            size_t got = 0;
+            {
+                std::scoped_lock lk(g_fiosMtx);
+                if (_fseeki64(g_posixFds[fh], off, SEEK_SET) == 0)
+                    got = std::fread(dst, 1, len, g_posixFds[fh]);
+            }
+            return AllocFiosOp(len, got);
+        }
+        case 404:  // sceFiosOpIsDone
+            return 1;
+        case 405: {  // sceFiosOpGetActualCount(op)
+            std::scoped_lock lk(g_fiosMtx);
+            const uint32_t op = static_cast<uint32_t>(r.gpr[0]);
+            return (op > 0 && op < 128) ? g_fiosOps[op].actual : 0;
+        }
+        case 406: {  // sceFiosOpGetRequestCount(op)
+            std::scoped_lock lk(g_fiosMtx);
+            const uint32_t op = static_cast<uint32_t>(r.gpr[0]);
+            return (op > 0 && op < 128) ? g_fiosOps[op].requested : 0;
+        }
+        case 407: {  // sceFiosFHClose(attr, fh)
+            const int fh = static_cast<int>(r.gpr[1]);
+            {
+                std::scoped_lock lk(g_fiosMtx);
+                if (fh >= 3 && fh < 64 && g_posixFds[fh]) {
+                    std::fclose(g_posixFds[fh]);
+                    g_posixFds[fh] = nullptr;
+                }
+            }
+            return AllocFiosOp(0, 0);
+        }
+        case 409:  // sceKernelGetProcessTime
+            return NowUsec();
         case 144: {  // usleep(usec)
             const uint32_t us = static_cast<uint32_t>(r.gpr[0]);
             if (us >= 1000) Sleep(us / 1000);
