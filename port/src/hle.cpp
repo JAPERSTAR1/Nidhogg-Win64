@@ -2266,14 +2266,14 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                             bestCalls = static_cast<uint32_t>(g_slotCalls[s]);
                             best = s;
                         }
+                        if (best == 512) break;
+                        const char* nm = SlotName(best);
+                        std::printf("    slot %3u  n=%6llu (%llu/frame)  %s\n", best,
+                                    static_cast<unsigned long long>(g_slotCalls[best]),
+                                    static_cast<unsigned long long>(g_slotCalls[best] / 300),
+                                    nm ? nm : "unimplemented");
+                        g_slotCalls[best] = 0;
                     }
-                    if (best == 512) break;
-                    const char* nm = SlotName(best);
-                    std::printf("    slot %3u  n=%6llu (%llu/frame)  %s\n", best,
-                                static_cast<unsigned long long>(g_slotCalls[best]),
-                                static_cast<unsigned long long>(g_slotCalls[best] / 300),
-                                nm ? nm : "unimplemented");
-                    g_slotCalls[best] = 0;
                 }
                 for (uint32_t s = 0; s < 512; ++s) g_slotCalls[s] = 0;
                 std::fflush(stdout);
