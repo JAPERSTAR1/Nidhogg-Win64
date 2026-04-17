@@ -2181,7 +2181,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                 }
             }
 
-            if (g_submits == 1) {                // Where the two shaders are actually executed from, and what the
+            if (g_verbose && g_submits == 1) {                // Where the two shaders are actually executed from, and what the
                 // index buffer points at.  The program registers hold ring
                 // addresses in this title, so the ring is the place to look.
                 auto dump = [](const char* path, uint64_t addr, size_t n) {
@@ -2243,7 +2243,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                 std::fflush(stdout);
             }
 
-            if (first) {
+            if (first && g_verbose) {
                 DumpFrameState();
             } else if ((g_submits % 300) == 0) {
                 std::printf("[gnm] frame %llu: %zu draws, %llu writes, %u errors | [audio] mixed=%llu voices=%u peak=%.4f\n",
@@ -2254,17 +2254,14 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                             static_cast<unsigned long long>(audio::MixedFrames()),
                             audio::ActiveVoices(),
                             audio::PeakAmplitude());
-
-                // What the guest asks the platform layer for, per frame.  Slots
-                // that never appear here are not the reason a frame is static;
-                // slots that appear sixty times a second are where the clock
-                // and the flip live.
-                for (int rank = 0; rank < 64; ++rank) {
-                    uint32_t best = 512, bestCalls = 0;
-                    for (uint32_t s = 0; s < 512; ++s) {
-                        if (g_slotCalls[s] > bestCalls) {
-                            bestCalls = static_cast<uint32_t>(g_slotCalls[s]);
-                            best = s;
+                if (g_verbose) {
+                    for (int rank = 0; rank < 64; ++rank) {
+                        uint32_t best = 512, bestCalls = 0;
+                        for (uint32_t s = 0; s < 512; ++s) {
+                            if (g_slotCalls[s] > bestCalls) {
+                                bestCalls = static_cast<uint32_t>(g_slotCalls[s]);
+                                best = s;
+                            }
                         }
                         if (best == 512) break;
                         const char* nm = SlotName(best);
