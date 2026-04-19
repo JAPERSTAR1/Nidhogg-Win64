@@ -47,6 +47,14 @@ void Configure() {
         g_traceFrom = std::strtoull(lim, nullptr, 0);
         std::free(lim);
     }
+    if (_dupenv_s(&lim, &n, "NIDHOGG_VERBOSE") == 0 && lim) {
+        g_verbose = (*lim != '\0' && *lim != '0');
+        std::free(lim);
+    }
+    if (_dupenv_s(&lim, &n, "NIDHOGG_UNCAPPED") == 0 && lim) {
+        g_uncapped = (*lim != '\0' && *lim != '0');
+        std::free(lim);
+    }
 }
 
 // Reads a C string out of the image without dying on a null the game is about
@@ -542,6 +550,25 @@ const std::string& App0() {
 
 std::string g_saveMountDir;
 std::FILE* g_posixFds[64] = {};
+std::mutex g_fiosMtx;
+struct FiosOp {
+    bool inUse = false;
+    uint64_t requested = 0;
+    uint64_t actual = 0;
+};
+FiosOp g_fiosOps[128] = {};
+
+uint32_t AllocFiosOp(uint64_t req, uint64_t act) {
+    std::scoped_lock lk(g_fiosMtx);
+    for (uint32_t i = 1; i < 128; ++i) {
+        if (!g_fiosOps[i].inUse) {
+            g_fiosOps[i] = {true, req, act};
+            return i;
+        }
+    }
+    g_fiosOps[1] = {true, req, act};
+    return 1;
+}
 
 std::string SaveRoot(const char* dirName) {
     char full[MAX_PATH]{};
