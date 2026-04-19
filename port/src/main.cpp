@@ -353,7 +353,7 @@ int main(int argc, char** argv) {
     // Watchdog: the image is a blocking game loop, so when it stops making
     // progress the useful question is "where is it parked", not "what did it
     // call last".  NIDHOGG_WATCHDOG=<ms> changes the delay, 0 disables.
-    DWORD watchdogMs = 10000;
+    DWORD watchdogMs = 0;
     if (const char* w = std::getenv("NIDHOGG_WATCHDOG"))
         watchdogMs = static_cast<DWORD>(std::strtoul(w, nullptr, 0));
     if (watchdogMs) {
