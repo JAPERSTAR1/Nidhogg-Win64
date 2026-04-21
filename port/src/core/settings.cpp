@@ -382,3 +382,99 @@ bool LoadSettings(Settings& out, const std::string& path) {
 
     JsonReadFloat(j, "masterVolume", s.masterVolume, 0.0f, 1.0f);
     JsonReadFloat(j, "musicVolume", s.musicVolume, 0.0f, 1.0f);
+    JsonReadFloat(j, "sfxVolume", s.sfxVolume, 0.0f, 1.0f);
+    JsonReadBool(j, "mute", s.mute);
+    JsonReadInt(j, "audioDeviceId", s.audioDeviceId, -1, 64);
+
+    JsonReadInt(j, "p1_up", s.p1Keys.up, 0, 255);
+    JsonReadInt(j, "p1_down", s.p1Keys.down, 0, 255);
+    JsonReadInt(j, "p1_left", s.p1Keys.left, 0, 255);
+    JsonReadInt(j, "p1_right", s.p1Keys.right, 0, 255);
+    JsonReadInt(j, "p1_jump", s.p1Keys.jump, 0, 255);
+    JsonReadInt(j, "p1_attack", s.p1Keys.attack, 0, 255);
+    JsonReadInt(j, "p1_back", s.p1Keys.back, 0, 255);
+    JsonReadInt(j, "p1_start", s.p1Keys.start, 0, 255);
+    JsonReadInt(j, "p1_altUp", s.p1Keys.altUp, 0, 255);
+    JsonReadInt(j, "p1_altDown", s.p1Keys.altDown, 0, 255);
+    JsonReadInt(j, "p1_altLeft", s.p1Keys.altLeft, 0, 255);
+    JsonReadInt(j, "p1_altRight", s.p1Keys.altRight, 0, 255);
+    JsonReadInt(j, "p1_altJump", s.p1Keys.altJump, 0, 255);
+    JsonReadInt(j, "p1_altAttack", s.p1Keys.altAttack, 0, 255);
+
+    JsonReadInt(j, "p2_up", s.p2Keys.up, 0, 255);
+    JsonReadInt(j, "p2_down", s.p2Keys.down, 0, 255);
+    JsonReadInt(j, "p2_left", s.p2Keys.left, 0, 255);
+    JsonReadInt(j, "p2_right", s.p2Keys.right, 0, 255);
+    JsonReadInt(j, "p2_jump", s.p2Keys.jump, 0, 255);
+    JsonReadInt(j, "p2_attack", s.p2Keys.attack, 0, 255);
+    JsonReadInt(j, "p2_back", s.p2Keys.back, 0, 255);
+    JsonReadInt(j, "p2_start", s.p2Keys.start, 0, 255);
+    JsonReadInt(j, "p2_altJump", s.p2Keys.altJump, 0, 255);
+
+    JsonReadInt(j, "p1Controller", s.p1Controller, -1, 3);
+    JsonReadInt(j, "p2Controller", s.p2Controller, -1, 3);
+    JsonReadBool(j, "vibration", s.vibration);
+
+    JsonReadStr(j, "playerName", s.playerName);
+    JsonReadStr(j, "region", s.region);
+    JsonReadStr(j, "lobbyServerUrl", s.lobbyServerUrl);
+    JsonReadInt(j, "inputDelayFrames", s.inputDelayFrames, 1, 8);
+
+    JsonReadBool(j, "launchDirectly", s.launchDirectly);
+    JsonReadBool(j, "showFps", s.showFps);
+    JsonReadBool(j, "showFrameGraph", s.showFrameGraph);
+    JsonReadBool(j, "showNetStats", s.showNetStats);
+
+    out = s;
+    return true;
+}
+
+bool SaveSettings(const Settings& s, const std::string& path) {
+    const std::string target = path.empty() ? ConfigFilePath() : path;
+    size_t slash = target.find_last_of("\\/");
+    if (slash != std::string::npos) MakeDirsUtf8(target.substr(0, slash));
+
+    std::ostringstream o;
+    o << "{\n"
+      << "  \"assetPath\": \"" << JsonEscape(s.assetPath) << "\",\n"
+      << "  \"displayMode\": " << static_cast<int>(s.displayMode) << ",\n"
+      << "  \"displayWidth\": " << s.displayWidth << ",\n"
+      << "  \"displayHeight\": " << s.displayHeight << ",\n"
+      << "  \"monitorIndex\": " << s.monitorIndex << ",\n"
+      << "  \"aspectMode\": " << static_cast<int>(s.aspectMode) << ",\n"
+      << "  \"qualityPreset\": " << static_cast<int>(s.qualityPreset) << ",\n"
+      << "  \"renderScale\": " << s.renderScale << ",\n"
+      << "  \"textureFilter\": " << static_cast<int>(s.textureFilter) << ",\n"
+      << "  \"anisotropy\": " << s.anisotropy << ",\n"
+      << "  \"postScanlines\": " << (s.postScanlines ? "true" : "false") << ",\n"
+      << "  \"vsync\": " << static_cast<int>(s.vsync) << ",\n"
+      << "  \"swapBuffers\": " << s.swapBuffers << ",\n"
+      << "  \"presentationFpsLimit\": " << s.presentationFpsLimit << ",\n"
+      << "  \"masterVolume\": " << s.masterVolume << ",\n"
+      << "  \"musicVolume\": " << s.musicVolume << ",\n"
+      << "  \"sfxVolume\": " << s.sfxVolume << ",\n"
+      << "  \"mute\": " << (s.mute ? "true" : "false") << ",\n"
+      << "  \"audioDeviceId\": " << s.audioDeviceId << ",\n"
+      << "  \"p1_up\": " << s.p1Keys.up << ",\n"
+      << "  \"p1_down\": " << s.p1Keys.down << ",\n"
+      << "  \"p1_left\": " << s.p1Keys.left << ",\n"
+      << "  \"p1_right\": " << s.p1Keys.right << ",\n"
+      << "  \"p1_jump\": " << s.p1Keys.jump << ",\n"
+      << "  \"p1_attack\": " << s.p1Keys.attack << ",\n"
+      << "  \"p1_back\": " << s.p1Keys.back << ",\n"
+      << "  \"p1_start\": " << s.p1Keys.start << ",\n"
+      << "  \"p1_altUp\": " << s.p1Keys.altUp << ",\n"
+      << "  \"p1_altDown\": " << s.p1Keys.altDown << ",\n"
+      << "  \"p1_altLeft\": " << s.p1Keys.altLeft << ",\n"
+      << "  \"p1_altRight\": " << s.p1Keys.altRight << ",\n"
+      << "  \"p1_altJump\": " << s.p1Keys.altJump << ",\n"
+      << "  \"p1_altAttack\": " << s.p1Keys.altAttack << ",\n"
+      << "  \"p2_up\": " << s.p2Keys.up << ",\n"
+      << "  \"p2_down\": " << s.p2Keys.down << ",\n"
+      << "  \"p2_left\": " << s.p2Keys.left << ",\n"
+      << "  \"p2_right\": " << s.p2Keys.right << ",\n"
+      << "  \"p2_jump\": " << s.p2Keys.jump << ",\n"
+      << "  \"p2_attack\": " << s.p2Keys.attack << ",\n"
+      << "  \"p2_back\": " << s.p2Keys.back << ",\n"
+      << "  \"p2_start\": " << s.p2Keys.start << ",\n"
+      << "  \"p2_altJump\": " << s.p2Keys.altJump << ",\n"
