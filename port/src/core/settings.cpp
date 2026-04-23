@@ -670,3 +670,99 @@ AssetValidation ValidateAssetsAt(const std::string& candidateDir) {
         root + "\\eboot.bin",
         root + "\\nidhogg.elf",
         root + "\\work\\nidhogg.elf",
+        ExeDir() + "\\work\\nidhogg.elf",
+        ExeDir() + "\\..\\..\\work\\nidhogg.elf",
+    };
+    for (const auto& c : exeCandidates) {
+        if (!c.empty() && FileExistsUtf8(c)) {
+            v.executablePath = c;
+            break;
+        }
+    }
+    if (v.executablePath.empty()) v.missingFiles.push_back("eboot.bin (or nidhogg.elf)");
+
+    // Locate Data directory (either root\Data or parent\CUSA00920\Data when pointed at work\nidhogg.elf)
+    std::string dataRoot = root;
+    if (!DirExistsUtf8(dataRoot + "\\Data")) {
+        const std::string parentCands[] = {
+            root + "\\..",
+            root + "\\..\\CUSA00920",
+            root + "\\..\\..\\CUSA00920",
+        };
+        for (const auto& pc : parentCands) {
+            if (DirExistsUtf8(pc + "\\Data")) {
+                dataRoot = pc;
+                break;
+            }
+        }
+    }
+    v.rootDir = dataRoot;
+    v.dataDir = dataRoot + "\\Data";
+
+    const char* requiredAssets[] = {
+        "Data\\shader_vv.sb",
+        "Data\\shader_p.sb",
+        "Data\\Font.csv",
+        "Data\\circle.png",
+        "Data\\atlas\\0.png",
+        "Data\\atlas\\1.png",
+        "Data\\atlas\\0_outline.png",
+        "Data\\fonts\\fMenu.csv",
+        "Data\\fonts\\fMenu.png",
+        "Data\\audio\\audio.bnk",
+    };
+    for (const char* rel : requiredAssets) {
+        if (!FileExistsUtf8(dataRoot + "\\" + rel)) v.missingFiles.push_back(rel);
+    }
+
+    v.valid = v.missingFiles.empty();
+    if (v.valid) {
+        v.summary = "Verified Nidhogg (CUSA00920) game files at " + v.rootDir;
+    } else {
+        std::ostringstream oss;
+        oss << "Missing " << v.missingFiles.size() << " required file(s): ";
+        for (size_t i = 0; i < v.missingFiles.size() && i < 4; ++i) {
+            if (i) oss << ", ";
+            oss << v.missingFiles[i];
+        }
+        if (v.missingFiles.size() > 4) oss << ", ...";
+        v.summary = oss.str();
+    }
+    return v;
+}
+
+AssetValidation AutoDiscoverAssets(const Settings& s, const char* cliArg) {
+    std::vector<std::string> tries;
+    if (cliArg && *cliArg) tries.emplace_back(cliArg);
+    if (!s.assetPath.empty()) tries.push_back(s.assetPath);
+
+    char* env = nullptr;
+    size_t len = 0;
+    if (_dupenv_s(&env, &len, "NIDHOGG_APP0") == 0 && env && *env) {
+        tries.emplace_back(env);
+    }
+    if (env) std::free(env);
+
+    const std::string exe = ExeDir();
+    tries.push_back(exe);
+    tries.push_back(exe + "\\CUSA00920");
+    tries.push_back(exe + "\\..\\CUSA00920");
+    tries.push_back(exe + "\\..\\..\\CUSA00920");
+    tries.push_back(exe + "\\..\\..\\..\\CUSA00920");
+    tries.push_back(".\\CUSA00920");
+    tries.push_back("..\\CUSA00920");
+
+    AssetValidation firstFail;
+    for (const auto& c : tries) {
+        AssetValidation v = ValidateAssetsAt(c);
+        if (v.valid) return v;
+        if (firstFail.summary.empty()) firstFail = v;
+    }
+    return firstFail;
+}
+
+bool PromptForAssetDirectoryGui(void* parentHwnd, std::string& outSelectedDir) {
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    using Microsoft::WRL::ComPtr;
+    ComPtr<IFileOpenDialog> dlg;
+    if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
