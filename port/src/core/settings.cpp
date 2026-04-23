@@ -478,3 +478,99 @@ bool SaveSettings(const Settings& s, const std::string& path) {
       << "  \"p2_back\": " << s.p2Keys.back << ",\n"
       << "  \"p2_start\": " << s.p2Keys.start << ",\n"
       << "  \"p2_altJump\": " << s.p2Keys.altJump << ",\n"
+      << "  \"p1Controller\": " << s.p1Controller << ",\n"
+      << "  \"p2Controller\": " << s.p2Controller << ",\n"
+      << "  \"vibration\": " << (s.vibration ? "true" : "false") << ",\n"
+      << "  \"playerName\": \"" << JsonEscape(s.playerName) << "\",\n"
+      << "  \"region\": \"" << JsonEscape(s.region) << "\",\n"
+      << "  \"lobbyServerUrl\": \"" << JsonEscape(s.lobbyServerUrl) << "\",\n"
+      << "  \"inputDelayFrames\": " << s.inputDelayFrames << ",\n"
+      << "  \"launchDirectly\": " << (s.launchDirectly ? "true" : "false") << ",\n"
+      << "  \"showFps\": " << (s.showFps ? "true" : "false") << ",\n"
+      << "  \"showFrameGraph\": " << (s.showFrameGraph ? "true" : "false") << ",\n"
+      << "  \"showNetStats\": " << (s.showNetStats ? "true" : "false") << "\n"
+      << "}\n";
+
+    const std::string text = o.str();
+    std::FILE* f = FopenUtf8(target, "wb");
+    if (!f) return false;
+    const size_t wrote = std::fwrite(text.data(), 1, text.size(), f);
+    std::fclose(f);
+    return wrote == text.size();
+}
+
+void ResetSettingsToDefaults() {
+    std::string keepAssets = g_current.assetPath;
+    g_current = MakeDefaultSettings();
+    g_current.assetPath = keepAssets;
+    SaveSettings(g_current);
+}
+
+std::vector<MonitorInfo> EnumerateMonitors() {
+    std::vector<MonitorInfo> out;
+    using Microsoft::WRL::ComPtr;
+    ComPtr<IDXGIFactory1> factory;
+    if (SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))) {
+        for (UINT a = 0;; ++a) {
+            ComPtr<IDXGIAdapter1> adapter;
+            if (factory->EnumAdapters1(a, &adapter) == DXGI_ERROR_NOT_FOUND) break;
+            for (UINT o = 0;; ++o) {
+                ComPtr<IDXGIOutput> output;
+                if (adapter->EnumOutputs(o, &output) == DXGI_ERROR_NOT_FOUND) break;
+                DXGI_OUTPUT_DESC od{};
+                if (FAILED(output->GetDesc(&od)) || !od.AttachedToDesktop) continue;
+
+                MonitorInfo mi;
+                mi.index = static_cast<int>(out.size());
+                mi.name = WideToUtf8(od.DeviceName);
+                mi.left = od.DesktopCoordinates.left;
+                mi.top = od.DesktopCoordinates.top;
+                mi.width = static_cast<uint32_t>(od.DesktopCoordinates.right - od.DesktopCoordinates.left);
+                mi.height = static_cast<uint32_t>(od.DesktopCoordinates.bottom - od.DesktopCoordinates.top);
+                mi.primary = (mi.left == 0 && mi.top == 0);
+
+                UINT num = 0;
+                output->GetDisplayModeList(DXGI_FORMAT_R8G8B8A8_UNORM, 0, &num, nullptr);
+                if (num > 0) {
+                    std::vector<DXGI_MODE_DESC> modes(num);
+                    if (SUCCEEDED(output->GetDisplayModeList(DXGI_FORMAT_R8G8B8A8_UNORM, 0, &num,
+                                                             modes.data()))) {
+                        for (const auto& m : modes) {
+                            if (m.Width < 640 || m.Height < 360) continue;
+                            const uint32_t hz = m.RefreshRate.Denominator
+                                                    ? (m.RefreshRate.Numerator + m.RefreshRate.Denominator / 2) /
+                                                          m.RefreshRate.Denominator
+                                                    : 60;
+                            bool dup = false;
+                            for (auto& existing : mi.modes) {
+                                if (existing.width == m.Width && existing.height == m.Height) {
+                                    existing.refreshHz = std::max(existing.refreshHz, hz);
+                                    dup = true;
+                                    break;
+                                }
+                            }
+                            if (!dup) mi.modes.push_back({m.Width, m.Height, hz});
+                        }
+                    }
+                }
+                out.push_back(std::move(mi));
+            }
+        }
+    }
+    if (out.empty()) {
+        MonitorInfo fallback;
+        fallback.index = 0;
+        fallback.name = "Primary Display";
+        fallback.width = static_cast<uint32_t>(GetSystemMetrics(SM_CXSCREEN));
+        fallback.height = static_cast<uint32_t>(GetSystemMetrics(SM_CYSCREEN));
+        if (!fallback.width) fallback.width = 1920;
+        if (!fallback.height) fallback.height = 1080;
+        fallback.primary = true;
+        fallback.modes = {{1280, 720, 60}, {1600, 900, 60}, {1920, 1080, 60},
+                          {2560, 1440, 60}, {3840, 2160, 60}};
+        out.push_back(std::move(fallback));
+    }
+    return out;
+}
+
+std::vector<AudioDeviceInfo> EnumerateAudioDevices() {
