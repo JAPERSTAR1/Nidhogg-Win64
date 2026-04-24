@@ -766,3 +766,22 @@ bool PromptForAssetDirectoryGui(void* parentHwnd, std::string& outSelectedDir) {
     using Microsoft::WRL::ComPtr;
     ComPtr<IFileOpenDialog> dlg;
     if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
+                                IID_PPV_ARGS(&dlg))))
+        return false;
+
+    DWORD opts = 0;
+    dlg->GetOptions(&opts);
+    dlg->SetOptions(opts | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
+    dlg->SetTitle(L"Select Nidhogg (CUSA00920) Game Folder (containing eboot.bin and Data\\)");
+
+    if (FAILED(dlg->Show(static_cast<HWND>(parentHwnd)))) return false;
+    ComPtr<IShellItem> item;
+    if (FAILED(dlg->GetResult(&item))) return false;
+    PWSTR pszPath = nullptr;
+    if (FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &pszPath)) || !pszPath) return false;
+    outSelectedDir = WideToUtf8(pszPath);
+    CoTaskMemFree(pszPath);
+    return !outSelectedDir.empty();
+}
+
+}  // namespace ps4::core
