@@ -46,3 +46,99 @@ struct PlayerKeyBinds {
     int right = 0;
     int jump = 0;
     int attack = 0;
+    int back = 0;
+    int start = 0;
+
+    // Optional secondary bindings (e.g. Arrow keys on Player 1)
+    int altUp = 0;
+    int altDown = 0;
+    int altLeft = 0;
+    int altRight = 0;
+    int altJump = 0;
+    int altAttack = 0;
+};
+
+struct Settings {
+    // Paths
+    std::string assetPath;
+
+    // Display
+    DisplayMode displayMode = DisplayMode::Windowed;
+    uint32_t displayWidth = 1920;
+    uint32_t displayHeight = 1080;
+    int monitorIndex = 0;
+    AspectMode aspectMode = AspectMode::Preserve16x9;
+
+    // Graphics
+    QualityPreset qualityPreset = QualityPreset::High;
+    float renderScale = 1.0f;  // 0.5 .. 2.0 (internal RT multiplier over 1920x1080)
+    TextureFilterMode textureFilter = TextureFilterMode::PixelPoint;
+    int anisotropy = 1;        // 1, 2, 4, 8, 16
+    bool postScanlines = false;
+    VSyncMode vsync = VSyncMode::On;
+    int swapBuffers = 2;       // 2 or 3
+    int presentationFpsLimit = 60;  // 0 = Unlimited, 30, 60, 120, 144, or custom (simulation stays 60 Hz)
+
+    // Audio
+    float masterVolume = 1.0f;
+    float musicVolume = 0.85f;
+    float sfxVolume = 1.0f;
+    bool mute = false;
+    int audioDeviceId = -1;    // -1 = Windows default (WAVE_MAPPER)
+
+    // Input
+    PlayerKeyBinds p1Keys;
+    PlayerKeyBinds p2Keys;
+    int p1Controller = 0;      // -1 = disabled, 0..3 = XInput index
+    int p2Controller = 1;
+    bool vibration = true;
+
+    // Online
+    std::string playerName = "Fencer";
+    std::string region = "us-east";
+    std::string lobbyServerUrl = "http://127.0.0.1:27880";
+    int inputDelayFrames = 2;  // 1 .. 8
+
+    // General / Diagnostics
+    bool launchDirectly = false;
+    bool showFps = false;
+    bool showFrameGraph = false;
+    bool showNetStats = true;
+};
+
+struct DisplayModeInfo {
+    uint32_t width = 0;
+    uint32_t height = 0;
+    uint32_t refreshHz = 60;
+};
+
+struct MonitorInfo {
+    int index = 0;
+    std::string name;
+    int left = 0;
+    int top = 0;
+    uint32_t width = 1920;
+    uint32_t height = 1080;
+    bool primary = false;
+    std::vector<DisplayModeInfo> modes;
+};
+
+struct AudioDeviceInfo {
+    int id = -1;
+    std::string name;
+};
+
+struct KeyConflict {
+    std::string actionA;
+    std::string actionB;
+    int vk = 0;
+};
+
+// Unicode filesystem helpers
+std::wstring Utf8ToWide(const std::string& s);
+std::string WideToUtf8(const std::wstring& w);
+std::FILE* FopenUtf8(const std::string& path, const char* mode);
+bool FileExistsUtf8(const std::string& path);
+bool DirExistsUtf8(const std::string& path);
+bool MakeDirsUtf8(const std::string& dirPath);
+std::string ExeDir();
