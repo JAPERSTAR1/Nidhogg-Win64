@@ -947,6 +947,21 @@ void RenderFrame(void* hwnd, const std::vector<Draw>& draws) {
                     g.context->Unmap(stage.Get(), 0);
                 }
             }
+
+            DXGI_MODE_DESC md{};
+            md.Width = cfg.displayWidth ? cfg.displayWidth : mon.width;
+            md.Height = cfg.displayHeight ? cfg.displayHeight : mon.height;
+            md.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+            g.swap->ResizeTarget(&md);
+            if (SUCCEEDED(g.swap->SetFullscreenState(TRUE, targetOut.Get()))) {
+                enteredExclusive = true;
+                LOG_INFO("[display] entered Exclusive Fullscreen %ux%u on monitor #%d",
+                         md.Width, md.Height, mi);
+            }
+        }
+        if (!enteredExclusive) {
+            LOG_WARN("[display] DXGI Exclusive Fullscreen unavailable on current session; using Borderless Fullscreen fallback");
+            cfg.displayMode = core::DisplayMode::Borderless;
         }
     }
 
@@ -998,6 +1013,14 @@ void ShutdownRenderer() {
     g.blendDisabled.Reset();
     g.rasterizer.Reset();
     g.depthDisabled.Reset();
+    g.missingTexture.Reset();
+    g.defaultSampler.Reset();
+    g.swap.Reset();
+    g.context.Reset();
+    g.device.Reset();
+    g.ok = false;
+    g.tried = false;
+    g.displayInitialized = false;
 }
 
 }  // namespace ps4::gnm
