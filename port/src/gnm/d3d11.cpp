@@ -950,7 +950,54 @@ void RenderFrame(void* hwnd, const std::vector<Draw>& draws) {
         }
     }
 
-    g.swap->Present(1, 0);
+    if (g.swap && g.device) {
+        RECT client{};
+        GetClientRect(hwnd, &client);
+        g.swapWidth = 0;  // force backbuffer recreation
+        EnsureSwapchainSize(static_cast<uint32_t>(std::max<LONG>(16, client.right - client.left)),
+                            static_cast<uint32_t>(std::max<LONG>(16, client.bottom - client.top)),
+                            cfg.swapBuffers);
+    }
+}
+
+void ShutdownRenderer() {
+    ui::ShutdownOverlay();
+    if (g.swap) {
+        g.swap->SetFullscreenState(FALSE, nullptr);
+    }
+    for (auto& [k, srv] : g.textures) {
+        if (srv) srv->Release();
+    }
+    g.textures.clear();
+    for (auto& [k, smp] : g.samplers) {
+        if (smp) smp->Release();
+    }
+    g.samplers.clear();
+    for (auto& [k, bl] : g.blends) {
+        if (bl) bl->Release();
+    }
+    g.blends.clear();
+    g.offscreenRts.clear();
+    g.pendingClears.clear();
+    g.masterRtv.Reset();
+    g.masterSrv.Reset();
+    g.masterTex.Reset();
+    g.backBuffer.Reset();
+    g.vb.Reset();
+    g.ib.Reset();
+    g.cb.Reset();
+    g.presentCb.Reset();
+    g.presentVs.Reset();
+    g.presentPs.Reset();
+    g.presentPointSmp.Reset();
+    g.presentLinearSmp.Reset();
+    g.presentAnisoSmp.Reset();
+    g.vs.Reset();
+    g.ps.Reset();
+    g.layout.Reset();
+    g.blendDisabled.Reset();
+    g.rasterizer.Reset();
+    g.depthDisabled.Reset();
 }
 
 }  // namespace ps4::gnm
