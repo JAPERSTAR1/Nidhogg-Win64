@@ -779,9 +779,12 @@ void RenderFrame(void* hwnd, const std::vector<Draw>& draws) {
     g.context->OMSetBlendState(g.blendDisabled.Get(), nullptr, 0xffffffff);
     g.context->OMSetDepthStencilState(g.depthDisabled.Get(), 0);
     g.context->RSSetState(g.rasterizer.Get());
-    const D3D11_VIEWPORT viewport{0.0f, 0.0f, static_cast<float>(g.width),
-                                  static_cast<float>(g.height), 0.0f, 1.0f};
-    g.context->RSSetViewports(1, &viewport);
+    const D3D11_VIEWPORT masterVp{0.0f, 0.0f, static_cast<float>(g.masterWidth),
+                                  static_cast<float>(g.masterHeight), 0.0f, 1.0f};
+    g.context->RSSetViewports(1, &masterVp);
+
+    const float sx = static_cast<float>(g.masterWidth) / 1920.0f;
+    const float sy = static_cast<float>(g.masterHeight) / 1080.0f;
 
     g.vertices.clear();
     g.indices.clear();
@@ -803,7 +806,7 @@ void RenderFrame(void* hwnd, const std::vector<Draw>& draws) {
                         ((rgba >> 24) & 0xffu) / 255.0f,
                     }};
                     if (dst.base == mainRtAddr) {
-                        g.context->ClearRenderTargetView(g.backBuffer.Get(), cc.c);
+                        g.context->ClearRenderTargetView(g.masterRtv.Get(), cc.c);
                     } else {
                         auto rtIt = g.offscreenRts.find(dst.base);
                         if (rtIt != g.offscreenRts.end() && rtIt->second.rtv)
