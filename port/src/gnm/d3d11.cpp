@@ -773,9 +773,9 @@ void RenderFrame(void* hwnd, const std::vector<Draw>& draws) {
     }
 
     const float clear[4] = {0.0f, 0.0f, 0.0f, 1.0f};
-    ID3D11RenderTargetView* currentRtv = g.backBuffer.Get();
+    ID3D11RenderTargetView* currentRtv = g.masterRtv.Get();
     g.context->OMSetRenderTargets(1, &currentRtv, nullptr);
-    g.context->ClearRenderTargetView(g.backBuffer.Get(), clear);
+    g.context->ClearRenderTargetView(g.masterRtv.Get(), clear);
     g.context->OMSetBlendState(g.blendDisabled.Get(), nullptr, 0xffffffff);
     g.context->OMSetDepthStencilState(g.depthDisabled.Get(), 0);
     g.context->RSSetState(g.rasterizer.Get());
