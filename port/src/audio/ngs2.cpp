@@ -811,6 +811,9 @@ int32_t AudioOutOutputs(const void* params, uint32_t count) {
             if (h > 0 && h < 16 && g_ports[h].inUse) {
                 primary = &g_ports[h];
                 grain = primary->grainSamples;
+                if (primary->openedDeviceId != wantDev) {
+                    OpenWaveDeviceLocked(*primary, wantDev);
+                }
                 break;
             }
         }
@@ -867,7 +870,11 @@ int32_t AudioOutOutputs(const void* params, uint32_t count) {
         dst[s * 2 + 0] = static_cast<int16_t>(std::clamp(sumL[s], -1.0f, 1.0f) * 32767.0f);
         dst[s * 2 + 1] = static_cast<int16_t>(std::clamp(sumR[s], -1.0f, 1.0f) * 32767.0f);
     }
-    waveOutWrite(primary->hwo, &hdr, sizeof(WAVEHDR));
+    MMRESULT wr = waveOutWrite(primary->hwo, &hdr, sizeof(WAVEHDR));
+    if (wr == MMSYSERR_NODRIVER || wr == WAVERR_UNPREPARED) {
+        std::scoped_lock lk(g_audioOutMtx);
+        OpenWaveDeviceLocked(*primary, -1);
+    }
     return static_cast<int32_t>(grain);
 }
 
