@@ -875,19 +875,27 @@ int32_t AudioOutClose(int32_t handle) {
     std::scoped_lock lk(g_audioOutMtx);
     if (handle <= 0 || handle >= 16 || !g_ports[handle].inUse) return 0;
     WavePort& p = g_ports[handle];
-    if (p.hwo) {
-        waveOutReset(p.hwo);
-        for (int i = 0; i < WavePort::kNumBufs; ++i)
-            waveOutUnprepareHeader(p.hwo, &p.hdrs[i], sizeof(WAVEHDR));
-        waveOutClose(p.hwo);
-        p.hwo = nullptr;
-    }
+    CloseWaveDeviceLocked(p);
     if (p.ev) {
         CloseHandle(p.ev);
         p.ev = nullptr;
     }
     p.inUse = false;
     return 0;
+}
+
+void ShutdownAudio() {
+    g_shuttingDown.store(true, std::memory_order_relaxed);
+    std::scoped_lock lk(g_audioOutMtx);
+    for (int i = 1; i < 16; ++i) {
+        if (!g_ports[i].inUse) continue;
+        CloseWaveDeviceLocked(g_ports[i]);
+        if (g_ports[i].ev) {
+            CloseHandle(g_ports[i].ev);
+            g_ports[i].ev = nullptr;
+        }
+        g_ports[i].inUse = false;
+    }
 }
 
 uint64_t MixedFrames() { return g_mixedFrames.load(std::memory_order_relaxed); }
