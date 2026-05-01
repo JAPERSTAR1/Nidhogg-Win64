@@ -750,27 +750,7 @@ int32_t AudioOutOpen(int32_t /*userId*/, int32_t /*type*/, int32_t /*index*/, ui
     else if (fmt == 4) { p.channels = 2; p.isFloat = true; }
     else { p.channels = 8; p.isFloat = true; }
 
-    p.ev = CreateEventA(nullptr, FALSE, FALSE, nullptr);
-    WAVEFORMATEX wfx{};
-    wfx.wFormatTag = WAVE_FORMAT_PCM;
-    wfx.nChannels = 2;
-    wfx.nSamplesPerSec = freq ? freq : 48000;
-    wfx.wBitsPerSample = 16;
-    wfx.nBlockAlign = 4;
-    wfx.nAvgBytesPerSec = wfx.nSamplesPerSec * wfx.nBlockAlign;
-
-    if (waveOutOpen(&p.hwo, WAVE_MAPPER, &wfx, reinterpret_cast<DWORD_PTR>(p.ev), 0,
-                    CALLBACK_EVENT) == MMSYSERR_NOERROR) {
-        for (int i = 0; i < WavePort::kNumBufs; ++i) {
-            p.bufs[i].assign(static_cast<size_t>(p.grainSamples * 2), 0);
-            std::memset(&p.hdrs[i], 0, sizeof(WAVEHDR));
-            p.hdrs[i].lpData = reinterpret_cast<LPSTR>(p.bufs[i].data());
-            p.hdrs[i].dwBufferLength = p.grainSamples * 4;
-            waveOutPrepareHeader(p.hwo, &p.hdrs[i], sizeof(WAVEHDR));
-        }
-    } else {
-        p.hwo = nullptr;
-    }
+    OpenWaveDeviceLocked(p, core::CurrentSettings().audioDeviceId);
     return slot;
 }
 
@@ -802,6 +782,12 @@ int32_t AudioOutOutputs(const void* params, uint32_t count) {
     if (!count || count > 16 || !HostOk(params, count * sizeof(OutParam))) return 0;
     const auto* list = static_cast<const OutParam*>(params);
 
+    if (g_shuttingDown.load(std::memory_order_relaxed)) {
+        Sleep(5);
+        return 0;
+    }
+
+    const int wantDev = core::CurrentSettings().audioDeviceId;
     WavePort* primary = nullptr;
     uint32_t grain = 512;
     {
