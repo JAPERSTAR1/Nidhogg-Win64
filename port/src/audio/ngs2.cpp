@@ -312,7 +312,52 @@ struct WavePort {
 };
 
 std::mutex g_audioOutMtx;
+std::atomic<bool> g_shuttingDown{false};
 WavePort g_ports[16];
+
+void CloseWaveDeviceLocked(WavePort& p) {
+    if (p.hwo) {
+        waveOutReset(p.hwo);
+        for (int i = 0; i < WavePort::kNumBufs; ++i)
+            waveOutUnprepareHeader(p.hwo, &p.hdrs[i], sizeof(WAVEHDR));
+        waveOutClose(p.hwo);
+        p.hwo = nullptr;
+    }
+}
+
+void OpenWaveDeviceLocked(WavePort& p, int deviceId) {
+    CloseWaveDeviceLocked(p);
+    p.openedDeviceId = deviceId;
+    p.nextBuf = 0;
+    if (!p.ev) p.ev = CreateEventA(nullptr, FALSE, FALSE, nullptr);
+
+    WAVEFORMATEX wfx{};
+    wfx.wFormatTag = WAVE_FORMAT_PCM;
+    wfx.nChannels = 2;
+    wfx.nSamplesPerSec = p.sampleRate ? p.sampleRate : 48000;
+    wfx.wBitsPerSample = 16;
+    wfx.nBlockAlign = 4;
+    wfx.nAvgBytesPerSec = wfx.nSamplesPerSec * wfx.nBlockAlign;
+
+    const UINT dev = (deviceId < 0) ? WAVE_MAPPER : static_cast<UINT>(deviceId);
+    MMRESULT mr = waveOutOpen(&p.hwo, dev, &wfx, reinterpret_cast<DWORD_PTR>(p.ev), 0,
+                              CALLBACK_EVENT);
+    if (mr != MMSYSERR_NOERROR && dev != WAVE_MAPPER) {
+        mr = waveOutOpen(&p.hwo, WAVE_MAPPER, &wfx, reinterpret_cast<DWORD_PTR>(p.ev), 0,
+                         CALLBACK_EVENT);
+    }
+    if (mr == MMSYSERR_NOERROR) {
+        for (int i = 0; i < WavePort::kNumBufs; ++i) {
+            p.bufs[i].assign(static_cast<size_t>(p.grainSamples * 2), 0);
+            std::memset(&p.hdrs[i], 0, sizeof(WAVEHDR));
+            p.hdrs[i].lpData = reinterpret_cast<LPSTR>(p.bufs[i].data());
+            p.hdrs[i].dwBufferLength = p.grainSamples * 4;
+            waveOutPrepareHeader(p.hwo, &p.hdrs[i], sizeof(WAVEHDR));
+        }
+    } else {
+        p.hwo = nullptr;
+    }
+}
 
 }  // namespace
 
