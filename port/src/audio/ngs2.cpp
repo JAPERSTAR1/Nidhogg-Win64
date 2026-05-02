@@ -613,6 +613,11 @@ int32_t Ngs2SystemRender(uint64_t systemHandle, const void* bufferInfos, uint32_
     const uint32_t grain = sys.grainSamples;
     const double outRate = static_cast<double>(sys.sampleRate ? sys.sampleRate : 48000u);
 
+    const auto& cfg = core::CurrentSettings();
+    const float masterGain = cfg.mute ? 0.0f : std::clamp(cfg.masterVolume, 0.0f, 1.0f);
+    const float musicGain = masterGain * std::clamp(cfg.musicVolume, 0.0f, 1.0f);
+    const float sfxGain = masterGain * std::clamp(cfg.sfxVolume, 0.0f, 1.0f);
+
     std::vector<float> mixL(grain, 0.0f);
     std::vector<float> mixR(grain, 0.0f);
     uint32_t activeCount = 0;
@@ -630,6 +635,10 @@ int32_t Ngs2SystemRender(uint64_t systemHandle, const void* bufferInfos, uint32_
                 ++activeCount;
                 continue;
             }
+
+            const bool isMusic = (v.fmt.numChannels >= 2) ||
+                                 (v.at9Valid && v.at9Info.channels >= 2);
+            const float catGain = isMusic ? musicGain : sfxGain;
 
             const uint32_t srcRate = v.at9Valid && v.at9Info.samplingRate > 0
                                          ? static_cast<uint32_t>(v.at9Info.samplingRate)
