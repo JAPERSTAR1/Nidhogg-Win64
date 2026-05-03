@@ -299,10 +299,12 @@ struct WavePort {
     static constexpr int kNumBufs = 6;
     bool inUse = false;
     uint32_t grainSamples = 512;
+    uint32_t sampleRate = 48000;
     uint32_t channels = 8;
     bool isFloat = true;
     float volL = 1.0f;
     float volR = 1.0f;
+    int openedDeviceId = -999;
 
     HWAVEOUT hwo = nullptr;
     HANDLE ev = nullptr;
