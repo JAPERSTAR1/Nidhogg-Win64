@@ -2,6 +2,7 @@
 #include "ngs2.h"
 
 #include "../atrac9/libatrac9.h"
+#include "../core/settings.h"
 #include "../gnm/pm4.h"
 
 #include <windows.h>
