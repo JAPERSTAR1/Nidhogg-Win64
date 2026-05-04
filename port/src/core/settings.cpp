@@ -574,3 +574,99 @@ std::vector<MonitorInfo> EnumerateMonitors() {
 }
 
 std::vector<AudioDeviceInfo> EnumerateAudioDevices() {
+    std::vector<AudioDeviceInfo> out;
+    out.push_back({-1, "Windows Default Audio Device"});
+    const UINT n = waveOutGetNumDevs();
+    for (UINT i = 0; i < n; ++i) {
+        WAVEOUTCAPSW caps{};
+        if (waveOutGetDevCapsW(i, &caps, sizeof(caps)) == MMSYSERR_NOERROR) {
+            out.push_back({static_cast<int>(i), WideToUtf8(caps.szPname)});
+        }
+    }
+    return out;
+}
+
+std::vector<KeyConflict> DetectKeyConflicts(const Settings& s) {
+    struct Entry {
+        const char* name;
+        int vk;
+    };
+    const Entry entries[] = {
+        {"P1 Up", s.p1Keys.up},         {"P1 Down", s.p1Keys.down},
+        {"P1 Left", s.p1Keys.left},     {"P1 Right", s.p1Keys.right},
+        {"P1 Jump", s.p1Keys.jump},     {"P1 Attack", s.p1Keys.attack},
+        {"P1 Back", s.p1Keys.back},     {"P1 Start", s.p1Keys.start},
+        {"P2 Up", s.p2Keys.up},         {"P2 Down", s.p2Keys.down},
+        {"P2 Left", s.p2Keys.left},     {"P2 Right", s.p2Keys.right},
+        {"P2 Jump", s.p2Keys.jump},     {"P2 Attack", s.p2Keys.attack},
+        {"P2 Back", s.p2Keys.back},     {"P2 Start", s.p2Keys.start},
+    };
+    std::vector<KeyConflict> conflicts;
+    for (size_t i = 0; i < std::size(entries); ++i) {
+        if (!entries[i].vk) continue;
+        for (size_t j = i + 1; j < std::size(entries); ++j) {
+            if (entries[i].vk == entries[j].vk) {
+                conflicts.push_back({entries[i].name, entries[j].name, entries[i].vk});
+            }
+        }
+    }
+    return conflicts;
+}
+
+const char* VirtualKeyName(int vk) {
+    switch (vk) {
+        case 0: return "Unbound";
+        case VK_SPACE: return "Space";
+        case VK_RETURN: return "Enter";
+        case VK_ESCAPE: return "Esc";
+        case VK_BACK: return "Backspace";
+        case VK_TAB: return "Tab";
+        case VK_UP: return "Up";
+        case VK_DOWN: return "Down";
+        case VK_LEFT: return "Left";
+        case VK_RIGHT: return "Right";
+        case VK_LSHIFT: case VK_SHIFT: return "Shift";
+        case VK_RSHIFT: return "RShift";
+        case VK_LCONTROL: case VK_CONTROL: return "Ctrl";
+        case VK_RCONTROL: return "RCtrl";
+        case VK_MENU: return "Alt";
+        default: break;
+    }
+    static char s_names[256][8] = {};
+    if (vk >= '0' && vk <= 'Z') {
+        s_names[vk][0] = static_cast<char>(vk);
+        s_names[vk][1] = '\0';
+        return s_names[vk];
+    }
+    if (vk >= VK_F1 && vk <= VK_F12) {
+        std::snprintf(s_names[vk & 255], 8, "F%d", vk - VK_F1 + 1);
+        return s_names[vk & 255];
+    }
+    std::snprintf(s_names[vk & 255], 8, "0x%02X", vk & 255);
+    return s_names[vk & 255];
+}
+
+AssetValidation ValidateAssetsAt(const std::string& candidateDir) {
+    AssetValidation v;
+    if (candidateDir.empty()) {
+        v.summary = "No game asset directory specified.";
+        return v;
+    }
+
+    // Accept either a folder directly, or a direct path to eboot.bin / nidhogg.elf.
+    std::string root = candidateDir;
+    std::string explicitExe;
+    if (FileExistsUtf8(candidateDir)) {
+        explicitExe = candidateDir;
+        size_t sl = root.find_last_of("\\/");
+        root = (sl != std::string::npos) ? root.substr(0, sl) : ".";
+    }
+    while (root.size() > 3 && (root.back() == '\\' || root.back() == '/')) root.pop_back();
+    v.rootDir = root;
+
+    // Locate executable: explicit, eboot.bin, nidhogg.elf, or work/nidhogg.elf
+    const std::string exeCandidates[] = {
+        explicitExe,
+        root + "\\eboot.bin",
+        root + "\\nidhogg.elf",
+        root + "\\work\\nidhogg.elf",
