@@ -142,3 +142,40 @@ bool FileExistsUtf8(const std::string& path);
 bool DirExistsUtf8(const std::string& path);
 bool MakeDirsUtf8(const std::string& dirPath);
 std::string ExeDir();
+
+// Writable user data directory (portable if writable & portable, else %LOCALAPPDATA%\Nidhogg)
+void SetUserDirOverride(const std::string& dir);
+const std::string& UserDir();
+std::string ConfigFilePath();
+std::string SavesDirPath();
+std::string LogsDirPath();
+
+// Settings lifecycle
+Settings MakeDefaultSettings();
+void ApplyQualityPreset(Settings& s, QualityPreset preset);
+Settings& CurrentSettings();
+bool LoadSettings(Settings& out, const std::string& path = {});
+bool SaveSettings(const Settings& s, const std::string& path = {});
+void ResetSettingsToDefaults();
+
+// Hardware enumeration & input validation
+std::vector<MonitorInfo> EnumerateMonitors();
+std::vector<AudioDeviceInfo> EnumerateAudioDevices();
+std::vector<KeyConflict> DetectKeyConflicts(const Settings& s);
+const char* VirtualKeyName(int vk);
+
+// Asset discovery & validation (accepts CUSA00920 root or folder with eboot.bin/nidhogg.elf + Data/)
+struct AssetValidation {
+    bool valid = false;
+    std::string rootDir;
+    std::string executablePath;  // eboot.bin or nidhogg.elf
+    std::string dataDir;
+    std::vector<std::string> missingFiles;
+    std::string summary;
+};
+
+AssetValidation ValidateAssetsAt(const std::string& candidateDir);
+AssetValidation AutoDiscoverAssets(const Settings& s, const char* cliArg = nullptr);
+bool PromptForAssetDirectoryGui(void* parentHwnd, std::string& outSelectedDir);
+
+}  // namespace ps4::core
