@@ -894,9 +894,17 @@ void RenderFrame(void* hwnd, const std::vector<Draw>& draws) {
             std::free(env);
         }
     }
-    bool takeShot = false;
-    for (uint64_t f : s_shotFrames) {
-        if (f == s_frame) { takeShot = true; break; }
+
+    CompositeAndPresent(hwnd, s_simFrame, true);
+}
+
+void PresentCachedFrame(void* hwndVoid) {
+    HWND hwnd = static_cast<HWND>(hwndVoid);
+    if (!hwnd || !g.ok || !g.swap || !g.masterSrv) return;
+    MSG msg;
+    while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
     }
     if (!EnsureRenderer(hwnd)) return;
     CompositeAndPresent(hwnd, 0, false);
@@ -946,6 +954,31 @@ void ApplyDisplaySettings(void* hwndVoid) {
         SetWindowLongPtrW(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
         SetWindowPos(hwnd, HWND_TOP, mon.left, mon.top,
                      static_cast<int>(mon.width), static_cast<int>(mon.height),
+                     SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+        LOG_INFO("[display] applied Borderless Windowed %ux%u on monitor #%d",
+                 mon.width, mon.height, mi);
+    } else if (cfg.displayMode == core::DisplayMode::ExclusiveFullscreen) {
+        SetWindowLongPtrW(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+        SetWindowPos(hwnd, HWND_TOP, mon.left, mon.top,
+                     static_cast<int>(mon.width), static_cast<int>(mon.height),
+                     SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+
+        bool enteredExclusive = false;
+        if (g.swap) {
+            ComPtr<IDXGIOutput> targetOut;
+            ComPtr<IDXGIFactory1> fac;
+            if (SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&fac)))) {
+                int curIdx = 0;
+                for (UINT a = 0; !targetOut; ++a) {
+                    ComPtr<IDXGIAdapter1> adp;
+                    if (fac->EnumAdapters1(a, &adp) == DXGI_ERROR_NOT_FOUND) break;
+                    for (UINT o = 0;; ++o) {
+                        ComPtr<IDXGIOutput> out;
+                        if (adp->EnumOutputs(o, &out) == DXGI_ERROR_NOT_FOUND) break;
+                        DXGI_OUTPUT_DESC od{};
+                        if (FAILED(out->GetDesc(&od)) || !od.AttachedToDesktop) continue;
+                        if (curIdx == mi) { targetOut = out; break; }
+                        ++curIdx;
                     }
                 }
             }
