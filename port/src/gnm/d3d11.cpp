@@ -771,6 +771,102 @@ void MaybeCaptureScreenshot(uint64_t simFrame) {
     D3D11_MAPPED_SUBRESOURCE map{};
     if (FAILED(g.context->Map(stage.Get(), 0, D3D11_MAP_READ, 0, &map))) return;
 
+    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    ComPtr<IWICImagingFactory> wic;
+    if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr,
+                                   CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic)))) {
+        std::string shotPath = s_shotDir + "\\shot_" + std::to_string(simFrame) + ".png";
+        std::wstring wpath = core::Utf8ToWide(shotPath);
+        ComPtr<IWICStream> stream;
+        ComPtr<IWICBitmapEncoder> enc;
+        ComPtr<IWICBitmapFrameEncode> frm;
+        if (!wpath.empty() &&
+            SUCCEEDED(wic->CreateStream(&stream)) &&
+            SUCCEEDED(stream->InitializeFromFilename(wpath.c_str(), GENERIC_WRITE)) &&
+            SUCCEEDED(wic->CreateEncoder(GUID_ContainerFormatPng, nullptr, &enc)) &&
+            SUCCEEDED(enc->Initialize(stream.Get(), WICBitmapEncoderNoCache)) &&
+            SUCCEEDED(enc->CreateNewFrame(&frm, nullptr)) &&
+            SUCCEEDED(frm->Initialize(nullptr)) &&
+            SUCCEEDED(frm->SetSize(td.Width, td.Height))) {
+            WICPixelFormatGUID pf = GUID_WICPixelFormat32bppRGBA;
+            frm->SetPixelFormat(&pf);
+            ComPtr<IWICBitmap> bmp;
+            if (SUCCEEDED(wic->CreateBitmapFromMemory(
+                    td.Width, td.Height, GUID_WICPixelFormat32bppRGBA,
+                    map.RowPitch, map.RowPitch * td.Height,
+                    static_cast<BYTE*>(map.pData), &bmp))) {
+                frm->WriteSource(bmp.Get(), nullptr);
+                frm->Commit();
+                enc->Commit();
+                LOG_INFO("[d3d11] saved %s", shotPath.c_str());
+            }
+        }
+    }
+    g.context->Unmap(stage.Get(), 0);
+}
+
+void CompositeAndPresent(HWND hwnd, uint64_t simFrame, bool isNewSimFrame) {
+    if (!g.backBuffer || !g.masterSrv) return;
+    const auto& cfg = core::CurrentSettings();
+
+    // Unbind masterRtv before sampling masterSrv
+    ID3D11RenderTargetView* backRtv = g.backBuffer.Get();
+    g.context->OMSetRenderTargets(1, &backRtv, nullptr);
+    const float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    g.context->ClearRenderTargetView(backRtv, black);
+
+    // Compute aspect-correct presentation viewport (16:9 letterbox/pillarbox or integer scale)
+    const float sw = static_cast<float>(g.swapWidth);
+    const float sh = static_cast<float>(g.swapHeight);
+    float vpW = sw, vpH = sh;
+    if (cfg.aspectMode == core::AspectMode::IntegerScale && sw >= 480.0f && sh >= 270.0f) {
+        const int scale = std::max(1, std::min(static_cast<int>(sw) / 480, static_cast<int>(sh) / 270));
+        vpW = static_cast<float>(480 * scale);
+        vpH = static_cast<float>(270 * scale);
+    } else {
+        if (sw * 9.0f > sh * 16.0f) {
+            vpH = sh;
+            vpW = std::floor(sh * (16.0f / 9.0f) + 0.5f);
+        } else {
+            vpW = sw;
+            vpH = std::floor(sw * (9.0f / 16.0f) + 0.5f);
+        }
+    }
+    const float vpX = std::floor((sw - vpW) * 0.5f);
+    const float vpY = std::floor((sh - vpH) * 0.5f);
+
+    const D3D11_VIEWPORT presVp{vpX, vpY, vpW, vpH, 0.0f, 1.0f};
+    g.context->RSSetViewports(1, &presVp);
+    g.context->RSSetState(g.rasterizer.Get());
+    g.context->OMSetBlendState(g.blendDisabled.Get(), nullptr, 0xffffffffu);
+    g.context->OMSetDepthStencilState(g.depthDisabled.Get(), 0);
+
+    PresentCb pcb{};
+    pcb.texSize[0] = static_cast<float>(g.masterWidth);
+    pcb.texSize[1] = static_cast<float>(g.masterHeight);
+    pcb.invTexSize[0] = 1.0f / pcb.texSize[0];
+    pcb.invTexSize[1] = 1.0f / pcb.texSize[1];
+    pcb.filterMode = static_cast<int>(cfg.textureFilter);
+    pcb.scanlines = cfg.postScanlines ? 1 : 0;
+
+    D3D11_MAPPED_SUBRESOURCE map{};
+    if (SUCCEEDED(g.context->Map(g.presentCb.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &map))) {
+        std::memcpy(map.pData, &pcb, sizeof(pcb));
+        g.context->Unmap(g.presentCb.Get(), 0);
+    }
+
+    ID3D11SamplerState* smp = g.presentPointSmp.Get();
+    if (cfg.textureFilter == core::TextureFilterMode::SharpBilinear ||
+        cfg.textureFilter == core::TextureFilterMode::Bilinear) {
+        smp = g.presentLinearSmp.Get();
+    } else if (cfg.textureFilter == core::TextureFilterMode::Anisotropic) {
+        const int wantAniso = std::clamp(cfg.anisotropy, 1, 16);
+        if (!g.presentAnisoSmp || g.builtAnisoLevel != wantAniso) {
+            g.presentAnisoSmp.Reset();
+            D3D11_SAMPLER_DESC ad{};
+            ad.Filter = wantAniso > 1 ? D3D11_FILTER_ANISOTROPIC : D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+            ad.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+            ad.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
 }
 
 }  // namespace
