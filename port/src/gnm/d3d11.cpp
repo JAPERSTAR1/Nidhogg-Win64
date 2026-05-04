@@ -731,26 +731,12 @@ void UploadAndDraw(uint32_t vpWidth, uint32_t vpHeight) {
 
 void RenderFrame(void* hwnd, const std::vector<Draw>& draws) {
     if (!hwnd || draws.empty()) return;
+    if (!EnsureRenderer(hwnd)) return;
 
-    // Pick the swapchain dimensions from the final display-buffer draw so an
-    // earlier 512x256 or 1024x256 offscreen pass never shrinks the backbuffer.
-    uint32_t vpWidth = 1920, vpHeight = 1080;
-    for (auto it = draws.rbegin(); it != draws.rend(); ++it) {
-        if (it->kind != Draw::Kind::Indexed) continue;
-        const uint32_t* sh = it->regs[Space::Sh];
-        if (sh[0x048] && sh[0x048] != 0x40100010u) continue;
-        const uint32_t* cx = it->regs[Space::Context];
-        const float xScale = *reinterpret_cast<const float*>(&cx[kCtxViewport + 0]);
-        const float yScale = *reinterpret_cast<const float*>(&cx[kCtxViewport + 2]);
-        if (xScale > 0.0f && yScale < 0.0f) {
-            vpWidth = static_cast<uint32_t>(xScale * 2.0f + 0.5f);
-            vpHeight = static_cast<uint32_t>(-yScale * 2.0f + 0.5f);
-        }
-        break;
-    }
-    if (vpWidth < 16 || vpHeight < 16 || vpWidth > 4096 || vpHeight > 4096) {
-        vpWidth = 1920;
-        vpHeight = 1080;
+    MSG msg;
+    while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
     }
 
     const auto& cfg = core::CurrentSettings();
