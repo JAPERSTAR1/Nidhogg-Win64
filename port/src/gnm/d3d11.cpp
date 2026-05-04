@@ -848,8 +848,10 @@ void RenderFrame(void* hwnd, const std::vector<Draw>& draws) {
         }
 
         if (xScale > 0.0f && yScale < 0.0f) {
-            const D3D11_VIEWPORT dvp{xOffset - xScale, yOffset + yScale, xScale * 2.0f,
-                                     -yScale * 2.0f, 0.0f, 1.0f};
+            const float mulX = isOffscreen ? 1.0f : sx;
+            const float mulY = isOffscreen ? 1.0f : sy;
+            const D3D11_VIEWPORT dvp{(xOffset - xScale) * mulX, (yOffset + yScale) * mulY,
+                                     (xScale * 2.0f) * mulX, (-yScale * 2.0f) * mulY, 0.0f, 1.0f};
             g.context->RSSetViewports(1, &dvp);
         }
 
@@ -869,30 +871,19 @@ void RenderFrame(void* hwnd, const std::vector<Draw>& draws) {
         if (!sampler) sampler = g.defaultSampler.Get();
         g.context->PSSetShaderResources(0, 1, &srv);
         g.context->PSSetSamplers(0, 1, &sampler);
-        UploadAndDraw(g.width, g.height);
+        UploadAndDraw();
         g.indices.resize(firstIndex);
         g.vertices.clear();
     }
 
-    static uint64_t s_frame = 0;
-    ++s_frame;
-    static std::vector<uint64_t> s_shotFrames;
-    static bool s_parsedShots = false;
-    if (!s_parsedShots) {
-        s_parsedShots = true;
-        char* env = nullptr;
-        size_t len = 0;
-        if (_dupenv_s(&env, &len, "NIDHOGG_SCREENSHOT") == 0 && env) {
-            const char* p = env;
-            while (*p) {
-                char* end = nullptr;
-                unsigned long long f = std::strtoull(p, &end, 10);
-                if (end == p) break;
-                if (f > 0) s_shotFrames.push_back(f);
-                p = (*end == ',') ? (end + 1) : end;
-            }
-            std::free(env);
-        }
+    static uint64_t s_simFrame = 0;
+    ++s_simFrame;
+
+    // Decoupled 30 FPS presentation cap: simulation continues at 60.00 Hz while
+    // every 2nd frame skips swapchain presentation unless a screenshot is scheduled.
+    if (cfg.presentationFpsLimit > 0 && cfg.presentationFpsLimit <= 30 && (s_simFrame & 1u) != 0) {
+        MaybeCaptureScreenshot(s_simFrame);
+        return;
     }
 
     CompositeAndPresent(hwnd, s_simFrame, true);
