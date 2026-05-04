@@ -286,3 +286,99 @@ Settings MakeDefaultSettings() {
     s.p2Keys.up = 'I';
     s.p2Keys.down = 'K';
     s.p2Keys.left = 'J';
+    s.p2Keys.right = 'L';
+    s.p2Keys.jump = 'O';
+    s.p2Keys.attack = 'U';
+    s.p2Keys.back = VK_BACK;
+    s.p2Keys.start = VK_RSHIFT;
+    s.p2Keys.altJump = VK_RCONTROL;
+    return s;
+}
+
+void ApplyQualityPreset(Settings& s, QualityPreset preset) {
+    s.qualityPreset = preset;
+    switch (preset) {
+        case QualityPreset::Low:
+            s.renderScale = 0.5f;
+            s.textureFilter = TextureFilterMode::PixelPoint;
+            s.anisotropy = 1;
+            s.postScanlines = false;
+            s.swapBuffers = 2;
+            break;
+        case QualityPreset::Medium:
+            s.renderScale = 1.0f;
+            s.textureFilter = TextureFilterMode::PixelPoint;
+            s.anisotropy = 1;
+            s.postScanlines = false;
+            s.swapBuffers = 2;
+            break;
+        case QualityPreset::High:
+            s.renderScale = 1.0f;
+            s.textureFilter = TextureFilterMode::PixelPoint;
+            s.anisotropy = 4;
+            s.postScanlines = false;
+            s.swapBuffers = 2;
+            break;
+        case QualityPreset::Ultra:
+            s.renderScale = 2.0f;
+            s.textureFilter = TextureFilterMode::SharpBilinear;
+            s.anisotropy = 16;
+            s.postScanlines = false;
+            s.swapBuffers = 2;
+            break;
+        case QualityPreset::Custom:
+            break;
+    }
+}
+
+Settings& CurrentSettings() { return g_current; }
+
+bool LoadSettings(Settings& out, const std::string& path) {
+    const std::string target = path.empty() ? ConfigFilePath() : path;
+    std::FILE* f = FopenUtf8(target, "rb");
+    if (!f) {
+        out = MakeDefaultSettings();
+        return false;
+    }
+    std::fseek(f, 0, SEEK_END);
+    const long sz = std::ftell(f);
+    std::fseek(f, 0, SEEK_SET);
+    if (sz <= 0 || sz > (1 << 20)) {
+        std::fclose(f);
+        out = MakeDefaultSettings();
+        return false;
+    }
+    std::string j(static_cast<size_t>(sz), '\0');
+    std::fread(j.data(), 1, j.size(), f);
+    std::fclose(f);
+
+    Settings s = MakeDefaultSettings();
+    JsonReadStr(j, "assetPath", s.assetPath);
+
+    int dm = static_cast<int>(s.displayMode);
+    JsonReadInt(j, "displayMode", dm, 0, 2);
+    s.displayMode = static_cast<DisplayMode>(dm);
+    JsonReadU32(j, "displayWidth", s.displayWidth, 640, 7680);
+    JsonReadU32(j, "displayHeight", s.displayHeight, 360, 4320);
+    JsonReadInt(j, "monitorIndex", s.monitorIndex, 0, 15);
+    int am = static_cast<int>(s.aspectMode);
+    JsonReadInt(j, "aspectMode", am, 0, 1);
+    s.aspectMode = static_cast<AspectMode>(am);
+
+    int qp = static_cast<int>(s.qualityPreset);
+    JsonReadInt(j, "qualityPreset", qp, 0, 4);
+    s.qualityPreset = static_cast<QualityPreset>(qp);
+    JsonReadFloat(j, "renderScale", s.renderScale, 0.5f, 2.0f);
+    int tf = static_cast<int>(s.textureFilter);
+    JsonReadInt(j, "textureFilter", tf, 0, 3);
+    s.textureFilter = static_cast<TextureFilterMode>(tf);
+    JsonReadInt(j, "anisotropy", s.anisotropy, 1, 16);
+    JsonReadBool(j, "postScanlines", s.postScanlines);
+    int vs = static_cast<int>(s.vsync);
+    JsonReadInt(j, "vsync", vs, 0, 2);
+    s.vsync = static_cast<VSyncMode>(vs);
+    JsonReadInt(j, "swapBuffers", s.swapBuffers, 2, 3);
+    JsonReadInt(j, "presentationFpsLimit", s.presentationFpsLimit, 0, 1000);
+
+    JsonReadFloat(j, "masterVolume", s.masterVolume, 0.0f, 1.0f);
+    JsonReadFloat(j, "musicVolume", s.musicVolume, 0.0f, 1.0f);
