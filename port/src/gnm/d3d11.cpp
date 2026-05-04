@@ -836,8 +836,10 @@ void RenderFrame(void* hwnd, const std::vector<Draw>& draws) {
             uint32_t rw = (xScale > 0.0f) ? static_cast<uint32_t>(xScale * 2.0f + 0.5f) : rtPitch;
             uint32_t rh = (yScale < 0.0f) ? static_cast<uint32_t>(-yScale * 2.0f + 0.5f) : rtSliceH;
             if (rw >= 16 && rh >= 16 && rw <= 4096 && rh <= 4096) {
-                if (ID3D11RenderTargetView* off = EnsureOffscreenRt(rtAddr, rw, rh))
+                if (ID3D11RenderTargetView* off = EnsureOffscreenRt(rtAddr, rw, rh)) {
                     targetRtv = off;
+                    isOffscreen = true;
+                }
             }
         }
         if (targetRtv != currentRtv) {
