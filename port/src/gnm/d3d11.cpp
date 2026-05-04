@@ -491,8 +491,20 @@ bool EnsureSize(uint32_t width, uint32_t height) {
 }
 
 bool CreateDevice(HWND hwnd, uint32_t width, uint32_t height) {
+    BOOL tearing = FALSE;
+    {
+        ComPtr<IDXGIFactory5> fac5;
+        if (SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&fac5)))) {
+            if (FAILED(fac5->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &tearing,
+                                                 sizeof(tearing))))
+                tearing = FALSE;
+        }
+    }
+    g.allowTearing = (tearing == TRUE);
+    const int initBufs = std::clamp(core::CurrentSettings().swapBuffers, 2, 3);
+
     DXGI_SWAP_CHAIN_DESC swapDesc{};
-    swapDesc.BufferCount = 2;
+    swapDesc.BufferCount = static_cast<UINT>(initBufs);
     swapDesc.BufferDesc.Width = width;
     swapDesc.BufferDesc.Height = height;
     swapDesc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
