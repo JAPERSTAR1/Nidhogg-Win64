@@ -898,53 +898,55 @@ void RenderFrame(void* hwnd, const std::vector<Draw>& draws) {
     for (uint64_t f : s_shotFrames) {
         if (f == s_frame) { takeShot = true; break; }
     }
-    if (takeShot) {
-        ComPtr<ID3D11Texture2D> back;
-        if (SUCCEEDED(g.swap->GetBuffer(0, IID_PPV_ARGS(&back)))) {
-            D3D11_TEXTURE2D_DESC td{};
-            back->GetDesc(&td);
-            td.Usage = D3D11_USAGE_STAGING;
-            td.BindFlags = 0;
-            td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-            ComPtr<ID3D11Texture2D> stage;
-            if (SUCCEEDED(g.device->CreateTexture2D(&td, nullptr, &stage))) {
-                g.context->CopyResource(stage.Get(), back.Get());
-                D3D11_MAPPED_SUBRESOURCE map{};
-                if (SUCCEEDED(g.context->Map(stage.Get(), 0, D3D11_MAP_READ, 0, &map))) {
-                    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-                    ComPtr<IWICImagingFactory> wic;
-                    if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr,
-                                                   CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic)))) {
-                        wchar_t path[128];
-                        std::swprintf(path, 128, L"work\\shot_%llu.png",
-                                      static_cast<unsigned long long>(s_frame));
-                        ComPtr<IWICStream> stream;
-                        ComPtr<IWICBitmapEncoder> enc;
-                        ComPtr<IWICBitmapFrameEncode> frm;
-                        if (SUCCEEDED(wic->CreateStream(&stream)) &&
-                            SUCCEEDED(stream->InitializeFromFilename(path, GENERIC_WRITE)) &&
-                            SUCCEEDED(wic->CreateEncoder(GUID_ContainerFormatPng, nullptr, &enc)) &&
-                            SUCCEEDED(enc->Initialize(stream.Get(), WICBitmapEncoderNoCache)) &&
-                            SUCCEEDED(enc->CreateNewFrame(&frm, nullptr)) &&
-                            SUCCEEDED(frm->Initialize(nullptr)) &&
-                            SUCCEEDED(frm->SetSize(td.Width, td.Height))) {
-                            WICPixelFormatGUID pf = GUID_WICPixelFormat32bppRGBA;
-                            frm->SetPixelFormat(&pf);
-                            ComPtr<IWICBitmap> bmp;
-                            if (SUCCEEDED(wic->CreateBitmapFromMemory(
-                                    td.Width, td.Height, GUID_WICPixelFormat32bppRGBA,
-                                    map.RowPitch, map.RowPitch * td.Height,
-                                    static_cast<BYTE*>(map.pData), &bmp))) {
-                                frm->WriteSource(bmp.Get(), nullptr);
-                                frm->Commit();
-                                enc->Commit();
-                                std::printf("[d3d11] saved work/shot_%llu.png\n",
-                                            static_cast<unsigned long long>(s_frame));
-                                std::fflush(stdout);
-                            }
-                        }
+    if (!EnsureRenderer(hwnd)) return;
+    CompositeAndPresent(hwnd, 0, false);
+}
+
+bool OnWindowMessage(void* hwnd, uint32_t msg, uint64_t wp, int64_t lp) {
+    return ui::OnWindowMessage(hwnd, msg, wp, lp);
+}
+
+bool IsOverlayCapturingInput() {
+    return ui::IsOverlayOpen();
+}
+
+void ApplyDisplaySettings(void* hwndVoid) {
+    HWND hwnd = static_cast<HWND>(hwndVoid);
+    if (!hwnd) return;
+
+    auto& cfg = core::CurrentSettings();
+    const auto monitors = core::EnumerateMonitors();
+    const int mi = std::clamp(cfg.monitorIndex, 0,
+                              std::max(0, static_cast<int>(monitors.size()) - 1));
+    const core::MonitorInfo mon = monitors.empty()
+                                      ? core::MonitorInfo{0, "Primary", 0, 0, 1920, 1080, true, {}}
+                                      : monitors[mi];
+
+    // Always exit exclusive fullscreen before changing window styles or monitor
+    if (g.swap) {
+        g.backBuffer.Reset();
+        g.swap->SetFullscreenState(FALSE, nullptr);
+    }
+
+    if (cfg.displayMode == core::DisplayMode::Windowed) {
+        const uint32_t w = std::clamp(cfg.displayWidth, 640u, std::max(640u, mon.width));
+        const uint32_t h = std::clamp(cfg.displayHeight, 360u, std::max(360u, mon.height));
+        const DWORD style = WS_OVERLAPPEDWINDOW | WS_VISIBLE;
+        SetWindowLongPtrW(hwnd, GWL_STYLE, style);
+        RECT rc{0, 0, static_cast<LONG>(w), static_cast<LONG>(h)};
+        AdjustWindowRect(&rc, style, FALSE);
+        const int winW = rc.right - rc.left;
+        const int winH = rc.bottom - rc.top;
+        const int winX = mon.left + std::max(0, (static_cast<int>(mon.width) - winW) / 2);
+        const int winY = mon.top + std::max(0, (static_cast<int>(mon.height) - winH) / 2);
+        SetWindowPos(hwnd, HWND_NOTOPMOST, winX, winY, winW, winH,
+                     SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+        LOG_INFO("[display] applied Windowed %ux%u on monitor #%d", w, h, mi);
+    } else if (cfg.displayMode == core::DisplayMode::Borderless) {
+        SetWindowLongPtrW(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+        SetWindowPos(hwnd, HWND_TOP, mon.left, mon.top,
+                     static_cast<int>(mon.width), static_cast<int>(mon.height),
                     }
-                    g.context->Unmap(stage.Get(), 0);
                 }
             }
 
