@@ -816,7 +816,6 @@ void RenderFrame(void* hwnd, const std::vector<Draw>& draws) {
             continue;
         }
 
-        // Skip embedded Gnmx fast-clear / CMASK passes (VS != shader_vv.sb).
         if (sh[0x048] && sh[0x048] != 0x40100010u) continue;
         if (!LoadMatrix(sh)) continue;
 
@@ -829,7 +828,8 @@ void RenderFrame(void* hwnd, const std::vector<Draw>& draws) {
         const float yOffset = *reinterpret_cast<const float*>(&cx[kCtxViewport + 3]);
 
         const uint64_t rtAddr = static_cast<uint64_t>(cx[kCtxColor0Base]) << 8;
-        ID3D11RenderTargetView* targetRtv = g.backBuffer.Get();
+        bool isOffscreen = false;
+        ID3D11RenderTargetView* targetRtv = g.masterRtv.Get();
         if (rtAddr && mainRtAddr && rtAddr != mainRtAddr) {
             const uint32_t rtPitch = ((cx[0x319] & 0x7ffu) + 1u) << 3;
             const uint32_t rtSliceH = rtPitch ? (((cx[0x31A] & 0x3fffffu) + 1u) * 64u / rtPitch) : 0;
