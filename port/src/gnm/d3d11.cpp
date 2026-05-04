@@ -580,10 +580,16 @@ bool EnsureRenderer(HWND hwnd, uint32_t width, uint32_t height) {
     if (g.ok && g.hwnd == hwnd) return EnsureSize(width, height);
     if (g.tried) return false;
     g.tried = true;
-    if (!hwnd || !width || !height) return false;
     g.hwnd = hwnd;
-    g.ok = CreateDevice(hwnd, width, height);
-    std::printf("[d3d11] %s\n", g.ok ? "ready" : "unavailable");
+    g.ok = CreateDevice(hwnd, cw, ch);
+    if (g.ok && !g.displayInitialized) {
+        g.displayInitialized = true;
+        ApplyDisplaySettings(hwnd);
+        GetClientRect(hwnd, &rc);
+        EnsureSwapchainSize(static_cast<uint32_t>(std::max<LONG>(16, rc.right - rc.left)),
+                            static_cast<uint32_t>(std::max<LONG>(16, rc.bottom - rc.top)),
+                            core::CurrentSettings().swapBuffers);
+    }
     return g.ok;
 }
 
