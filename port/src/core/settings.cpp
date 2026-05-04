@@ -190,3 +190,99 @@ bool MakeDirsUtf8(const std::string& dirPath) {
     if (dirPath.empty()) return false;
     std::string norm = dirPath;
     for (char& c : norm) {
+        if (c == '/') c = '\\';
+    }
+    for (size_t i = 1; i <= norm.size(); ++i) {
+        if (i == norm.size() || norm[i] == '\\') {
+            std::string sub = norm.substr(0, i);
+            if (sub.size() == 2 && sub[1] == ':') continue;
+            if (!DirExistsUtf8(sub)) {
+                std::wstring w = Utf8ToWide(sub);
+                CreateDirectoryW(w.c_str(), nullptr);
+            }
+        }
+    }
+    return DirExistsUtf8(norm);
+}
+
+std::string ExeDir() {
+    wchar_t buf[MAX_PATH * 4]{};
+    DWORD n = GetModuleFileNameW(nullptr, buf, MAX_PATH * 4);
+    if (!n) return ".";
+    std::wstring w(buf, n);
+    size_t slash = w.find_last_of(L"\\/");
+    if (slash != std::wstring::npos) w.resize(slash);
+    return WideToUtf8(w);
+}
+
+void SetUserDirOverride(const std::string& dir) {
+    std::scoped_lock lk(g_settingsMtx);
+    g_userDirOverride = dir;
+    g_cachedUserDir.clear();
+}
+
+const std::string& UserDir() {
+    std::scoped_lock lk(g_settingsMtx);
+    if (!g_cachedUserDir.empty()) return g_cachedUserDir;
+
+    if (!g_userDirOverride.empty()) {
+        g_cachedUserDir = g_userDirOverride;
+    } else {
+        char* env = nullptr;
+        size_t len = 0;
+        if (_dupenv_s(&env, &len, "NIDHOGG_USER_DIR") == 0 && env && *env) {
+            g_cachedUserDir = env;
+            std::free(env);
+        } else {
+            if (env) std::free(env);
+            const std::string exe = ExeDir();
+            // Portable mode when portable.txt or a local config/ folder sits next
+            // to the executable AND that directory is writable.  Protected paths
+            // like C:\Program Files fall back cleanly to %LOCALAPPDATA%\Nidhogg.
+            const bool wantPortable =
+                FileExistsUtf8(exe + "\\portable.txt") || DirExistsUtf8(exe + "\\config");
+            if (wantPortable && IsDirectoryWritable(exe)) {
+                g_cachedUserDir = exe;
+            } else {
+                PWSTR appData = nullptr;
+                if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &appData)) &&
+                    appData) {
+                    g_cachedUserDir = WideToUtf8(appData) + "\\Nidhogg";
+                    CoTaskMemFree(appData);
+                } else {
+                    g_cachedUserDir = exe;
+                }
+            }
+        }
+    }
+
+    MakeDirsUtf8(g_cachedUserDir + "\\config");
+    MakeDirsUtf8(g_cachedUserDir + "\\saves");
+    MakeDirsUtf8(g_cachedUserDir + "\\logs");
+    return g_cachedUserDir;
+}
+
+std::string ConfigFilePath() { return UserDir() + "\\config\\settings.json"; }
+std::string SavesDirPath() { return UserDir() + "\\saves"; }
+std::string LogsDirPath() { return UserDir() + "\\logs"; }
+
+Settings MakeDefaultSettings() {
+    Settings s;
+    s.p1Keys.up = 'W';
+    s.p1Keys.down = 'S';
+    s.p1Keys.left = 'A';
+    s.p1Keys.right = 'D';
+    s.p1Keys.jump = VK_SPACE;
+    s.p1Keys.attack = 'F';
+    s.p1Keys.back = VK_ESCAPE;
+    s.p1Keys.start = VK_RETURN;
+    s.p1Keys.altUp = VK_UP;
+    s.p1Keys.altDown = VK_DOWN;
+    s.p1Keys.altLeft = VK_LEFT;
+    s.p1Keys.altRight = VK_RIGHT;
+    s.p1Keys.altJump = 'Z';
+    s.p1Keys.altAttack = 'X';
+
+    s.p2Keys.up = 'I';
+    s.p2Keys.down = 'K';
+    s.p2Keys.left = 'J';
