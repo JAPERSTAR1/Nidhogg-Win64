@@ -753,16 +753,12 @@ void RenderFrame(void* hwnd, const std::vector<Draw>& draws) {
         vpHeight = 1080;
     }
 
-    if (!EnsureRenderer(static_cast<HWND>(hwnd), vpWidth, vpHeight)) return;
+    const auto& cfg = core::CurrentSettings();
+    const float scale = std::clamp(cfg.renderScale, 0.5f, 2.0f);
+    const uint32_t targetMasterW = static_cast<uint32_t>(1920.0f * scale + 0.5f);
+    const uint32_t targetMasterH = static_cast<uint32_t>(1080.0f * scale + 0.5f);
+    if (!EnsureMasterRt(targetMasterW, targetMasterH)) return;
 
-    MSG msg;
-    while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) {
-        TranslateMessage(&msg);
-        DispatchMessageA(&msg);
-    }
-
-    // Identify the display buffer presented at the end of the submit so
-    // offscreen surface passes route to their own D3D11 render targets.
     uint64_t mainRtAddr = 0;
     for (auto it = draws.rbegin(); it != draws.rend(); ++it) {
         if (it->kind == Draw::Kind::Dispatch) continue;
