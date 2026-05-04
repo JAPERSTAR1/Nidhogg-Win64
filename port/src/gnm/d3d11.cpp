@@ -500,7 +500,8 @@ bool CreateDevice(HWND hwnd, uint32_t width, uint32_t height) {
     swapDesc.OutputWindow = hwnd;
     swapDesc.SampleDesc.Count = 1;
     swapDesc.Windowed = TRUE;
-    swapDesc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+    swapDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    swapDesc.Flags = g.allowTearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0u;
 
     const D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0};
     D3D_FEATURE_LEVEL got{};
@@ -508,7 +509,15 @@ bool CreateDevice(HWND hwnd, uint32_t width, uint32_t height) {
         nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, levels, 2, D3D11_SDK_VERSION, &swapDesc,
         &g.swap, &g.device, &got, &g.context);
     if (FAILED(hr)) {
-        std::printf("[d3d11] device creation failed 0x%08lx\n", static_cast<unsigned long>(hr));
+        g.allowTearing = false;
+        swapDesc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+        swapDesc.Flags = 0;
+        hr = D3D11CreateDeviceAndSwapChain(
+            nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, levels, 2, D3D11_SDK_VERSION, &swapDesc,
+            &g.swap, &g.device, &got, &g.context);
+    }
+    if (FAILED(hr)) {
+        LOG_ERROR("[d3d11] device creation failed 0x%08lx", static_cast<unsigned long>(hr));
         return false;
     }
 
