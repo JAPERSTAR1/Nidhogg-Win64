@@ -673,7 +673,7 @@ bool LoadMatrix(const uint32_t* sh) {
     return true;
 }
 
-void UploadAndDraw(uint32_t vpWidth, uint32_t vpHeight) {
+void UploadAndDraw() {
     if (g.indices.empty() || g.vertices.empty()) return;
 
     if (!g.vb || g.vbCapacity < g.vertices.size()) {
@@ -867,6 +867,53 @@ void CompositeAndPresent(HWND hwnd, uint64_t simFrame, bool isNewSimFrame) {
             ad.Filter = wantAniso > 1 ? D3D11_FILTER_ANISOTROPIC : D3D11_FILTER_MIN_MAG_MIP_LINEAR;
             ad.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
             ad.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+            ad.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+            ad.MaxAnisotropy = static_cast<UINT>(wantAniso);
+            ad.MaxLOD = D3D11_FLOAT32_MAX;
+            g.device->CreateSamplerState(&ad, &g.presentAnisoSmp);
+            g.builtAnisoLevel = wantAniso;
+        }
+        if (g.presentAnisoSmp) smp = g.presentAnisoSmp.Get();
+    }
+
+    ID3D11Buffer* pcbPtr = g.presentCb.Get();
+    ID3D11ShaderResourceView* msrv = g.masterSrv.Get();
+    g.context->IASetInputLayout(nullptr);
+    g.context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    g.context->VSSetShader(g.presentVs.Get(), nullptr, 0);
+    g.context->PSSetShader(g.presentPs.Get(), nullptr, 0);
+    g.context->PSSetConstantBuffers(0, 1, &pcbPtr);
+    g.context->PSSetShaderResources(0, 1, &msrv);
+    g.context->PSSetSamplers(0, 1, &smp);
+    g.context->Draw(3, 0);
+
+    ID3D11ShaderResourceView* nullSrv = nullptr;
+    g.context->PSSetShaderResources(0, 1, &nullSrv);
+
+    // Composite native Settings / Online / Diagnostics UI at full display resolution
+    ui::RenderOverlay(hwnd, g.device.Get(), g.context.Get(), g.swapWidth, g.swapHeight,
+                      isNewSimFrame);
+
+    if (isNewSimFrame) {
+        MaybeCaptureScreenshot(simFrame);
+    }
+
+    const uint64_t nowUsec = QpcUsec();
+    const double dtMs = g.lastPresentQpcUsec
+                            ? static_cast<double>(nowUsec - g.lastPresentQpcUsec) / 1000.0
+                            : 16.67;
+    g.lastPresentQpcUsec = nowUsec;
+
+    BOOL inFs = FALSE;
+    g.swap->GetFullscreenState(&inFs, nullptr);
+    UINT sync = 1u;
+    if (cfg.vsync == core::VSyncMode::Off) {
+        sync = 0u;
+    } else if (cfg.vsync == core::VSyncMode::Adaptive) {
+        sync = (dtMs > 17.2) ? 0u : 1u;
+    }
+    const UINT pflags = (sync == 0u && g.allowTearing && !inFs) ? DXGI_PRESENT_ALLOW_TEARING : 0u;
+    g.swap->Present(sync, pflags);
 }
 
 }  // namespace
