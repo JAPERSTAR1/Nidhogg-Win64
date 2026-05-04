@@ -480,13 +480,17 @@ bool EnsureSize(uint32_t width, uint32_t height) {
     if (g.swap && width == g.width && height == g.height) return true;
     g.backBuffer.Reset();
     if (!g.swap) return false;
-    if (FAILED(g.swap->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0))) return false;
+    const UINT flags = g.allowTearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0u;
+    if (FAILED(g.swap->ResizeBuffers(static_cast<UINT>(wantBuffers), width, height,
+                                     DXGI_FORMAT_R8G8B8A8_UNORM, flags)))
+        return false;
 
     ComPtr<ID3D11Texture2D> back;
     if (FAILED(g.swap->GetBuffer(0, IID_PPV_ARGS(&back)))) return false;
     if (FAILED(g.device->CreateRenderTargetView(back.Get(), nullptr, &g.backBuffer))) return false;
-    g.width = width;
-    g.height = height;
+    g.swapWidth = width;
+    g.swapHeight = height;
+    g.swapBuffers = wantBuffers;
     return true;
 }
 
