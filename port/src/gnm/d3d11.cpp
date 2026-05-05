@@ -468,16 +468,22 @@ bool CompileShaders() {
         return false;
 
     const D3D11_INPUT_ELEMENT_DESC elements[] = {
-        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
-        {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0},
-        {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 28, D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, 0,  D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"COLOR",    0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,       0, 28, D3D11_INPUT_PER_VERTEX_DATA, 0},
     };
     return SUCCEEDED(g.device->CreateInputLayout(elements, 3, vsBlob->GetBufferPointer(),
                                                  vsBlob->GetBufferSize(), &g.layout));
 }
 
-bool EnsureSize(uint32_t width, uint32_t height) {
-    if (g.swap && width == g.width && height == g.height) return true;
+bool EnsureSwapchainSize(uint32_t width, uint32_t height, int wantBuffers) {
+    width = std::max(16u, width);
+    height = std::max(16u, height);
+    wantBuffers = std::clamp(wantBuffers, 2, 3);
+    if (g.swap && g.backBuffer && width == g.swapWidth && height == g.swapHeight &&
+        wantBuffers == g.swapBuffers)
+        return true;
+
     g.backBuffer.Reset();
     if (!g.swap) return false;
     const UINT flags = g.allowTearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0u;
