@@ -341,6 +341,36 @@ ID3D11RenderTargetView* EnsureOffscreenRt(uint64_t addr, uint32_t w, uint32_t h)
     return slot.rtv.Get();
 }
 
+bool EnsureMasterRt(uint32_t w, uint32_t h) {
+    w = std::clamp(w, 320u, 7680u);
+    h = std::clamp(h, 180u, 4320u);
+    if (g.masterRtv && g.masterSrv && g.masterWidth == w && g.masterHeight == h) return true;
+
+    g.masterRtv.Reset();
+    g.masterSrv.Reset();
+    g.masterTex.Reset();
+
+    D3D11_TEXTURE2D_DESC td{};
+    td.Width = w;
+    td.Height = h;
+    td.MipLevels = 1;
+    td.ArraySize = 1;
+    td.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    td.SampleDesc.Count = 1;
+    td.Usage = D3D11_USAGE_DEFAULT;
+    td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+    if (FAILED(g.device->CreateTexture2D(&td, nullptr, &g.masterTex))) return false;
+    if (FAILED(g.device->CreateRenderTargetView(g.masterTex.Get(), nullptr, &g.masterRtv)))
+        return false;
+    if (FAILED(g.device->CreateShaderResourceView(g.masterTex.Get(), nullptr, &g.masterSrv)))
+        return false;
+
+    g.masterWidth = w;
+    g.masterHeight = h;
+    LOG_INFO("[d3d11] internal master RT resized to %ux%u", w, h);
+    return true;
+}
+
 D3D11_TEXTURE_ADDRESS_MODE MapClamp(uint32_t mode) {
     switch (mode & 0x7) {
         case 0: return D3D11_TEXTURE_ADDRESS_WRAP;
@@ -352,6 +382,10 @@ D3D11_TEXTURE_ADDRESS_MODE MapClamp(uint32_t mode) {
 }
 
 ID3D11SamplerState* LookupSampler(const uint32_t* words) {
+    const auto& cfg = core::CurrentSettings();
+    const uint32_t anisoTag = (cfg.textureFilter == core::TextureFilterMode::Anisotropic)
+                                  ? static_cast<uint32_t>(std::clamp(cfg.anisotropy, 1, 16))
+                                  : 0u;
     const uint64_t key = (static_cast<uint64_t>(words[0]) * 1099511628211ull) ^
                          (static_cast<uint64_t>(words[2]) << 32) ^ words[1] ^
                          (static_cast<uint64_t>(anisoTag) << 56);
