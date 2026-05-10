@@ -446,17 +446,11 @@ ID3D11BlendState* LookupBlend(uint32_t ctl, uint32_t targetMask) {
 bool CompileShaders() {
     ComPtr<ID3DBlob> vsBlob, psBlob, errors;
 
-    UINT flags = D3DCOMPILE_ENABLE_STRICTNESS;
-    if (FAILED(D3DCompile(kShaderSource, std::strlen(kShaderSource), "nidhogg.hlsl", nullptr,
-                          nullptr, "VSMain", "vs_5_0", flags, 0, &vsBlob, &errors))) {
-        std::printf("[d3d11] VS compile failed: %s\n",
-                    errors ? static_cast<const char*>(errors->GetBufferPointer()) : "?");
+    if (FAILED(D3DCompile(kGuestShaderSource, std::strlen(kGuestShaderSource), "nidhogg.hlsl",
+                          nullptr, nullptr, "VSMain", "vs_5_0", flags, 0, &vsBlob, &errors)))
         return false;
-    }
-    if (FAILED(D3DCompile(kShaderSource, std::strlen(kShaderSource), "nidhogg.hlsl", nullptr,
-                          nullptr, "PSMain", "ps_5_0", flags, 0, &psBlob, &errors))) {
-        std::printf("[d3d11] PS compile failed: %s\n",
-                    errors ? static_cast<const char*>(errors->GetBufferPointer()) : "?");
+    if (FAILED(D3DCompile(kGuestShaderSource, std::strlen(kGuestShaderSource), "nidhogg.hlsl",
+                          nullptr, nullptr, "PSMain", "ps_5_0", flags, 0, &psBlob, &errors)))
         return false;
     if (FAILED(D3DCompile(kPresentShaderSource, std::strlen(kPresentShaderSource), "present.hlsl",
                           nullptr, nullptr, "VSMain", "vs_5_0", flags, 0, &pvsBlob, &errors)))
