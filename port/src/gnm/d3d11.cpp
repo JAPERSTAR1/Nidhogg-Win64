@@ -587,10 +587,6 @@ bool EnsureRenderer(HWND hwnd, uint32_t width, uint32_t height) {
     return g.ok;
 }
 
-// ------------------------------------------------------------------- drawing --
-
-// Appends one draw's geometry.  Returns false when the state is not the shape
-// this backend knows how to reproduce.
 bool BuildGeometry(const Draw& draw, const uint32_t* sh) {
     const uint64_t table = (static_cast<uint64_t>(sh[kVsTable + 1] & 0xffff) << 32) |
                            sh[kVsTable];
@@ -657,9 +653,6 @@ bool BuildGeometry(const Draw& draw, const uint32_t* sh) {
     return true;
 }
 
-// The matrix lives behind VS user-data slot 2 as a V# whose base points at four
-// float4 rows.  Row order is x, y, z, w because the VS multiplies the rows the
-// shader loads from offsets 0x0, 0x4, 0x8 and 0xc.
 bool LoadMatrix(const uint32_t* sh) {
     const uint64_t address = (static_cast<uint64_t>(sh[kVsMatrix + 1] & 0xffff) << 32) |
                              sh[kVsMatrix];
