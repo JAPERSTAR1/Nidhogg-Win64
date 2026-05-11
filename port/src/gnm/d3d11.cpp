@@ -549,20 +549,22 @@ bool CreateDevice(HWND hwnd, uint32_t width, uint32_t height) {
     whiteDesc.SampleDesc.Count = 1;
     whiteDesc.Usage = D3D11_USAGE_IMMUTABLE;
     whiteDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-    D3D11_SUBRESOURCE_DATA whiteData{};
-    whiteData.pSysMem = pixels;
-    whiteData.SysMemPitch = 8;
+    D3D11_SUBRESOURCE_DATA whiteData{pixels, 8, 0};
     ComPtr<ID3D11Texture2D> whiteTexture;
     if (SUCCEEDED(g.device->CreateTexture2D(&whiteDesc, &whiteData, &whiteTexture)))
-        g.device->CreateShaderResourceView(whiteTexture.Get(), &white, &g.missingTexture);
+        g.device->CreateShaderResourceView(whiteTexture.Get(), nullptr, &g.missingTexture);
 
-    D3D11_SAMPLER_DESC sampler{};
-    sampler.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
-    sampler.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
-    sampler.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
-    sampler.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-    sampler.MaxLOD = D3D11_FLOAT32_MAX;
-    if (FAILED(g.device->CreateSamplerState(&sampler, &g.defaultSampler))) return false;
+    D3D11_SAMPLER_DESC smp{};
+    smp.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+    smp.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+    smp.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+    smp.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+    smp.MaxLOD = D3D11_FLOAT32_MAX;
+    if (FAILED(g.device->CreateSamplerState(&smp, &g.defaultSampler))) return false;
+    if (FAILED(g.device->CreateSamplerState(&smp, &g.presentPointSmp))) return false;
+
+    smp.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    if (FAILED(g.device->CreateSamplerState(&smp, &g.presentLinearSmp))) return false;
 
     D3D11_BUFFER_DESC bufferDesc{};
     bufferDesc.Usage = D3D11_USAGE_DYNAMIC;
