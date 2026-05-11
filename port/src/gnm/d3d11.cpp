@@ -723,13 +723,60 @@ void UploadAndDraw(uint32_t vpWidth, uint32_t vpHeight) {
     g.context->VSSetConstantBuffers(0, 1, &cb);
     g.context->PSSetShader(g.ps.Get(), nullptr, 0);
     g.context->DrawIndexed(static_cast<UINT>(g.indices.size()), 0, 0);
-    (void)vpWidth;
-    (void)vpHeight;
+}
+
+void MaybeCaptureScreenshot(uint64_t simFrame) {
+    static std::vector<uint64_t> s_shotFrames;
+    static std::string s_shotDir = "work";
+    static bool s_parsedShots = false;
+    if (!s_parsedShots) {
+        s_parsedShots = true;
+        char* dirEnv = nullptr;
+        size_t dirLen = 0;
+        if (_dupenv_s(&dirEnv, &dirLen, "NIDHOGG_SCREENSHOT_DIR") == 0 && dirEnv && *dirEnv)
+            s_shotDir = dirEnv;
+        if (dirEnv) std::free(dirEnv);
+
+        char* env = nullptr;
+        size_t len = 0;
+        if (_dupenv_s(&env, &len, "NIDHOGG_SCREENSHOT") == 0 && env) {
+            const char* p = env;
+            while (*p) {
+                char* end = nullptr;
+                unsigned long long f = std::strtoull(p, &end, 10);
+                if (end == p) break;
+                if (f > 0) s_shotFrames.push_back(f);
+                p = (*end == ',') ? (end + 1) : end;
+            }
+            std::free(env);
+        }
+    }
+    bool takeShot = false;
+    for (uint64_t f : s_shotFrames) {
+        if (f == simFrame) { takeShot = true; break; }
+    }
+    if (!takeShot) return;
+
+    core::MakeDirsUtf8(s_shotDir);
+    ComPtr<ID3D11Texture2D> back;
+    if (FAILED(g.swap->GetBuffer(0, IID_PPV_ARGS(&back)))) return;
+    D3D11_TEXTURE2D_DESC td{};
+    back->GetDesc(&td);
+    td.Usage = D3D11_USAGE_STAGING;
+    td.BindFlags = 0;
+    td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    ComPtr<ID3D11Texture2D> stage;
+    if (FAILED(g.device->CreateTexture2D(&td, nullptr, &stage))) return;
+    g.context->CopyResource(stage.Get(), back.Get());
+    D3D11_MAPPED_SUBRESOURCE map{};
+    if (FAILED(g.context->Map(stage.Get(), 0, D3D11_MAP_READ, 0, &map))) return;
+
 }
 
 }  // namespace
 
-void RenderFrame(void* hwnd, const std::vector<Draw>& draws) {
+void RenderFrame(void* hwndVoid, const std::vector<Draw>& draws) {
+    HWND hwnd = static_cast<HWND>(hwndVoid);
     if (!hwnd || draws.empty()) return;
     if (!EnsureRenderer(hwnd)) return;
 
