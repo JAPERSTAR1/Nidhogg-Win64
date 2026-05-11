@@ -511,7 +511,20 @@ bool CreateDevice(HWND hwnd, uint32_t width, uint32_t height) {
         std::printf("[d3d11] device creation failed 0x%08lx\n", static_cast<unsigned long>(hr));
         return false;
     }
-    std::printf("[d3d11] feature level 0x%x\n", static_cast<unsigned>(got));
+
+    // Disable DXGI's built-in Alt+Enter handler so our settings/revert manager owns it cleanly.
+    {
+        ComPtr<IDXGIDevice> dxgiDev;
+        ComPtr<IDXGIAdapter> dxgiAdp;
+        ComPtr<IDXGIFactory1> dxgiFac;
+        if (SUCCEEDED(g.device.As(&dxgiDev)) && SUCCEEDED(dxgiDev->GetAdapter(&dxgiAdp)) &&
+            SUCCEEDED(dxgiAdp->GetParent(IID_PPV_ARGS(&dxgiFac)))) {
+            dxgiFac->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER);
+        }
+    }
+
+    LOG_INFO("[d3d11] feature level 0x%x (tearing=%d)", static_cast<unsigned>(got),
+             g.allowTearing ? 1 : 0);
 
     ComPtr<ID3D11Texture2D> back;
     if (FAILED(g.swap->GetBuffer(0, IID_PPV_ARGS(&back)))) return false;
@@ -533,11 +546,6 @@ bool CreateDevice(HWND hwnd, uint32_t width, uint32_t height) {
     depth.DepthEnable = FALSE;
     depth.StencilEnable = FALSE;
     if (FAILED(g.device->CreateDepthStencilState(&depth, &g.depthDisabled))) return false;
-
-    D3D11_SHADER_RESOURCE_VIEW_DESC white{};
-    white.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    white.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-    white.Texture2D.MipLevels = 1;
 
     const uint32_t pixels[4] = {0xffffffffu, 0xffffffffu, 0xffffffffu, 0xffffffffu};
     D3D11_TEXTURE2D_DESC whiteDesc{};
