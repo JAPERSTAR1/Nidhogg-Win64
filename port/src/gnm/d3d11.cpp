@@ -571,13 +571,24 @@ bool CreateDevice(HWND hwnd, uint32_t width, uint32_t height) {
     bufferDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
     if (FAILED(g.device->CreateBuffer(&bufferDesc, nullptr, &g.cb))) return false;
 
-    g.width = width;
-    g.height = height;
+    bufferDesc.ByteWidth = sizeof(PresentCb);
+    if (FAILED(g.device->CreateBuffer(&bufferDesc, nullptr, &g.presentCb))) return false;
+
+    g.swapWidth = width;
+    g.swapHeight = height;
+    g.swapBuffers = initBufs;
     return CompileShaders();
 }
 
-bool EnsureRenderer(HWND hwnd, uint32_t width, uint32_t height) {
-    if (g.ok && g.hwnd == hwnd) return EnsureSize(width, height);
+bool EnsureRenderer(HWND hwnd) {
+    RECT rc{};
+    GetClientRect(hwnd, &rc);
+    const uint32_t cw = static_cast<uint32_t>(std::max<LONG>(16, rc.right - rc.left));
+    const uint32_t ch = static_cast<uint32_t>(std::max<LONG>(16, rc.bottom - rc.top));
+
+    if (g.ok && g.hwnd == hwnd) {
+        return EnsureSwapchainSize(cw, ch, core::CurrentSettings().swapBuffers);
+    }
     if (g.tried) return false;
     g.tried = true;
     g.hwnd = hwnd;
