@@ -183,11 +183,18 @@ struct Renderer {
 
 Renderer g;
 
+uint64_t QpcUsec() {
+    static LARGE_INTEGER freq{};
+    if (!freq.QuadPart) QueryPerformanceFrequency(&freq);
+    LARGE_INTEGER now{};
+    QueryPerformanceCounter(&now);
+    return static_cast<uint64_t>(now.QuadPart * 1000000ULL / freq.QuadPart);
+}
+
 bool Readable(uint64_t address, size_t bytes) {
     return address != 0 && ps4::gnm::HostReadable(address, bytes);
 }
 
-// Byte size of one texel of a Sea Islands (GCN) DataFormat, Table 8.13.
 uint32_t TexelBytes(uint32_t dataFormat) {
     switch (dataFormat) {
         case 1: return 1;
