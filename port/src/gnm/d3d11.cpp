@@ -190,23 +190,23 @@ bool Readable(uint64_t address, size_t bytes) {
 // Byte size of one texel of a Sea Islands (GCN) DataFormat, Table 8.13.
 uint32_t TexelBytes(uint32_t dataFormat) {
     switch (dataFormat) {
-        case 1: return 1;   // Format8
-        case 2: return 2;   // Format16
-        case 3: return 2;   // Format8_8
-        case 4: return 4;   // Format32
-        case 5: return 4;   // Format16_16
-        case 6: return 4;   // Format10_11_11
-        case 7: return 4;   // Format11_11_10
-        case 8: return 4;   // Format10_10_10_2
-        case 9: return 4;   // Format2_10_10_10
-        case 10: return 4;  // Format8_8_8_8
-        case 11: return 8;  // Format32_32
-        case 12: return 8;  // Format16_16_16_16
-        case 13: return 12; // Format32_32_32
-        case 14: return 16; // Format32_32_32_32
-        case 16: return 2;  // Format5_6_5
-        case 17: return 2;  // Format1_5_5_5
-        case 19: return 2;  // Format4_4_4_4
+        case 1: return 1;
+        case 2: return 2;
+        case 3: return 2;
+        case 4: return 4;
+        case 5: return 4;
+        case 6: return 4;
+        case 7: return 4;
+        case 8: return 4;
+        case 9: return 4;
+        case 10: return 4;
+        case 11: return 8;
+        case 12: return 8;
+        case 13: return 12;
+        case 14: return 16;
+        case 16: return 2;
+        case 17: return 2;
+        case 19: return 2;
         default: return 0;
     }
 }
@@ -333,9 +333,6 @@ ID3D11RenderTargetView* EnsureOffscreenRt(uint64_t addr, uint32_t w, uint32_t h)
         g.pendingClears.erase(pc);
     }
     g.context->ClearRenderTargetView(rt.rtv.Get(), clr);
-    std::printf("[d3d11] offscreen rt 0x%llx %ux%u\n",
-                static_cast<unsigned long long>(addr), w, h);
-    std::fflush(stdout);
     auto& slot = g.offscreenRts[addr];
     slot = std::move(rt);
     return slot.rtv.Get();
