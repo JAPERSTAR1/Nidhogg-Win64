@@ -458,13 +458,24 @@ bool CompileShaders() {
         std::printf("[d3d11] PS compile failed: %s\n",
                     errors ? static_cast<const char*>(errors->GetBufferPointer()) : "?");
         return false;
-    }
+    if (FAILED(D3DCompile(kPresentShaderSource, std::strlen(kPresentShaderSource), "present.hlsl",
+                          nullptr, nullptr, "VSMain", "vs_5_0", flags, 0, &pvsBlob, &errors)))
+        return false;
+    if (FAILED(D3DCompile(kPresentShaderSource, std::strlen(kPresentShaderSource), "present.hlsl",
+                          nullptr, nullptr, "PSMain", "ps_5_0", flags, 0, &ppsBlob, &errors)))
+        return false;
 
     if (FAILED(g.device->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(),
                                             nullptr, &g.vs)))
         return false;
     if (FAILED(g.device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(),
                                            nullptr, &g.ps)))
+        return false;
+    if (FAILED(g.device->CreateVertexShader(pvsBlob->GetBufferPointer(), pvsBlob->GetBufferSize(),
+                                            nullptr, &g.presentVs)))
+        return false;
+    if (FAILED(g.device->CreatePixelShader(ppsBlob->GetBufferPointer(), ppsBlob->GetBufferSize(),
+                                           nullptr, &g.presentPs)))
         return false;
 
     const D3D11_INPUT_ELEMENT_DESC elements[] = {
