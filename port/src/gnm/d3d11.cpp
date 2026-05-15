@@ -353,7 +353,8 @@ D3D11_TEXTURE_ADDRESS_MODE MapClamp(uint32_t mode) {
 
 ID3D11SamplerState* LookupSampler(const uint32_t* words) {
     const uint64_t key = (static_cast<uint64_t>(words[0]) * 1099511628211ull) ^
-                         (static_cast<uint64_t>(words[2]) << 32) ^ words[1];
+                         (static_cast<uint64_t>(words[2]) << 32) ^ words[1] ^
+                         (static_cast<uint64_t>(anisoTag) << 56);
     auto it = g.samplers.find(key);
     if (it != g.samplers.end()) return it->second;
 
@@ -362,7 +363,8 @@ ID3D11SamplerState* LookupSampler(const uint32_t* words) {
     const bool magLinear = ((w2 >> 20) & 0x3) == 1 || ((w2 >> 20) & 0x3) == 3;
     const bool minLinear = ((w2 >> 22) & 0x3) == 1 || ((w2 >> 22) & 0x3) == 3;
     D3D11_FILTER filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
-    if (minLinear && magLinear) filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    if (anisoTag > 1 && (minLinear || magLinear)) filter = D3D11_FILTER_ANISOTROPIC;
+    else if (minLinear && magLinear) filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
     else if (minLinear) filter = D3D11_FILTER_MIN_LINEAR_MAG_MIP_POINT;
     else if (magLinear) filter = D3D11_FILTER_MIN_POINT_MAG_LINEAR_MIP_POINT;
 
