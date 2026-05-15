@@ -144,12 +144,26 @@ struct Renderer {
     ComPtr<ID3D11DeviceContext> context;
     ComPtr<IDXGISwapChain> swap;
     ComPtr<ID3D11RenderTargetView> backBuffer;
+
+    ComPtr<ID3D11Texture2D> masterTex;
+    ComPtr<ID3D11RenderTargetView> masterRtv;
+    ComPtr<ID3D11ShaderResourceView> masterSrv;
+
     ComPtr<ID3D11VertexShader> vs;
     ComPtr<ID3D11PixelShader> ps;
     ComPtr<ID3D11InputLayout> layout;
     ComPtr<ID3D11Buffer> vb;
     ComPtr<ID3D11Buffer> ib;
     ComPtr<ID3D11Buffer> cb;
+
+    ComPtr<ID3D11VertexShader> presentVs;
+    ComPtr<ID3D11PixelShader> presentPs;
+    ComPtr<ID3D11Buffer> presentCb;
+    ComPtr<ID3D11SamplerState> presentPointSmp;
+    ComPtr<ID3D11SamplerState> presentLinearSmp;
+    ComPtr<ID3D11SamplerState> presentAnisoSmp;
+    int builtAnisoLevel = 0;
+
     ComPtr<ID3D11BlendState> blendDisabled;
     ComPtr<ID3D11RasterizerState> rasterizer;
     ComPtr<ID3D11DepthStencilState> depthDisabled;
@@ -175,6 +189,7 @@ struct Renderer {
 
     uint32_t vbCapacity = 0;
     uint32_t ibCapacity = 0;
+    uint64_t lastPresentQpcUsec = 0;
 
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
