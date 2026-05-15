@@ -371,6 +371,7 @@ ID3D11SamplerState* LookupSampler(const uint32_t* words) {
     desc.AddressU = MapClamp(w0);
     desc.AddressV = MapClamp(w0 >> 3);
     desc.AddressW = MapClamp(w0 >> 6);
+    desc.MaxAnisotropy = std::max(1u, anisoTag);
     desc.MaxLOD = D3D11_FLOAT32_MAX;
 
     ID3D11SamplerState* state = nullptr;
@@ -444,7 +445,8 @@ ID3D11BlendState* LookupBlend(uint32_t ctl, uint32_t targetMask) {
 }
 
 bool CompileShaders() {
-    ComPtr<ID3DBlob> vsBlob, psBlob, errors;
+    ComPtr<ID3DBlob> vsBlob, psBlob, pvsBlob, ppsBlob, errors;
+    const UINT flags = D3DCOMPILE_ENABLE_STRICTNESS;
 
     if (FAILED(D3DCompile(kGuestShaderSource, std::strlen(kGuestShaderSource), "nidhogg.hlsl",
                           nullptr, nullptr, "VSMain", "vs_5_0", flags, 0, &vsBlob, &errors)))
