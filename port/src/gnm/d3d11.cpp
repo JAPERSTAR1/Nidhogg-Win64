@@ -124,13 +124,60 @@ float4 PSMain(VsOut i) : SV_Target {
 }
 )";
 
+const char* kPresentShaderSource = R"(
+cbuffer PresentParams : register(b0) {
+    float2 TexSize;
+    float2 InvTexSize;
+    int    FilterMode;   // 0=Point, 1=SharpBilinear, 2=Bilinear, 3=Anisotropic
+    int    Scanlines;
+    float2 Pad;
+};
+struct VsOut {
+    float4 pos : SV_POSITION;
+    float2 uv  : TEXCOORD0;
+};
+VsOut VSMain(uint vid : SV_VertexID) {
+    VsOut o;
+    o.uv = float2((vid << 1) & 2, vid & 2);
+    o.pos = float4(o.uv * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.0, 1.0);
+    return o;
+}
+Texture2D    MasterTex : register(t0);
+SamplerState Smp       : register(s0);
+float4 PSMain(VsOut i) : SV_Target {
+    float2 uv = i.uv;
+    if (FilterMode == 1) {
+        // Sharp-bilinear pixel-art anti-aliasing: crisp texel interiors with
+        // 1-device-pixel anti-aliased transitions on non-integer resolutions.
+        float2 tx = uv * TexSize;
+        float2 fw = max(fwidth(tx), float2(1e-4, 1e-4));
+        float2 fl = floor(tx - 0.5) + 0.5;
+        float2 fr = saturate((tx - fl) / fw);
+        uv = (fl + fr) * InvTexSize;
+    }
+    float4 col = MasterTex.Sample(Smp, uv);
+    if (Scanlines != 0) {
+        float s = 0.5 - 0.5 * cos(i.uv.y * 1080.0 * 6.2831853);
+        col.rgb *= lerp(1.0, 0.83, s);
+    }
+    col.a = 1.0;
+    return col;
+}
+)";
+
 struct Vertex {
     float pos[3];
     float color[4];
     float uv[2];
 };
 
-// --------------------------------------------------------------------- state --
+struct PresentCb {
+    float texSize[2];
+    float invTexSize[2];
+    int filterMode;
+    int scanlines;
+    float pad[2];
+};
 
 struct Renderer {
     bool tried = false;
