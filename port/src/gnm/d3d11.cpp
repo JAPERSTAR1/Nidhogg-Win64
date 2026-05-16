@@ -115,10 +115,8 @@ VsOut VSMain(VsIn i) {
     o.uv = i.uv;
     return o;
 }
-
 Texture2D    Source : register(t0);
 SamplerState Linear : register(s0);
-
 float4 PSMain(VsOut i) : SV_Target {
     return Source.Sample(Linear, i.uv) * i.color;
 }
