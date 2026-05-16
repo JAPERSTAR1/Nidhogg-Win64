@@ -135,10 +135,16 @@ struct Vertex {
 struct Renderer {
     bool tried = false;
     bool ok = false;
+    bool allowTearing = false;
+    bool displayInitialized = false;
 
     HWND hwnd = nullptr;
-    uint32_t width = 0;
-    uint32_t height = 0;
+    uint32_t swapWidth = 0;
+    uint32_t swapHeight = 0;
+    int swapBuffers = 2;
+
+    uint32_t masterWidth = 0;
+    uint32_t masterHeight = 0;
 
     ComPtr<ID3D11Device> device;
     ComPtr<ID3D11DeviceContext> context;
