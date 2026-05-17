@@ -38,8 +38,6 @@ constexpr uint32_t kCtxViewport = 0x10F;
 constexpr uint32_t kCtxBlend0Control = 0x1E0;
 constexpr uint32_t kCtxColor0Base = 0x318;
 
-// One buffer descriptor (V#).  The address is 40 bits split across the first
-// two dwords; the rest is stride and the component format.
 struct BufferDesc {
     uint64_t base = 0;
     uint32_t stride = 0;
@@ -56,8 +54,6 @@ BufferDesc DecodeBuffer(const uint32_t* w) {
     return b;
 }
 
-// One 256-bit image descriptor (T#).  GNM stores the address as address >> 8,
-// and dword 4 bits 26:13 carry (pitch - 1) in texels for linear-aligned images.
 struct ImageDesc {
     uint64_t address = 0;
     uint32_t width = 0;
