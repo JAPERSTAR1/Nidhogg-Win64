@@ -86,16 +86,13 @@ ImageDesc DecodeImage(const uint32_t* w) {
     return i;
 }
 
-// --------------------------------------------------------------- shader pair --
-
-const char* kShaderSource = R"(
+const char* kGuestShaderSource = R"(
 cbuffer Transform : register(b0) {
     float4 Row0;
     float4 Row1;
     float4 Row2;
     float4 Row3;
 };
-
 struct VsIn {
     float3 pos   : POSITION;
     float4 color : COLOR0;
