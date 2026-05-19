@@ -20,15 +20,8 @@ using Microsoft::WRL::ComPtr;
 namespace ps4::gnm {
 namespace {
 
-// ---------------------------------------------------------------- registers --
-
-// SH register space: GNM numbers the stage user-data blocks from these bases
-// and the command stream carries them already biased by 0x2C00, which is the
-// same bias pm4.cpp applies.  PS dwords 4..11 are the 256-bit T#, 12..15 the
-// 128-bit S#; VS dwords 0..1 the fetch shader, 2..3 the V# table, 8..11 the matrix V#.
 constexpr uint32_t kPsTexture = 0x0C + 4;
 constexpr uint32_t kPsSampler = 0x0C + 12;
-constexpr uint32_t kVsFetch = 0x4C;
 constexpr uint32_t kVsTable = 0x4C + 2;
 constexpr uint32_t kVsMatrix = 0x4C + 8;
 
