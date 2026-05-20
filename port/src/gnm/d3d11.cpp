@@ -101,13 +101,11 @@ struct VsIn {
     float4 color : COLOR0;
     float2 uv    : TEXCOORD0;
 };
-
 struct VsOut {
     float4 pos   : SV_POSITION;
     float4 color : COLOR0;
     float2 uv    : TEXCOORD0;
 };
-
 VsOut VSMain(VsIn i) {
     VsOut o;
     o.pos = i.pos.x * Row0 + i.pos.y * Row1 + i.pos.z * Row2 + Row3;
