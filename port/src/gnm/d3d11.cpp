@@ -8,10 +8,12 @@
 #include <wincodec.h>
 #include <wrl/client.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
