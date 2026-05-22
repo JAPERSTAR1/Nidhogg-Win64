@@ -1746,7 +1746,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
         case 400: {  // sceFiosFHOpen(attr, &outFH, path, openParams)
             std::scoped_lock lk(g_fiosMtx);
             std::string path = HostPath(str(2));
-            std::FILE* f = std::fopen(path.c_str(), "rb");
+            std::FILE* f = core::FopenUtf8(path, "rb");
             if (!f) {
                 if (Readable(ptr(1), 4)) *reinterpret_cast<int32_t*>(r.gpr[1]) = 0;
                 return 0;
@@ -1782,7 +1782,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             void* dst = ptr(2);
             const uint32_t len = static_cast<uint32_t>(r.gpr[3]);
             const int64_t off = static_cast<int64_t>(r.gpr[4]);
-            if (fh < 3 || fh >= 64 || !g_posixFds[fh] || !Readable(dst, len)) return 0;
+            if (fh < 3 || fh >= 64 || !Readable(dst, len)) return 0;
             size_t got = 0;
             {
                 std::scoped_lock lk(g_fiosMtx);
