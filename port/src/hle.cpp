@@ -1786,6 +1786,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             size_t got = 0;
             {
                 std::scoped_lock lk(g_fiosMtx);
+                if (!g_posixFds[fh]) return 0;
                 if (_fseeki64(g_posixFds[fh], off, SEEK_SET) == 0)
                     got = std::fread(dst, 1, len, g_posixFds[fh]);
             }
@@ -2033,7 +2034,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                 }
             }
 
-            if (g_submits <= 3) {
+            if (g_verbose && g_submits <= 3) {
                 std::printf("[gnm] submit #%llu count=%u vid=%llu display=%u mode=%d arg=%lld label=%p value=%u\n",
                             static_cast<unsigned long long>(g_submits),
                             count, static_cast<unsigned long long>(r.gpr[5]), displayIndex,
