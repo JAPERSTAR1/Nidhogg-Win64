@@ -1560,10 +1560,14 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
         }
         case 136:    // sceKernelRead(fd, buf, nbytes)
         case 361: {  // read(fd, buf, nbytes)
+            std::scoped_lock lk(g_fiosMtx);
             const int fd = static_cast<int>(r.gpr[0]);
             if (fd < 3 || fd >= 64 || !g_posixFds[fd])
                 return slot == 361 ? static_cast<uint64_t>(static_cast<int64_t>(-1)) : 0x80020009ull;
-            const size_t n = std::fread(ptr(1), 1, static_cast<size_t>(r.gpr[2]), g_posixFds[fd]);
+            const size_t want = static_cast<size_t>(r.gpr[2]);
+            if (!Readable(ptr(1), want))
+                return slot == 361 ? static_cast<uint64_t>(static_cast<int64_t>(-1)) : 0x8002000eull;
+            const size_t n = std::fread(ptr(1), 1, want, g_posixFds[fd]);
             return static_cast<uint64_t>(n);
         }
 
