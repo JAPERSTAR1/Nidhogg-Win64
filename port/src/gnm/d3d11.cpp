@@ -1,10 +1,14 @@
 #include "d3d11.h"
 
+#include "../core/logger.h"
+#include "../core/settings.h"
+#include "../ui/overlay.h"
+
 #include <windows.h>
 
 #include <d3d11.h>
 #include <d3dcompiler.h>
-#include <dxgi.h>
+#include <dxgi1_5.h>
 #include <wincodec.h>
 #include <wrl/client.h>
 
