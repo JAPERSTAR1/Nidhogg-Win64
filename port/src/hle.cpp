@@ -1547,13 +1547,14 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
         case 135: {  // sceKernelStat(path, sb)
             std::string path = HostPath(str(0));
             WIN32_FILE_ATTRIBUTE_DATA fad{};
-            if (!GetFileAttributesExA(path.c_str(), GetFileExInfoStandard, &fad))
+            if (wpath.empty() || !GetFileAttributesExW(wpath.c_str(), GetFileExInfoStandard, &fad))
                 return 0x80020002ull;
             if (Readable(ptr(1), 0x78)) {
                 auto* sb = reinterpret_cast<uint8_t*>(r.gpr[1]);
                 std::memset(sb, 0, 0x78);
-                const uint64_t sz = (static_cast<uint64_t>(fad.nFileSizeHigh) << 32) |
-                                    fad.nFileSizeLow;
+                uint64_t sz = (static_cast<uint64_t>(fad.nFileSizeHigh) << 32) |
+                              fad.nFileSizeLow;
+                if (sz > (64ULL << 20)) sz = (64ULL << 20);  // guard against multi-GB corrupted save
                 *reinterpret_cast<uint64_t*>(sb + 0x48) = sz;  // Orbis st_size
             }
             return 0;
