@@ -1487,10 +1487,9 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             const auto* m = reinterpret_cast<const uint8_t*>(r.gpr[0]);
             const char* dirName = *reinterpret_cast<const char* const*>(m + 0x10);
             const uint32_t mode = *reinterpret_cast<const uint32_t*>(m + 0x28);
-            std::string hostDir = SaveRoot((dirName && Readable(dirName, 1)) ? dirName : "00");
-            DWORD attr = GetFileAttributesA(hostDir.c_str());
+            std::string hostDir = SaveRoot((dirName && Readable(dirName, 1)) ? dirName : "SAVEDATA00");
             if (mode == 1) {  // READ_ONLY
-                if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY))
+                if (!core::DirExistsUtf8(hostDir))
                     return 0x809f0008ull;  // SCE_SAVE_DATA_ERROR_NOT_FOUND
             } else {
                 if (!core::MakeDirsUtf8(hostDir))
