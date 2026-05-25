@@ -1507,8 +1507,13 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             const uint32_t flags = static_cast<uint32_t>(r.gpr[1]);
             const bool writing = (flags & 0x3u) != 0 || (flags & 0x200u) != 0;
             if (writing) MakeParentDirs(path);
-            std::FILE* f = std::fopen(path.c_str(), writing ? "wb" : "rb");
-            if (!f) return slot == 359 ? static_cast<uint64_t>(static_cast<int64_t>(-1)) : 0x80020002ull;
+            std::FILE* f = core::FopenUtf8(path, writing ? "wb" : "rb");
+            if (!f) {
+                return slot == 359
+                    ? static_cast<uint64_t>(static_cast<int64_t>(-1))
+                    : (writing ? 0x8002000dull : 0x80020002ull);
+            }
+            std::scoped_lock lk(g_fiosMtx);
             for (int fd = 3; fd < 64; ++fd) {
                 if (!g_posixFds[fd]) {
                     g_posixFds[fd] = f;
@@ -1520,6 +1525,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
         }
         case 360:    // lseek(fd, offset, whence)
         case 397: {  // sceKernelLseek(fd, offset, whence)
+            std::scoped_lock lk(g_fiosMtx);
             const int fd = static_cast<int>(r.gpr[0]);
             if (fd < 3 || fd >= 64 || !g_posixFds[fd])
                 return static_cast<uint64_t>(static_cast<int64_t>(-1));
