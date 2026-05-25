@@ -2364,14 +2364,15 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             if (first && g_verbose) {
                 DumpFrameState();
             } else if ((g_submits % 300) == 0) {
-                std::printf("[gnm] frame %llu: %zu draws, %llu writes, %u errors | [audio] mixed=%llu voices=%u peak=%.4f\n",
-                            static_cast<unsigned long long>(g_submits),
-                            g_machine.draws().size(),
-                            static_cast<unsigned long long>(g_machine.memoryWrites()),
-                            g_machine.errors(),
-                            static_cast<unsigned long long>(audio::MixedFrames()),
-                            audio::ActiveVoices(),
-                            audio::PeakAmplitude());
+                LOG_INFO("[gnm] frame %llu (room=%s): %zu draws, %llu writes, %u errors | [audio] mixed=%llu voices=%u peak=%.4f",
+                         static_cast<unsigned long long>(g_submits),
+                         CurrentRoom().c_str(),
+                         g_machine.draws().size(),
+                         static_cast<unsigned long long>(g_machine.memoryWrites()),
+                         g_machine.errors(),
+                         static_cast<unsigned long long>(audio::MixedFrames()),
+                         audio::ActiveVoices(),
+                         audio::PeakAmplitude());
                 if (g_verbose) {
                     for (int rank = 0; rank < 64; ++rank) {
                         uint32_t best = 512, bestCalls = 0;
@@ -2391,7 +2392,6 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                     }
                 }
                 for (uint32_t s = 0; s < 512; ++s) g_slotCalls[s] = 0;
-                std::fflush(stdout);
             }
 
             ++g_videoOut.flipCount;
