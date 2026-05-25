@@ -1,3 +1,4 @@
+#define NOMINMAX
 #include "d3d11.h"
 
 #include "../core/logger.h"
