@@ -16,12 +16,10 @@
 #include <cstdint>
 #include <vector>
 
-#include "pm4.h"
-
 namespace ps4::gnm {
 
-// Renders everything the guest submitted this frame and presents it.  Safe to
-// call with an empty list or before the window exists: it does nothing then.
+// Executes one submitted frame's draws against a D3D11 swapchain attached to
+// `hwnd` (an HWND passed as void* so callers do not pull in <windows.h>).
 void RenderFrame(void* hwnd, const std::vector<Draw>& draws);
 
 // Re-presents the latest rendered frame with live overlay/HUD updates without
