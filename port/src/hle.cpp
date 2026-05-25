@@ -1242,13 +1242,12 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                 std::fclose(reinterpret_cast<std::FILE*>(r.gpr[0])));
         case 52: {  // mkdir(path, mode)
             std::string path = HostPath(str(0));
-            MakeParentDirs(path);
-            return static_cast<uint64_t>(static_cast<int64_t>(_mkdir(path.c_str())));
+            return core::MakeDirsUtf8(path) ? 0 : static_cast<uint64_t>(static_cast<int64_t>(-1));
         }
         case 53:  // fwrite
-            return std::fwrite(ptr(0), static_cast<size_t>(r.gpr[1]),
-                               static_cast<size_t>(r.gpr[2]),
-                               reinterpret_cast<std::FILE*>(r.gpr[3]));
+            return r.gpr[3] ? std::fwrite(ptr(0), static_cast<size_t>(r.gpr[1]),
+                                          static_cast<size_t>(r.gpr[2]),
+                                          reinterpret_cast<std::FILE*>(r.gpr[3])) : 0;
         case 54: {  // remove
             std::wstring w = core::Utf8ToWide(HostPath(str(0)));
             return w.empty() ? static_cast<uint64_t>(-1ll)
