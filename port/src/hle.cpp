@@ -1493,9 +1493,13 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                 if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY))
                     return 0x809f0008ull;  // SCE_SAVE_DATA_ERROR_NOT_FOUND
             } else {
-                MakeParentDirs(hostDir + "\\_");
+                if (!core::MakeDirsUtf8(hostDir))
+                    return 0x809f000full;  // permission / IO failure
             }
-            g_saveMountDir = hostDir;
+            {
+                std::scoped_lock lk(g_fiosMtx);
+                g_saveMountDir = hostDir;
+            }
             char* dst = reinterpret_cast<char*>(r.gpr[1]);
             std::memset(dst, 0, 0x20);
             std::strcpy(dst, "/savedata0");
