@@ -1250,8 +1250,9 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                                static_cast<size_t>(r.gpr[2]),
                                reinterpret_cast<std::FILE*>(r.gpr[3]));
         case 54: {  // remove
-            std::string path = HostPath(str(0));
-            return static_cast<uint64_t>(static_cast<int64_t>(std::remove(path.c_str())));
+            std::wstring w = core::Utf8ToWide(HostPath(str(0)));
+            return w.empty() ? static_cast<uint64_t>(-1ll)
+                             : static_cast<uint64_t>(static_cast<int64_t>(_wremove(w.c_str())));
         }
 
         // ---- libScePngDec
@@ -1372,7 +1373,21 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             if (uid == 2) return 2;
             return 0x80920004ull;
         }
-        case 29:  // scePadSetVibration(handle, param)
+        case 29: {  // scePadSetVibration(handle, param)
+            const int32_t handle = static_cast<int32_t>(r.gpr[0]);
+            const auto& cfg = core::CurrentSettings();
+            const int padIdx = (handle == 1) ? cfg.p1Controller : (handle == 2 ? cfg.p2Controller : -1);
+            if (padIdx >= 0 && padIdx <= 3 && Readable(ptr(1), 2)) {
+                const auto* vp = reinterpret_cast<const uint8_t*>(r.gpr[1]);
+                XINPUT_VIBRATION vib{};
+                if (cfg.vibration) {
+                    vib.wLeftMotorSpeed = static_cast<WORD>(vp[0]) * 257u;
+                    vib.wRightMotorSpeed = static_cast<WORD>(vp[1]) * 257u;
+                }
+                XInputSetState(static_cast<DWORD>(padIdx), &vib);
+            }
+            return 0;
+        }
         case 30:  // scePadClose(handle)
         case 38:  // scePadSetLightBar(handle, color)
         case 39:  // scePadResetLightBar(handle)
@@ -1384,7 +1399,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             if ((handle != 1 && handle != 2) || want <= 0 || !Readable(out, 0x78))
                 return 0x80920003ull;
             std::memset(out, 0, 0x78);
-            uint32_t buttons = 0;
+
             uint8_t lx = 0x80, ly = 0x80, rx = 0x80, ry = 0x80;
             uint32_t buttons = ReadLocalPlayerButtons(handle, lx, ly, rx, ry);
 
