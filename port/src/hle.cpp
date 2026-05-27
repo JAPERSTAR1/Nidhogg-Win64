@@ -1234,12 +1234,12 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             return static_cast<uint64_t>(static_cast<int64_t>(
                 std::ftell(reinterpret_cast<std::FILE*>(r.gpr[0]))));
         case 49:  // fread
-            return std::fread(ptr(0), static_cast<size_t>(r.gpr[1]),
-                              static_cast<size_t>(r.gpr[2]),
-                              reinterpret_cast<std::FILE*>(r.gpr[3]));
+            return r.gpr[0] ? std::fread(ptr(0), static_cast<size_t>(r.gpr[1]),
+                                         static_cast<size_t>(r.gpr[2]),
+                                         reinterpret_cast<std::FILE*>(r.gpr[3])) : 0;
         case 50:  // fclose
-            return static_cast<uint64_t>(
-                std::fclose(reinterpret_cast<std::FILE*>(r.gpr[0])));
+            return r.gpr[0] ? static_cast<uint64_t>(
+                std::fclose(reinterpret_cast<std::FILE*>(r.gpr[0]))) : 0;
         case 52: {  // mkdir(path, mode)
             std::string path = HostPath(str(0));
             return core::MakeDirsUtf8(path) ? 0 : static_cast<uint64_t>(static_cast<int64_t>(-1));
