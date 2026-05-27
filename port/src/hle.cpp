@@ -1537,6 +1537,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
         }
         case 130:    // sceKernelClose(fd)
         case 362: {  // close(fd)
+            std::scoped_lock lk(g_fiosMtx);
             const int fd = static_cast<int>(r.gpr[0]);
             if (fd >= 3 && fd < 64 && g_posixFds[fd]) {
                 std::fclose(g_posixFds[fd]);
@@ -1545,7 +1546,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             return 0;
         }
         case 135: {  // sceKernelStat(path, sb)
-            std::string path = HostPath(str(0));
+            std::wstring wpath = core::Utf8ToWide(HostPath(str(0)));
             WIN32_FILE_ATTRIBUTE_DATA fad{};
             if (wpath.empty() || !GetFileAttributesExW(wpath.c_str(), GetFileExInfoStandard, &fad))
                 return 0x80020002ull;
