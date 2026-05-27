@@ -1529,9 +1529,12 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             return static_cast<uint64_t>(_ftelli64(g_posixFds[fd]));
         }
         case 129: {  // sceKernelWrite(fd, buf, nbytes)
+            std::scoped_lock lk(g_fiosMtx);
             const int fd = static_cast<int>(r.gpr[0]);
             if (fd < 3 || fd >= 64 || !g_posixFds[fd]) return 0x80020009ull;
-            const size_t n = std::fwrite(ptr(1), 1, static_cast<size_t>(r.gpr[2]), g_posixFds[fd]);
+            const size_t want = static_cast<size_t>(r.gpr[2]);
+            if (!Readable(ptr(1), want)) return 0x8002000eull;
+            const size_t n = std::fwrite(ptr(1), 1, want, g_posixFds[fd]);
             std::fflush(g_posixFds[fd]);
             return static_cast<uint64_t>(n);
         }
