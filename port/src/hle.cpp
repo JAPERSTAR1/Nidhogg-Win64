@@ -836,6 +836,102 @@ HWND CreatePortWindow(uint32_t w, uint32_t h) {
     return hwnd;
 }
 
+struct AutoPressCmd {
+    uint64_t startFrame = 0;
+    uint64_t duration = 6;
+    uint32_t mask = 0;
+};
+
+std::vector<AutoPressCmd> ParseAutoPressEnv(const char* envName) {
+    std::vector<AutoPressCmd> out;
+    char* env = nullptr;
+    size_t len = 0;
+    if (_dupenv_s(&env, &len, envName) != 0 || !env) return out;
+    const char* p = env;
+    while (*p && out.size() < 512) {
+        while (*p == ' ' || *p == ',') ++p;
+        if (!*p) break;
+        char* mid = nullptr;
+        unsigned long long f = std::strtoull(p, &mid, 10);
+        if (mid == p || *mid != ':') break;
+        char* end = nullptr;
+        unsigned long m = std::strtoul(mid + 1, &end, 0);
+        if (end == mid + 1) break;
+        unsigned long long dur = 6;
+        if (*end == ':') {
+            char* durEnd = nullptr;
+            unsigned long long parsedDur = std::strtoull(end + 1, &durEnd, 10);
+            if (durEnd != end + 1 && parsedDur > 0) {
+                dur = parsedDur;
+                end = durEnd;
+            }
+        }
+        out.push_back({f, dur, static_cast<uint32_t>(m)});
+        p = (*end == ',') ? (end + 1) : end;
+    }
+    std::free(env);
+    return out;
+}
+
+uint32_t ReadLocalPlayerButtons(int playerIndex, uint8_t& lx, uint8_t& ly, uint8_t& rx, uint8_t& ry) {
+    uint32_t buttons = 0;
+    lx = 0x80; ly = 0x80; rx = 0x80; ry = 0x80;
+
+    const auto& cfg = core::CurrentSettings();
+    const bool focused = !g_qaUnfocused && g_videoOut.window &&
+                         GetForegroundWindow() == g_videoOut.window &&
+                         !gnm::IsOverlayCapturingInput();
+    auto down = [&](int vk) {
+        return vk != 0 && focused && (GetAsyncKeyState(vk) & 0x8000) != 0;
+    };
+
+    const auto& kb = (playerIndex == 1) ? cfg.p1Keys : cfg.p2Keys;
+    if (down(kb.up) || down(kb.altUp))         buttons |= 0x0010;  // Up
+    if (down(kb.down) || down(kb.altDown))     buttons |= 0x0040;  // Down
+    if (down(kb.left) || down(kb.altLeft))     buttons |= 0x0080;  // Left
+    if (down(kb.right) || down(kb.altRight))   buttons |= 0x0020;  // Right
+    if (down(kb.jump) || down(kb.altJump))     buttons |= 0x4000;  // Cross (Jump/Confirm)
+    if (down(kb.attack) || down(kb.altAttack)) buttons |= 0x8000;  // Square (Attack/Throw)
+    if (down(kb.back))                         buttons |= 0x2000;  // Circle (Back)
+    if (down(kb.start))                        buttons |= 0x0008;  // Options (Start)
+    if (playerIndex == 1 && down('E'))         buttons |= 0x1000;  // Triangle
+
+    const int padIdx = (playerIndex == 1) ? cfg.p1Controller : cfg.p2Controller;
+    if (!g_qaUnfocused && !gnm::IsOverlayCapturingInput() && padIdx >= 0 && padIdx <= 3) {
+        XINPUT_STATE xi{};
+        if (XInputGetState(static_cast<DWORD>(padIdx), &xi) == ERROR_SUCCESS) {
+            const WORD xb = xi.Gamepad.wButtons;
+            if (xb & XINPUT_GAMEPAD_DPAD_UP)        buttons |= 0x0010;
+            if (xb & XINPUT_GAMEPAD_DPAD_DOWN)      buttons |= 0x0040;
+            if (xb & XINPUT_GAMEPAD_DPAD_LEFT)      buttons |= 0x0080;
+            if (xb & XINPUT_GAMEPAD_DPAD_RIGHT)     buttons |= 0x0020;
+            if (xb & XINPUT_GAMEPAD_START)          buttons |= 0x0008;
+            if (xb & XINPUT_GAMEPAD_A)              buttons |= 0x4000;
+            if (xb & XINPUT_GAMEPAD_B)              buttons |= 0x2000;
+            if (xb & XINPUT_GAMEPAD_X)              buttons |= 0x8000;
+            if (xb & XINPUT_GAMEPAD_Y)              buttons |= 0x1000;
+            if (xb & XINPUT_GAMEPAD_LEFT_SHOULDER)  buttons |= 0x0400;
+            if (xb & XINPUT_GAMEPAD_RIGHT_SHOULDER) buttons |= 0x0800;
+            if (xi.Gamepad.bLeftTrigger > 64)       buttons |= 0x0100;
+            if (xi.Gamepad.bRightTrigger > 64)      buttons |= 0x0200;
+            lx = static_cast<uint8_t>((static_cast<int>(xi.Gamepad.sThumbLX) + 32768) >> 8);
+            ly = static_cast<uint8_t>((32767 - static_cast<int>(xi.Gamepad.sThumbLY)) >> 8);
+            rx = static_cast<uint8_t>((static_cast<int>(xi.Gamepad.sThumbRX) + 32768) >> 8);
+            ry = static_cast<uint8_t>((32767 - static_cast<int>(xi.Gamepad.sThumbRY)) >> 8);
+        }
+    }
+
+    static std::vector<AutoPressCmd> s_p1Auto = ParseAutoPressEnv("NIDHOGG_AUTOPRESS");
+    static std::vector<AutoPressCmd> s_p2Auto = ParseAutoPressEnv("NIDHOGG_AUTOPRESS_P2");
+    const auto& seq = (playerIndex == 1) ? s_p1Auto : s_p2Auto;
+    for (const auto& cmd : seq) {
+        if (g_submits >= cmd.startFrame && g_submits < cmd.startFrame + cmd.duration) {
+            buttons |= cmd.mask;
+        }
+    }
+    return buttons;
+}
+
 }  // namespace
 
 uint32_t LastSlot() { return g_lastSlot; }
