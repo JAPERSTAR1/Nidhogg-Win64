@@ -842,6 +842,54 @@ uint32_t LastSlot() { return g_lastSlot; }
 uint64_t LastCallSite() { return g_lastRet; }
 void HleSetImageBase(uint64_t base) { g_base = base; }
 
+void HleSetApp0(const std::string& app0Dir) {
+    if (app0Dir.empty()) return;
+    std::wstring w = core::Utf8ToWide(app0Dir);
+    wchar_t full[MAX_PATH * 4]{};
+    if (!w.empty() && GetFullPathNameW(w.c_str(), MAX_PATH * 4, full, nullptr))
+        g_app0Override = core::WideToUtf8(full);
+    else
+        g_app0Override = app0Dir;
+}
+
+void RequestQuit() {
+    g_quitRequested.store(true, std::memory_order_relaxed);
+}
+
+bool IsQuitRequested() {
+    return g_quitRequested.load(std::memory_order_relaxed);
+}
+
+void HleShutdown() {
+    if (g_shutDownDone.exchange(true)) return;
+    LOG_INFO("[hle] shutting down cleanly at frame %llu (room=%s)",
+             static_cast<unsigned long long>(g_submits), CurrentRoom().c_str());
+
+    for (DWORD i = 0; i < 4; ++i) {
+        XINPUT_VIBRATION vib{};
+        XInputSetState(i, &vib);
+    }
+    {
+        std::scoped_lock lk(g_fiosMtx);
+        for (int fd = 3; fd < 64; ++fd) {
+            if (g_posixFds[fd]) {
+                std::fflush(g_posixFds[fd]);
+                std::fclose(g_posixFds[fd]);
+                g_posixFds[fd] = nullptr;
+            }
+        }
+    }
+    net::ShutdownNetplay();
+    audio::ShutdownAudio();
+    gnm::ShutdownRenderer();
+    if (g_videoOut.window) {
+        HWND w = g_videoOut.window;
+        g_videoOut.window = nullptr;
+        DestroyWindow(w);
+    }
+    timeEndPeriod(1);
+    core::ShutdownLogger();
+
 // ------------------------------------------------------------------ names --
 
 const char* SlotName(uint32_t s) {
@@ -1143,8 +1191,15 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                        static_cast<size_t>(r.gpr[1]),
                        static_cast<size_t>(r.gpr[2]), r.gpr[3]);
             return 0;
-        case 153:
-            return static_cast<uint64_t>(std::rand() & 0x7fff);
+        case 153: {
+            if (GetCurrentThreadId() == g_simThreadId) {
+                g_simRandState = g_simRandState * 214013u + 2531011u;
+                return static_cast<uint64_t>((g_simRandState >> 16) & 0x7fffu);
+            }
+            thread_local uint32_t tl_rng = 0x2468ACE1u ^ GetCurrentThreadId();
+            tl_rng = tl_rng * 214013u + 2531011u;
+            return static_cast<uint64_t>((tl_rng >> 16) & 0x7fffu);
+        }
         case 155: {
             if (!r.gpr[0] || !r.gpr[1]) return 0;
             const char* p = std::strstr(reinterpret_cast<const char*>(r.gpr[0]), str(1));
