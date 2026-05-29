@@ -1220,14 +1220,12 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                 mode += 'b';
             if (mode.find('w') != std::string::npos || mode.find('a') != std::string::npos)
                 MakeParentDirs(path);
-            std::FILE* f = std::fopen(path.c_str(), mode.c_str());
-            std::printf("[fios] fopen \"%s\" mode \"%s\" -> %p\n", path.c_str(),
-                        mode.c_str(), static_cast<void*>(f));
-            std::fflush(stdout);
+            std::FILE* f = core::FopenUtf8(path, mode.c_str());
+            if (g_verbose) LOG_INFO("[fios] fopen \"%s\" mode \"%s\" -> %p", path.c_str(), mode.c_str(), static_cast<void*>(f));
             return reinterpret_cast<uint64_t>(f);
         }
         case 47:  // fseek
-            return static_cast<uint64_t>(static_cast<int64_t>(
+            return r.gpr[0] ? static_cast<uint64_t>(static_cast<int64_t>(
                 std::fseek(reinterpret_cast<std::FILE*>(r.gpr[0]),
                            static_cast<long>(r.gpr[1]), static_cast<int>(r.gpr[2])))) : static_cast<uint64_t>(-1ll);
         case 48:  // ftell
