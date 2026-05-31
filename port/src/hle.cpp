@@ -807,10 +807,11 @@ bool Readable(const void* p, size_t n) {
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
         case WM_CLOSE:
-            DestroyWindow(hwnd);
+            RequestQuit();
             return 0;
         case WM_DESTROY:
-            PostQuitMessage(0);
+            if (g_videoOut.window == hwnd) g_videoOut.window = nullptr;
+            RequestQuit();
             return 0;
         case WM_SYSCOMMAND:
             if ((wp & 0xFFF0) == SC_KEYMENU) return 0;  // Suppress Alt menu beep
