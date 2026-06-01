@@ -1454,13 +1454,10 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                         s_press[s_pressCount++] = {f, static_cast<uint32_t>(m)};
                         p = (*end == ',') ? (end + 1) : end;
                     }
-                    std::free(env);
                 }
-            }
-            if (handle == 1) {
-                for (int i = 0; i < s_pressCount; ++i) {
-                    if (g_submits >= s_press[i].frame && g_submits < s_press[i].frame + 6)
-                        buttons |= s_press[i].mask;
+                if (g_netplaySyncedFrame == g_submits) {
+                    buttons = (handle == 1) ? g_netplayP1Buttons : g_netplayP2Buttons;
+                    lx = 0x80; ly = 0x80; rx = 0x80; ry = 0x80;
                 }
             }
 
