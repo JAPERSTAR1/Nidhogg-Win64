@@ -819,17 +819,25 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
 HWND CreatePortWindow(uint32_t w, uint32_t h) {
     if (g_videoOut.window) return g_videoOut.window;
-    HINSTANCE inst = GetModuleHandleA(nullptr);
-    WNDCLASSA wc{};
+    HINSTANCE inst = GetModuleHandleW(nullptr);
+    const wchar_t* kWideClass = L"NidhoggPortWindow";
+    WNDCLASSW wc{};
     wc.style = CS_OWNDC;
     wc.lpfnWndProc = WndProc;
     wc.hInstance = inst;
-    wc.hCursor = LoadCursorA(nullptr, IDC_ARROW);
-    wc.lpszClassName = kClassName;
-    if (!RegisterClassA(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return nullptr;
-    RECT rc{0, 0, static_cast<LONG>(w), static_cast<LONG>(h)};
-    AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
-    HWND hwnd = CreateWindowExA(0, kClassName, "Nidhogg", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+    wc.hCursor = LoadCursorW(nullptr, reinterpret_cast<LPCWSTR>(IDC_ARROW));
+    wc.hIcon = LoadIconW(inst, MAKEINTRESOURCEW(101));
+    if (!wc.hIcon) wc.hIcon = LoadIconW(nullptr, reinterpret_cast<LPCWSTR>(IDI_APPLICATION));
+    wc.lpszClassName = kWideClass;
+    if (!RegisterClassW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return nullptr;
+
+    const auto& cfg = core::CurrentSettings();
+    const uint32_t initW = cfg.displayWidth ? cfg.displayWidth : w;
+    const uint32_t initH = cfg.displayHeight ? cfg.displayHeight : h;
+    DWORD style = WS_OVERLAPPEDWINDOW | WS_VISIBLE;
+    RECT rc{0, 0, static_cast<LONG>(initW), static_cast<LONG>(initH)};
+    AdjustWindowRect(&rc, style, FALSE);
+    HWND hwnd = CreateWindowExW(0, kWideClass, L"Nidhogg", style,
                                 CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left,
                                 rc.bottom - rc.top, nullptr, nullptr, inst, nullptr);
     g_videoOut.window = hwnd;
