@@ -574,9 +574,7 @@ uint32_t AllocFiosOp(uint64_t req, uint64_t act) {
 }
 
 std::string SaveRoot(const char* dirName) {
-    char full[MAX_PATH]{};
-    GetFullPathNameA("savedata", MAX_PATH, full, nullptr);
-    std::string out = full[0] ? full : "savedata";
+    std::string out = core::SavesDirPath();
     if (dirName && *dirName) {
         out += '\\';
         out += dirName;
@@ -591,7 +589,7 @@ std::string HostPath(const char* p) {
         for (char& c : rest) {
             if (c == '/') c = '\\';
         }
-        std::string out = g_saveMountDir.empty() ? SaveRoot("00") : g_saveMountDir;
+        std::string out = g_saveMountDir.empty() ? SaveRoot("SAVEDATA00") : g_saveMountDir;
         if (!rest.empty()) {
             out += '\\';
             out += rest;
