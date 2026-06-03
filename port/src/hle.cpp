@@ -812,8 +812,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_DESTROY:
             PostQuitMessage(0);
             return 0;
+        case WM_SYSCOMMAND:
+            if ((wp & 0xFFF0) == SC_KEYMENU) return 0;  // Suppress Alt menu beep
+            return DefWindowProcW(hwnd, msg, wp, lp);
         default:
-            return DefWindowProcA(hwnd, msg, wp, lp);
+            return DefWindowProcW(hwnd, msg, wp, lp);
     }
 }
 
