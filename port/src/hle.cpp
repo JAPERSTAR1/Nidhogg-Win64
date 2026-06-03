@@ -264,7 +264,7 @@ int NullSafeStricmp(const char* a, const char* b) {
 }
 
 // High-resolution monotonic clock in microseconds and simulated 1.6 GHz TSC.
-uint64_t NowUsec() {
+uint64_t HostNowUsec() {
     static LARGE_INTEGER freq{};
     static LARGE_INTEGER start{};
     if (!freq.QuadPart) {
@@ -274,6 +274,16 @@ uint64_t NowUsec() {
     LARGE_INTEGER now{};
     QueryPerformanceCounter(&now);
     return static_cast<uint64_t>((now.QuadPart - start.QuadPart) * 1000000ULL / freq.QuadPart);
+}
+
+// Guest-visible clock: locked to synchronized simulation frame on the main
+// simulation thread during online matches so frame delta-timers stay identical.
+uint64_t NowUsec() {
+    if (g_netplayClockLock.load(std::memory_order_relaxed) &&
+        GetCurrentThreadId() == g_simThreadId) {
+        return 1000000ULL + g_netplaySimFrame.load(std::memory_order_relaxed) * 16667ULL;
+    }
+    return HostNowUsec();
 }
 
 // Runtime Win64 -> SysV 2-argument shim for guest qsort comparators.
