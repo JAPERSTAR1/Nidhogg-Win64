@@ -889,6 +889,58 @@ void HleShutdown() {
     }
     timeEndPeriod(1);
     core::ShutdownLogger();
+}
+
+void* GameWindow() { return g_videoOut.window; }
+uint64_t SubmittedFrames() { return g_submits; }
+
+std::string CurrentRoom() {
+    std::scoped_lock lk(g_roomMtx);
+    return g_currentRoom;
+}
+
+uint64_t ComputeGuestStateHash() {
+    if (!g_base) return 0;
+    uint64_t h = 1469598103934665603ULL;
+    auto mixBytes = [&](const void* data, size_t len) {
+        const auto* b = static_cast<const uint8_t*>(data);
+        for (size_t i = 0; i < len; ++i) {
+            h ^= b[i];
+            h *= 1099511628211ULL;
+        }
+    };
+
+    // Room index (+0x3e22b0) and guest LCG state (+0x1f0068)
+    if (Readable(reinterpret_cast<void*>(g_base + 0x3e22b0), 4))
+        mixBytes(reinterpret_cast<const void*>(g_base + 0x3e22b0), 4);
+    mixBytes(&g_simRandState, sizeof(g_simRandState));
+
+    // Walk active FOCAL/GameMaker entity list (+0x3e2230): hash relative vtable
+    // and deterministic non-pointer simulation fields [+0x80..+0x124].
+    uint32_t entityCount = 0;
+    if (Readable(reinterpret_cast<void*>(g_base + 0x3e2230), 8)) {
+        uint64_t ent = *reinterpret_cast<const uint64_t*>(g_base + 0x3e2230);
+        while (ent && entityCount < 2048 && Readable(reinterpret_cast<void*>(ent), 0x128)) {
+            const auto* eb = reinterpret_cast<const uint8_t*>(ent);
+            if (eb[0x9b] == 0) {  // not marked destroyed
+                const uint64_t vt = *reinterpret_cast<const uint64_t*>(eb);
+                const uint64_t relVt = (vt >= g_base) ? (vt - g_base) : vt;
+                mixBytes(&relVt, sizeof(relVt));
+                mixBytes(eb + 0x80, 0xA4);  // positions, velocities, alarms, sprite, angles
+                ++entityCount;
+            }
+            ent = *reinterpret_cast<const uint64_t*>(eb + 0x08);
+        }
+    }
+    mixBytes(&entityCount, sizeof(entityCount));
+    return h;
+}
+
+void SetNetplayStepCallback(NetplayStepFn fn) {
+    g_netplayStep = fn;
+    g_netplaySyncedFrame = UINT64_MAX;
+    if (!fn) g_netplayClockLock.store(false, std::memory_order_relaxed);
+}
 
 // ------------------------------------------------------------------ names --
 
