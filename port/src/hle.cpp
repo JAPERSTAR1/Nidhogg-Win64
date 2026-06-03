@@ -528,26 +528,18 @@ const std::string& App0() {
     static std::string root;
     if (!root.empty()) return root;
 
-    char* v = nullptr;
-    size_t n = 0;
-    if (_dupenv_s(&v, &n, "NIDHOGG_APP0") == 0 && v && *v) {
-        root = v;
-        std::free(v);
+    const auto& cfg = core::CurrentSettings();
+    core::AssetValidation v = core::AutoDiscoverAssets(cfg, nullptr);
+    if (v.valid && !v.rootDir.empty()) {
+        root = v.rootDir;
     } else {
-        std::free(v);
-        for (const char* cand : {"..\\CUSA00920", "CUSA00920", "..\\..\\CUSA00920"}) {
-            DWORD a = GetFileAttributesA(cand);
-            if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY)) {
-                root = cand;
-                break;
-            }
-        }
-        if (root.empty()) root = ".";
+        root = ".";
     }
-    char full[MAX_PATH]{};
-    if (GetFullPathNameA(root.c_str(), MAX_PATH, full, nullptr)) root = full;
-    std::printf("[fios] app0 = %s\n", root.c_str());
-    std::fflush(stdout);
+    std::wstring w = core::Utf8ToWide(root);
+    wchar_t full[MAX_PATH * 4]{};
+    if (!w.empty() && GetFullPathNameW(w.c_str(), MAX_PATH * 4, full, nullptr))
+        root = core::WideToUtf8(full);
+    LOG_INFO("[fios] app0 = %s", root.c_str());
     return root;
 }
 
