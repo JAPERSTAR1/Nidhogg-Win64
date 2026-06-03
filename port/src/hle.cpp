@@ -610,12 +610,8 @@ std::string HostPath(const char* p) {
 }
 
 void MakeParentDirs(const std::string& path) {
-    for (size_t i = 1; i < path.size(); ++i) {
-        if (path[i] != '\\') continue;
-        std::string dir = path.substr(0, i);
-        DWORD a = GetFileAttributesA(dir.c_str());
-        if (a == INVALID_FILE_ATTRIBUTES) CreateDirectoryA(dir.c_str(), nullptr);
-    }
+    size_t slash = path.find_last_of("\\/");
+    if (slash != std::string::npos) core::MakeDirsUtf8(path.substr(0, slash));
 }
 
 // ------------------------------------------------------------- gnm submit --
@@ -805,6 +801,9 @@ bool Readable(const void* p, size_t n) {
 }
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (gnm::OnWindowMessage(hwnd, msg, static_cast<uint64_t>(wp), static_cast<int64_t>(lp))) {
+        return 0;
+    }
     switch (msg) {
         case WM_CLOSE:
             RequestQuit();
