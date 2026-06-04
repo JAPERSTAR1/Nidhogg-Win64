@@ -461,9 +461,26 @@ uint32_t* Pm4Nop(uint32_t* cmd, uint32_t totalDwords) {
 }
 
 void Emit(const char* text, size_t len) {
-    if (len) {
-        std::fwrite(text, 1, len, stdout);
-        std::fflush(stdout);
+    if (!text || !len) return;
+    core::LogRaw(text, len);
+    // Capture guest room transitions ("Created room rMainMenu\n", etc.)
+    const char* tag = "Created room ";
+    const size_t tagLen = 13;
+    std::string sv(text, len);
+    size_t pos = sv.find(tag);
+    if (pos != std::string::npos) {
+        pos += tagLen;
+        size_t end = pos;
+        while (end < sv.size() && sv[end] != '\n' && sv[end] != '\r' && sv[end] != ' ') ++end;
+        if (end > pos) {
+            std::scoped_lock lk(g_roomMtx);
+            g_currentRoom = sv.substr(pos, end - pos);
+        }
+    }
+    if (sv.find("SteamCreateLobby") != std::string::npos ||
+        sv.find("SteamFindLobby") != std::string::npos ||
+        sv.find("Created room rShowLobbies") != std::string::npos) {
+        ui::OpenOverlayTab(4);
     }
 }
 
@@ -526,6 +543,7 @@ void* DirectMap(uint64_t phys, uint64_t len) {
 // overrides the default so the host can be run from anywhere.
 const std::string& App0() {
     static std::string root;
+    if (!g_app0Override.empty()) return g_app0Override;
     if (!root.empty()) return root;
 
     const auto& cfg = core::CurrentSettings();
