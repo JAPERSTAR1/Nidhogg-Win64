@@ -10,6 +10,8 @@
 #include <wrl/client.h>
 #include <xinput.h>
 
+#include <algorithm>
+#include <atomic>
 #include <bit>
 #include <cmath>
 #include <cstdarg>
@@ -28,6 +30,22 @@ namespace {
 thread_local uint32_t g_lastSlot = 0xffffffff;
 thread_local uint64_t g_lastRet = 0;
 uint64_t g_base = 0;
+DWORD g_simThreadId = 0;
+uint32_t g_simRandState = 0x13579BDFu;
+std::atomic<bool> g_quitRequested{false};
+std::atomic<bool> g_shutDownDone{false};
+uint64_t g_maxFrames = 0;
+bool g_qaUnfocused = false;
+NetplayStepFn g_netplayStep = nullptr;
+std::atomic<bool> g_netplayClockLock{false};
+std::atomic<uint64_t> g_netplaySimFrame{0};
+uint32_t g_netplayP1Buttons = 0;
+uint32_t g_netplayP2Buttons = 0;
+uint64_t g_netplaySyncedFrame = UINT64_MAX;
+std::mutex g_roomMtx;
+std::string g_currentRoom = "boot";
+std::string g_app0Override;
+
 uint64_t g_logLimit = 0;   // per-call trace budget; 0 turns it off
 uint64_t g_traceFrom = 0;  // frame to begin tracing from
 uint64_t g_calls = 0;
