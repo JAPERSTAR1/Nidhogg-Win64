@@ -40,6 +40,7 @@ uint64_t g_slotCalls[512] = {};   // since the last histogram reset
 void Configure() {
     if (g_configured) return;
     g_configured = true;
+    g_simThreadId = GetCurrentThreadId();
     char* lim = nullptr;
     size_t n = 0;
     if (_dupenv_s(&lim, &n, "NIDHOGG_IMPORT_LIMIT") == 0 && lim) {
@@ -56,6 +57,14 @@ void Configure() {
     }
     if (_dupenv_s(&lim, &n, "NIDHOGG_UNCAPPED") == 0 && lim) {
         g_uncapped = (*lim != '\0' && *lim != '0');
+        std::free(lim);
+    }
+    if (_dupenv_s(&lim, &n, "NIDHOGG_MAX_FRAMES") == 0 && lim) {
+        g_maxFrames = std::strtoull(lim, nullptr, 0);
+        std::free(lim);
+    }
+    if (_dupenv_s(&lim, &n, "NIDHOGG_QA_UNFOCUSED") == 0 && lim) {
+        g_qaUnfocused = (*lim != '\0' && *lim != '0');
         std::free(lim);
     }
 }
