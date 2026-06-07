@@ -1,8 +1,12 @@
 #include "hle.h"
 
 #include "audio/ngs2.h"
+#include "core/logger.h"
+#include "core/settings.h"
 #include "gnm/d3d11.h"
 #include "gnm/pm4.h"
+#include "net/netplay.h"
+#include "ui/overlay.h"
 
 #include <windows.h>
 #include <direct.h>
