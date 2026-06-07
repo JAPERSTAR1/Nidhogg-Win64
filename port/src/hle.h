@@ -24,14 +24,21 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& regs, uint64_t ret, const uint
 // Human name for a slot, or nullptr.
 const char* SlotName(uint32_t slot);
 
-// Last import slot the HLE layer saw, for the fault report.
-uint32_t LastSlot();
+// Lifecycle & telemetry
+void RequestQuit();
+bool IsQuitRequested();
+void HleShutdown();
+void* GameWindow();
+uint64_t SubmittedFrames();
+std::string CurrentRoom();
+uint64_t ComputeGuestStateHash();
 
-// Return address of that import call, i.e. the instruction after the call.
-uint64_t LastCallSite();
-
-// Load address of the image, so trace lines can print offsets instead of
-// absolute pointers.
-void HleSetImageBase(uint64_t base);
+// Netplay frame-synchronized input & determinism hook.
+// When active and returning true, overrides P1/P2 pad state and locks guest
+// PRNG + wall clock to the synchronized match frame.
+using NetplayStepFn = bool (*)(uint64_t simFrame, uint32_t localButtons,
+                               uint32_t& outP1Buttons, uint32_t& outP2Buttons,
+                               uint32_t& ioRandState);
+void SetNetplayStepCallback(NetplayStepFn fn);
 
 }  // namespace ps4
