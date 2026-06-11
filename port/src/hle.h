@@ -1,12 +1,8 @@
 // Host-side implementations of the imports the image calls.
-//
-// The image is the original PS4 code, so every import is a real SCE/libc
-// function it expects to exist.  Slots are identified by call-site behaviour:
-// the surrounding code shows the argument shape and the error strings name the
-// API.  Anything not yet identified returns 0 and is reported.
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 namespace ps4 {
 
