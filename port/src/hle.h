@@ -21,8 +21,11 @@ struct ImportRegs {
 // Executes import `slot` and returns its value (rax, mirrored into xmm0).
 uint64_t HleCall(uint32_t slot, const ImportRegs& regs, uint64_t ret, const uint64_t* stack);
 
-// Human name for a slot, or nullptr.
 const char* SlotName(uint32_t slot);
+uint32_t LastSlot();
+uint64_t LastCallSite();
+void HleSetImageBase(uint64_t base);
+void HleSetApp0(const std::string& app0Dir);
 
 // Lifecycle & telemetry
 void RequestQuit();
