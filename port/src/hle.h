@@ -10,15 +10,11 @@
 
 namespace ps4 {
 
-// Register snapshot taken by the stub before it calls into C++.  The layout
-// matches the System V va_list register save area on purpose: shrinking
-// wrappers can point a va_list straight at it.
 struct ImportRegs {
     uint64_t gpr[6];          // rdi rsi rdx rcx r8 r9
     uint8_t xmm[8][16];       // xmm0..xmm7
 };
 
-// Executes import `slot` and returns its value (rax, mirrored into xmm0).
 uint64_t HleCall(uint32_t slot, const ImportRegs& regs, uint64_t ret, const uint64_t* stack);
 
 const char* SlotName(uint32_t slot);
