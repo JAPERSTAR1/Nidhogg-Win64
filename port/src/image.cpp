@@ -127,8 +127,6 @@ bool Image::load(const std::string& elfPath) {
 
     if (!parse(file)) return false;
 
-    // Reserve the whole span so the image lives at one contiguous, aligned
-    // window; vaddr == address - base becomes true everywhere.
     const uint64_t align = 0x10000;
     const uint64_t want = (span_ + align - 1) & ~(align - 1);
     for (uintptr_t hint = 0x10000000; hint < 0x70000000; hint += 0x10000000) {
@@ -142,8 +140,8 @@ bool Image::load(const std::string& elfPath) {
     for (const auto& s : segs_)
         std::memcpy(base_ + s.vaddr, s.file, static_cast<size_t>(s.filesz));
 
-    findRelocs(file);
-    findImports(file);
+    findRelocs(blob_);
+    findImports(blob_);
     return true;
 }
 
