@@ -103,7 +103,7 @@ void Image::findImports(const std::vector<uint8_t>& f) {
     };
 
     uint64_t slot = 0;
-    if (!slotAt(plt + 6, &slot)) return;   // skip the resolver trampoline
+    if (!slotAt(plt + 6, &slot)) return;
     for (uint64_t va = plt + 0x10; va + 6 <= text->vaddr + text->filesz; va += 0x10) {
         uint64_t next = 0;
         if (!slotAt(va, &next) || next != slot + 8) break;
@@ -113,7 +113,7 @@ void Image::findImports(const std::vector<uint8_t>& f) {
 }
 
 bool Image::load(const std::string& elfPath) {
-    FILE* fp = std::fopen(elfPath.c_str(), "rb");
+    FILE* fp = core::FopenUtf8(elfPath, "rb");
     if (!fp) return false;
     if (_fseeki64(fp, 0, SEEK_END) != 0) {
         std::fclose(fp);
