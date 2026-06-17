@@ -331,9 +331,6 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    // The image's _start takes (arg_block, fini) where arg_block is the
-    // kernel's initial process block: argc at +0 and the argv array inline at
-    // +8, followed by envp.  Build one so the SysV startup path can read it.
     const char* exe = "nidhogg";
     const char* env[] = {"LANG=en_US.UTF-8", "HOME=/app0", nullptr};
     uint8_t* block = static_cast<uint8_t*>(
@@ -347,12 +344,8 @@ int main(int argc, char** argv) {
     for (int i = 0; env[i]; ++i) ev[i] = env[i];
     ev[2] = nullptr;
 
-    std::printf("entering 0x%llx\n\n", static_cast<unsigned long long>(image.entry()));
-    std::fflush(stdout);
-
-    // Watchdog: the image is a blocking game loop, so when it stops making
-    // progress the useful question is "where is it parked", not "what did it
-    // call last".  NIDHOGG_WATCHDOG=<ms> changes the delay, 0 disables.
+    char* wdEnv = nullptr;
+    size_t wdLen = 0;
     DWORD watchdogMs = 0;
     if (_dupenv_s(&wdEnv, &wdLen, "NIDHOGG_WATCHDOG") == 0 && wdEnv) {
         watchdogMs = static_cast<DWORD>(std::strtoul(wdEnv, nullptr, 0));
