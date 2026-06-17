@@ -23,8 +23,21 @@ bool Image::parse(const std::vector<uint8_t>& f) {
     const uint8_t* e = f.data();
     if (e[4] != 2 || e[5] != 1) return false;  // ELFCLASS64, LE
 
+    struct SelfSeg {
+        uint64_t offset;
+        uint64_t filesz;
+    };
+    std::vector<SelfSeg> selfSegs;
+    if (isSelf) {
+        for (size_t off = kSelfSegOff; off + 0x20 <= kSelfElfOff; off += 0x20) {
+            const uint64_t foff = rd64(f.data() + off + 8);
+            const uint64_t fsz = rd64(f.data() + off + 16);
+            if (fsz > 0 && foff + fsz <= f.size()) selfSegs.push_back({foff, fsz});
+        }
+    }
+
     entry_ = rd64(e + 0x18);
-    const uint64_t phoff = rd64(e + 0x20);
+    const uint64_t phoff = ehOff + rd64(e + 0x20);
     const uint16_t phentsize = rd16(e + 0x36);
     const uint16_t phnum = rd16(e + 0x38);
     if (phoff + static_cast<uint64_t>(phnum) * phentsize > f.size()) return false;
