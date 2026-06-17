@@ -148,15 +148,29 @@ LONG WINAPI OnFault(EXCEPTION_POINTERS* ep) {    const auto* rec = ep->Exception
             mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) ||
             bp + 16 > reinterpret_cast<uint64_t>(mbi.BaseAddress) + mbi.RegionSize)
             break;
-        savedBp = *reinterpret_cast<uint64_t*>(bp);
-        ret = *reinterpret_cast<uint64_t*>(bp + 8);
-        std::printf(" +0x%llx",
-                    static_cast<unsigned long long>(ret - g_imageBase));
+        const uint64_t savedBp = *reinterpret_cast<uint64_t*>(bp);
+        const uint64_t ret = *reinterpret_cast<uint64_t*>(bp + 8);
+        report << " +0x" << std::hex << (ret - g_imageBase);
         if (savedBp <= bp) break;
         bp = savedBp;
     }
-    std::printf("\n");
-    std::fflush(stdout);
+    report << "\n";
+
+    const std::string crashText = report.str();
+    LOG_ERROR("%s", crashText.c_str());
+
+    const std::string crashFile = ps4::core::LogsDirPath() + "\\crash.log";
+    if (std::FILE* cf = ps4::core::FopenUtf8(crashFile, "wb")) {
+        std::fwrite(crashText.data(), 1, crashText.size(), cf);
+        std::fclose(cf);
+    }
+
+    if (!g_noGuiPrompts) {
+        std::wstring msg = ps4::core::Utf8ToWide(
+            "Nidhogg encountered an unexpected error and wrote diagnostic details to:\n\n" +
+            crashFile);
+        MessageBoxW(nullptr, msg.c_str(), L"Nidhogg Crash Report", MB_ICONERROR | MB_OK);
+    }
     TerminateProcess(GetCurrentProcess(), 0xC0000005u);
     return EXCEPTION_CONTINUE_SEARCH;
 }
