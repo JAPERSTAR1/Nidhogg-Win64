@@ -297,11 +297,8 @@ int main(int argc, char** argv) {
                     (unsigned long long)s.memsz, s.flags);
 
     const size_t relocs = image.relocate();
-    std::printf("relocs  %zu applied\n", relocs);
+    LOG_INFO("relocs  %zu applied", relocs);
 
-    // PS4 libc stores a *pointer* to the stack-guard slot in .bss; the real
-    // __libc_init seeds it.  Stand in for that here so every function with a
-    // stack-protector prologue can read a valid guard.
     auto* guard = static_cast<uint64_t*>(
         VirtualAlloc(nullptr, 0x1000, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
     *guard = 0x8f3a5c17d2e94b60ull;
