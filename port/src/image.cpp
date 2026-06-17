@@ -37,6 +37,18 @@ bool Image::parse(const std::vector<uint8_t>& f) {
         const uint64_t memsz = rd64(p + 40);
         if (type != PT_LOAD) continue;
 
+        if (isSelf) {
+            bool matched = false;
+            for (const auto& ss : selfSegs) {
+                if (ss.filesz == filesz) {
+                    off = ss.offset;
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) return false;
+        }
+
         Segment s;
         s.vaddr = vaddr;
         s.memsz = memsz;
@@ -50,11 +62,6 @@ bool Image::parse(const std::vector<uint8_t>& f) {
 }
 
 void Image::findRelocs(const std::vector<uint8_t>& f) {
-    // The SCE relocation table is a run of 24-byte {r_offset, r_info, r_addend}
-    // records.  The dump is truncated before DT_SCE_RELA, so the entries are
-    // recovered by shape: relative type 8, offset and addend both inside the
-    // image.  A single match proves nothing inside a 2 MB code segment, so only
-    // runs of eight or more consecutive records are accepted.
     const uint64_t limit = span_;
     auto plausible = [&](size_t i) {
         if (i + 24 > f.size()) return false;
@@ -84,10 +91,7 @@ void Image::findRelocs(const std::vector<uint8_t>& f) {
     }
 }
 
-void Image::findImports(const std::vector<uint8_t>& f) {
-    // The PLT at 0x171bc0 opens with push qword ptr [rip+disp] / jmp qword
-    // ptr [rip+disp]; every following entry is jmp qword ptr [rip+disp] with
-    // its slot 8 bytes further along.  Walk the run and collect the slots.
+void Image::findImports(const std::vector<uint8_t>&) {
     const uint64_t plt = 0x171bc0;
     const Segment* text = nullptr;
     for (const auto& s : segs_)
