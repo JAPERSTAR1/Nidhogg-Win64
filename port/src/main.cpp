@@ -269,13 +269,26 @@ DWORD WINAPI SamplerThread(LPVOID) {
     return 0;
 }
 
-}  // namespace
+    if (maxFrames > 0) {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%llu", static_cast<unsigned long long>(maxFrames));
+        _putenv_s("NIDHOGG_MAX_FRAMES", buf);
+    }
+    if (openOnlineMenu) _putenv_s("NIDHOGG_OPEN_ONLINE", "1");
+    if (openSettingsMenu) _putenv_s("NIDHOGG_OPEN_SETTINGS", "1");
 
-int main(int argc, char** argv) {
-    SetConsoleOutputCP(CP_UTF8);
-    std::setvbuf(stdout, nullptr, _IONBF, 0);
-    std::printf("nidhogg x64 host\n");
-    g_mainThread = GetCurrentThreadId();
+    if (wantConsole && !hasConsole) {
+        if (AttachConsole(ATTACH_PARENT_PROCESS) || AllocConsole()) {
+            FILE* dummy = nullptr;
+            freopen_s(&dummy, "CONOUT$", "w", stdout);
+            freopen_s(&dummy, "CONOUT$", "w", stderr);
+            hasConsole = true;
+        }
+    }
+    if (hasConsole) {
+        SetConsoleOutputCP(CP_UTF8);
+        std::setvbuf(stdout, nullptr, _IONBF, 0);
+    }
 
     if (!cliUserDir.empty()) ps4::core::SetUserDirOverride(cliUserDir);
 
