@@ -287,14 +287,12 @@ int main(int argc, char** argv) {
         std::printf("load failed: %s\n", elf);
         return 1;
     }
+
     g_imageBase = reinterpret_cast<uint64_t>(image.base());
-    std::printf("image   base=%p span=0x%llx entry=0x%llx\n", image.base(),
-                static_cast<unsigned long long>(image.size()),
-                static_cast<unsigned long long>(image.entry()));
-    for (const auto& s : image.segments())
-        std::printf("  seg vaddr=0x%llx filesz=0x%llx memsz=0x%llx flags=%u\n",
-                    (unsigned long long)s.vaddr, (unsigned long long)s.filesz,
-                    (unsigned long long)s.memsz, s.flags);
+    LOG_INFO("image   base=%p span=0x%llx entry=0x%llx (%s)", image.base(),
+             static_cast<unsigned long long>(image.size()),
+             static_cast<unsigned long long>(image.entry()),
+             assets.executablePath.c_str());
 
     const size_t relocs = image.relocate();
     LOG_INFO("relocs  %zu applied", relocs);
