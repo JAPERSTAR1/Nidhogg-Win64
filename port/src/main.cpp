@@ -354,8 +354,10 @@ int main(int argc, char** argv) {
     // progress the useful question is "where is it parked", not "what did it
     // call last".  NIDHOGG_WATCHDOG=<ms> changes the delay, 0 disables.
     DWORD watchdogMs = 0;
-    if (const char* w = std::getenv("NIDHOGG_WATCHDOG"))
-        watchdogMs = static_cast<DWORD>(std::strtoul(w, nullptr, 0));
+    if (_dupenv_s(&wdEnv, &wdLen, "NIDHOGG_WATCHDOG") == 0 && wdEnv) {
+        watchdogMs = static_cast<DWORD>(std::strtoul(wdEnv, nullptr, 0));
+        std::free(wdEnv);
+    }
     if (watchdogMs) {
         auto* ms = new DWORD(watchdogMs);
         CreateThread(nullptr, 0, [](LPVOID p) -> DWORD {
@@ -367,9 +369,7 @@ int main(int argc, char** argv) {
         }, ms, 0, nullptr);
     }
 
-    if (std::getenv("NIDHOGG_SAMPLE"))
-        CreateThread(nullptr, 0, SamplerThread, nullptr, 0, nullptr);
-
+    LOG_INFO("entering guest 0x%llx", static_cast<unsigned long long>(image.entry()));
     auto call = MakeSysvCall();
     call(reinterpret_cast<uint64_t>(image.at(image.entry())),
          reinterpret_cast<uint64_t>(block), 0);
