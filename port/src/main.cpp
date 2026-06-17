@@ -324,10 +324,10 @@ int main(int argc, char** argv) {
         // dragging the SCE layer into it.
         using Fn = uint64_t (*)();
         auto fn = reinterpret_cast<Fn>(image.at(callAt));
-        std::printf("calling 0x%llx ...\n", static_cast<unsigned long long>(callAt));
         const uint64_t r = fn();
-        std::printf("returned 0x%llx (%llu)\n", static_cast<unsigned long long>(r),
-                    static_cast<unsigned long long>(r));
+        LOG_INFO("callAt 0x%llx returned 0x%llx", static_cast<unsigned long long>(callAt),
+                 static_cast<unsigned long long>(r));
+        ps4::core::ShutdownLogger();
         return 0;
     }
 
