@@ -1,4 +1,6 @@
+#define NOMINMAX
 #include "image.h"
+#include "core/settings.h"
 
 #include <windows.h>
 
