@@ -101,13 +101,7 @@ LONG WINAPI OnFault(EXCEPTION_POINTERS* ep) {    const auto* rec = ep->Exception
         rec->ExceptionCode == 0x406d1388) {   // MS_VC_EXCEPTION (set thread name)
         return EXCEPTION_CONTINUE_SEARCH;
     }
-    std::printf("\n[fault] code=0x%08lx address=%p\n", rec->ExceptionCode,
-                rec->ExceptionAddress);
-    if (rec->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && rec->NumberParameters >= 2) {
-        std::printf("[fault] %s at %p\n",
-                    rec->ExceptionInformation[0] ? "write" : "read",
-                    reinterpret_cast<void*>(rec->ExceptionInformation[1]));
-    }
+
     const CONTEXT* c = ep->ContextRecord;
     char modName[MAX_PATH] = "?";
     uint64_t modBase = 0;
@@ -120,22 +114,6 @@ LONG WINAPI OnFault(EXCEPTION_POINTERS* ep) {    const auto* rec = ep->Exception
             if (slash) std::memmove(modName, slash + 1, std::strlen(slash + 1) + 1);
         }
     }
-    std::printf("[fault] in %s+0x%llx\n", modName,
-                static_cast<unsigned long long>(
-                    reinterpret_cast<uint64_t>(rec->ExceptionAddress) - modBase));
-    std::printf("[fault] bytes:");
-    const uint8_t* code = static_cast<const uint8_t*>(rec->ExceptionAddress);
-    for (int i = 0; i < 16; ++i) std::printf(" %02x", code[i]);
-    std::printf("\n");
-    std::printf("[fault] rip=+0x%llx (last import slot %u from +0x%llx)\n",
-                static_cast<unsigned long long>(static_cast<uint64_t>(c->Rip) - g_imageBase),
-                ps4::LastSlot(),
-                static_cast<unsigned long long>(ps4::LastCallSite() - g_imageBase));
-    std::printf("[fault] rax=%p rbx=%p rcx=%p rdx=%p rsi=%p rdi=%p\n",
-                (void*)c->Rax, (void*)c->Rbx, (void*)c->Rcx, (void*)c->Rdx,
-                (void*)c->Rsi, (void*)c->Rdi);
-    std::printf("[fault] rsp=%p rbp=%p r8=%p r9=%p\n",
-                (void*)c->Rsp, (void*)c->Rbp, (void*)c->R8, (void*)c->R9);
 
     std::ostringstream report;
     report << "Nidhogg Fatal Exception Report\n"
