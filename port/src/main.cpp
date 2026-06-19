@@ -91,14 +91,23 @@ SysvCall MakeSysvCall() {
     return reinterpret_cast<SysvCall>(p);
 }
 
-LONG WINAPI OnFault(EXCEPTION_POINTERS* ep) {    const auto* rec = ep->ExceptionRecord;
+bool IsFatalHardwareException(DWORD code) {
+    switch (code) {
+        case EXCEPTION_ACCESS_VIOLATION:
+        case EXCEPTION_ILLEGAL_INSTRUCTION:
+        case EXCEPTION_PRIV_INSTRUCTION:
+        case EXCEPTION_STACK_OVERFLOW:
+        case EXCEPTION_INT_DIVIDE_BY_ZERO:
+        case EXCEPTION_IN_PAGE_ERROR:
+            return true;
+        default:
+            return false;
+    }
+}
 
-    // Windows libraries raise two exceptions that are pure diagnostics: the
-    // debugger print channel (OutputDebugString) and the thread-name handshake
-    // DXGI uses when it starts a worker.  Neither is a fault, and treating them
-    // as one kills the process the moment the swapchain comes up.
-    if (rec->ExceptionCode == 0x40010006 ||   // DBG_PRINTEXCEPTION_C
-        rec->ExceptionCode == 0x406d1388) {   // MS_VC_EXCEPTION (set thread name)
+LONG WINAPI OnFault(EXCEPTION_POINTERS* ep) {
+    const auto* rec = ep->ExceptionRecord;
+    if (!IsFatalHardwareException(rec->ExceptionCode)) {
         return EXCEPTION_CONTINUE_SEARCH;
     }
 
