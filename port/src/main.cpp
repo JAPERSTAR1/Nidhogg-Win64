@@ -19,11 +19,19 @@ namespace {
 
 uint64_t g_imageBase = 0;
 DWORD g_mainThread = 0;
+bool g_noGuiPrompts = false;
 
-// Walks the frame-pointer chain of the image's main thread and prints the
-// return addresses it finds.  Used by the watchdog when the game parks itself
-// in a wait loop and stops calling into the HLE layer, which is exactly the
-// case where "last import" tells you nothing.
+void EnableDpiAwareness() {
+    HMODULE user32 = GetModuleHandleW(L"user32.dll");
+    if (user32) {
+        using SetDpiCtxFn = BOOL(WINAPI*)(DPI_AWARENESS_CONTEXT);
+        auto fn = reinterpret_cast<SetDpiCtxFn>(
+            GetProcAddress(user32, "SetProcessDpiAwarenessContext"));
+        if (fn && fn(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)) return;
+    }
+    SetProcessDPIAware();
+}
+
 void DumpMainStack(const char* why) {
     HANDLE th = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, g_mainThread);
     if (!th) return;
