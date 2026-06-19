@@ -1,10 +1,12 @@
 // Nidhogg (CUSA00920) native Windows x64 host.
 //
-// Strategy: the PS4 build is plain x86-64 with a System V ABI, so it is mapped
-// and executed as-is inside a Windows process.  The SCE platform layer is
-// replaced one library at a time; this file is the harness that makes that
-// possible and reports where the image currently gives up.
+// Maps and relocates the PS4 x86-64 guest executable (raw SELF `eboot.bin` or
+// extracted `nidhogg.elf`), installs System V <-> Win64 ABI trampolines,
+// initializes settings, logging, crash reporting, DPI awareness, and transfers
+// control to the guest entry point.
+#define NOMINMAX
 #include <windows.h>
+#include <shellapi.h>
 
 #include <cstdio>
 #include <cstdlib>
