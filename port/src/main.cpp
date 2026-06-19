@@ -31,54 +31,16 @@ void DumpMainStack(const char* why) {
     CONTEXT c{};
     c.ContextFlags = CONTEXT_FULL;
     if (GetThreadContext(th, &c)) {
-        std::printf("\n[watchdog] %s\n", why);
-        std::printf("[watchdog] rip=+0x%llx (last import slot %u from +0x%llx)\n",
-                    static_cast<unsigned long long>(static_cast<uint64_t>(c.Rip) - g_imageBase),
-                    ps4::LastSlot(),
-                    static_cast<unsigned long long>(ps4::LastCallSite() - g_imageBase));
-        std::printf("[watchdog] stack:");
-        uint64_t bp = c.Rbp;
-        for (int i = 0; i < 24 && bp; ++i) {
-            MEMORY_BASIC_INFORMATION mbi{};
-            if (!VirtualQuery(reinterpret_cast<void*>(bp), &mbi, sizeof(mbi)) ||
-                mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) ||
-                bp + 16 > reinterpret_cast<uint64_t>(mbi.BaseAddress) + mbi.RegionSize)
-                break;
-            const uint64_t savedBp = *reinterpret_cast<uint64_t*>(bp);
-            const uint64_t ret = *reinterpret_cast<uint64_t*>(bp + 8);
-            std::printf(" +0x%llx", static_cast<unsigned long long>(ret - g_imageBase));
-            if (savedBp <= bp) break;
-            bp = savedBp;
-        }
-        std::printf("\n");
-
-        // The host frames between the image and the park point break the rbp
-        // chain, so scan the raw stack for anything that points into the image.
-        MEMORY_BASIC_INFORMATION stack{};
-        if (VirtualQuery(reinterpret_cast<void*>(c.Rsp), &stack, sizeof(stack)) &&
-            stack.State == MEM_COMMIT) {
-            const uint64_t lo = reinterpret_cast<uint64_t>(stack.BaseAddress);
-            const uint64_t hi = lo + stack.RegionSize;
-            std::printf("[watchdog] image frames on stack:");
-            int shown = 0;
-            for (uint64_t p = (c.Rsp + 7) & ~7ull; p + 8 <= hi && shown < 20; p += 8) {
-                const uint64_t v = *reinterpret_cast<uint64_t*>(p);
-                if (v > g_imageBase && v < g_imageBase + 0x41ec48) {
-                    std::printf(" +0x%llx", static_cast<unsigned long long>(v - g_imageBase));
-                    ++shown;
-                }
-            }
-            std::printf("\n");
-        }
-        std::fflush(stdout);
+        LOG_WARN("[watchdog] %s | rip=+0x%llx (last slot %u from +0x%llx)",
+                 why,
+                 static_cast<unsigned long long>(static_cast<uint64_t>(c.Rip) - g_imageBase),
+                 ps4::LastSlot(),
+                 static_cast<unsigned long long>(ps4::LastCallSite() - g_imageBase));
     }
     ResumeThread(th);
     CloseHandle(th);
 }
 
-// Win64 passes args in rcx/rdx/r8; the PS4 image expects SysV (rdi/rsi/rdx).
-// This tail-jump shim moves the first two and hands control to the image, so
-// the callee returns straight to the C++ caller with the same stack shape.
 using SysvCall = uint64_t (*)(uint64_t fn, uint64_t a0, uint64_t a1);
 SysvCall MakeSysvCall() {
     auto* p = static_cast<uint8_t*>(
