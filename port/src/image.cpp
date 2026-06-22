@@ -27,11 +27,12 @@ bool Image::parse(const std::vector<uint8_t>& f) {
     const uint64_t phoff = rd64(e + 0x20);
     const uint16_t phentsize = rd16(e + 0x36);
     const uint16_t phnum = rd16(e + 0x38);
+    if (phoff + static_cast<uint64_t>(phnum) * phentsize > f.size()) return false;
 
     for (uint16_t i = 0; i < phnum; ++i) {
         const uint8_t* p = f.data() + phoff + i * phentsize;
         const uint32_t type = rd32(p);
-        const uint64_t off = rd64(p + 8);
+        uint64_t off = rd64(p + 8);
         const uint64_t vaddr = rd64(p + 16);
         const uint64_t filesz = rd64(p + 32);
         const uint64_t memsz = rd64(p + 40);
