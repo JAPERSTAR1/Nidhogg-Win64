@@ -170,104 +170,30 @@ LONG WINAPI OnFault(EXCEPTION_POINTERS* ep) {    const auto* rec = ep->Exception
 // is a diagnostic, not an instrument, and it must never perturb the guest.
 namespace {
 
-constexpr int kSampleSlots = 1 << 13;
-uint64_t g_sampleAddr[kSampleSlots] = {};
-uint32_t g_sampleCount[kSampleSlots] = {};
-volatile LONG g_sampling = 1;
-
-void DumpSamples() {
-    struct Row { uint64_t addr; uint32_t count; };
-    static Row rows[kSampleSlots];
-    int n = 0;
-    uint64_t total = 0;
-    for (int i = 0; i < kSampleSlots; ++i) {
-        if (!g_sampleCount[i]) continue;
-        rows[n].addr = g_sampleAddr[i];
-        rows[n].count = g_sampleCount[i];
-        total += g_sampleCount[i];
-        ++n;
-    }
-    for (int i = 0; i < n; ++i)
-        for (int j = i + 1; j < n; ++j)
-            if (rows[j].count > rows[i].count) {
-                const Row t = rows[i];
-                rows[i] = rows[j];
-                rows[j] = t;
-            }
-    std::printf("[sample] %llu samples, top:\n", static_cast<unsigned long long>(total));
-    for (int i = 0; i < n && i < 12; ++i) {
-        const uint64_t a = rows[i].addr;
-        char mod[MAX_PATH] = "?";
-        uint64_t modBase = 0;
-        MEMORY_BASIC_INFORMATION mbi{};
-        if (VirtualQuery(reinterpret_cast<void*>(a), &mbi, sizeof(mbi))) {
-            modBase = reinterpret_cast<uint64_t>(mbi.AllocationBase);
-            GetModuleFileNameA(static_cast<HMODULE>(mbi.AllocationBase), mod, MAX_PATH);
-            const char* slash = std::strrchr(mod, '\\');
-            if (slash) std::memmove(mod, slash + 1, std::strlen(slash + 1) + 1);
-        }
-        if (a >= g_imageBase && a < g_imageBase + 0x41ec48)
-            std::printf("   %6.2f%%  image+0x%llx\n",
-                        100.0 * rows[i].count / (total ? total : 1),
-                        static_cast<unsigned long long>(a - g_imageBase));
-        else
-            std::printf("   %6.2f%%  %s+0x%llx\n", 100.0 * rows[i].count / (total ? total : 1),
-                        mod, static_cast<unsigned long long>(a - modBase));
-    }
-    std::fflush(stdout);
-    for (int i = 0; i < kSampleSlots; ++i) g_sampleCount[i] = 0;
-}
-
-DWORD WINAPI SamplerThread(LPVOID) {
-    std::printf("[sample] thread up, target %lu\n", g_mainThread);
-    std::fflush(stdout);
-    HANDLE th = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, g_mainThread);
-    if (!th) {
-        std::printf("[sample] OpenThread failed %lu\n", GetLastError());
-        std::fflush(stdout);
-        return 0;
-    }
-    int ticks = 0;
-    while (g_sampling) {
-        Sleep(1);
-        CONTEXT c{};
-        c.ContextFlags = CONTEXT_CONTROL;
-        if (SuspendThread(th) == static_cast<DWORD>(-1)) break;
-        GetThreadContext(th, &c);
-        ResumeThread(th);
-
-        // When the thread is inside a Windows wait, the interesting address is
-        // not the wait itself: it is the guest frame that asked for it.  Walk
-        // the stack a little and attribute the sample to the first image return
-        // address found, so a vsync block lands on its caller.
-        uint64_t at = c.Rip;
-        if (at < g_imageBase || at >= g_imageBase + 0x41ec48) {
-            MEMORY_BASIC_INFORMATION mbi{};
-            if (VirtualQuery(reinterpret_cast<void*>(c.Rsp), &mbi, sizeof(mbi)) &&
-                mbi.State == MEM_COMMIT && !(mbi.Protect & PAGE_NOACCESS)) {
-                uint64_t top = reinterpret_cast<uint64_t>(mbi.BaseAddress) + mbi.RegionSize;
-                for (int i = 0; i < 192 && c.Rsp + i * 8 + 8 <= top; ++i) {
-                    const uint64_t v = *reinterpret_cast<uint64_t*>(c.Rsp + i * 8);
-                    if (v >= g_imageBase && v < g_imageBase + 0x41ec48) {
-                        at = v;
-                        break;
-                    }
-                }
-            }
-        }
-
-        const uint32_t h = static_cast<uint32_t>((at >> 2) * 2654435761u) &
-                           (kSampleSlots - 1);
-        g_sampleAddr[h] = at;
-        ++g_sampleCount[h];
-        if (++ticks >= 256) {
-            ticks = 0;
-            DumpSamples();
+    for (size_t i = 1; i < args.size(); ++i) {
+        const std::string& a = args[i];
+        if (a == "--user-dir" && i + 1 < args.size()) {
+            cliUserDir = args[++i];
+        } else if (a == "--assets" && i + 1 < args.size()) {
+            cliAssets = args[++i];
+        } else if (a == "--call" && i + 1 < args.size()) {
+            callAt = std::strtoull(args[++i].c_str(), nullptr, 0);
+        } else if (a == "--max-frames" && i + 1 < args.size()) {
+            maxFrames = std::strtoull(args[++i].c_str(), nullptr, 0);
+        } else if (a == "--console") {
+            wantConsole = true;
+        } else if (a == "--no-prompt") {
+            g_noGuiPrompts = true;
+        } else if (a == "--online") {
+            openOnlineMenu = true;
+        } else if (a == "--settings") {
+            openSettingsMenu = true;
+        } else if (a == "--verify-assets") {
+            verifyOnly = true;
+        } else if (!a.empty() && a[0] != '-' && positionalPath.empty()) {
+            positionalPath = a;
         }
     }
-    CloseHandle(th);
-    return 0;
-}
 
     if (maxFrames > 0) {
         char buf[32];
