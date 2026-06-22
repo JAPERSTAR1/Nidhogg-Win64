@@ -309,10 +309,14 @@ int main(int argc, char** argv) {
 
     ps4::Thunks thunks;
     thunks.install(image);
-    std::printf("imports %zu slots wired to stubs\n", thunks.count());
+    LOG_INFO("imports %zu slots wired to stubs", thunks.count());
 
-    if (std::getenv("NIDHOGG_PROBE_ONLY")) {
-        std::printf("probe only, not entering\n");
+    char* probeEnv = nullptr;
+    size_t probeLen = 0;
+    if (_dupenv_s(&probeEnv, &probeLen, "NIDHOGG_PROBE_ONLY") == 0 && probeEnv && *probeEnv) {
+        std::free(probeEnv);
+        LOG_INFO("probe only, exiting cleanly");
+        ps4::core::ShutdownLogger();
         return 0;
     }
     if (probeEnv) std::free(probeEnv);
