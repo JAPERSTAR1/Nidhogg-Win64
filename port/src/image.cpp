@@ -10,7 +10,8 @@ namespace {
 
 constexpr uint32_t PT_LOAD = 1;
 constexpr uint32_t PF_X = 1;
-constexpr uint32_t PF_W = 2;
+constexpr size_t kSelfSegOff = 0x40;
+constexpr size_t kSelfElfOff = 0x120;
 
 uint16_t rd16(const uint8_t* p) { return *reinterpret_cast<const uint16_t*>(p); }
 uint32_t rd32(const uint8_t* p) { return *reinterpret_cast<const uint32_t*>(p); }
@@ -19,8 +20,20 @@ uint64_t rd64(const uint8_t* p) { return *reinterpret_cast<const uint64_t*>(p); 
 }  // namespace
 
 bool Image::parse(const std::vector<uint8_t>& f) {
-    if (f.size() < 64 || std::memcmp(f.data(), "\x7f" "ELF", 4) != 0) return false;
-    const uint8_t* e = f.data();
+    bool isSelf = false;
+    size_t ehOff = 0;
+    if (f.size() >= 64 && std::memcmp(f.data(), "\x7f" "ELF", 4) == 0) {
+        ehOff = 0;
+    } else if (f.size() >= kSelfElfOff + 64 &&
+               std::memcmp(f.data(), "\x4f\x15\x3d\x1d", 4) == 0 &&
+               std::memcmp(f.data() + kSelfElfOff, "\x7f" "ELF", 4) == 0) {
+        isSelf = true;
+        ehOff = kSelfElfOff;
+    } else {
+        return false;
+    }
+
+    const uint8_t* e = f.data() + ehOff;
     if (e[4] != 2 || e[5] != 1) return false;  // ELFCLASS64, LE
 
     struct SelfSeg {
