@@ -115,17 +115,28 @@ void Image::findImports(const std::vector<uint8_t>& f) {
 bool Image::load(const std::string& elfPath) {
     FILE* fp = std::fopen(elfPath.c_str(), "rb");
     if (!fp) return false;
-    std::fseek(fp, 0, SEEK_END);
-    const long n = std::ftell(fp);
-    std::fseek(fp, 0, SEEK_SET);
-    std::vector<uint8_t> file(static_cast<size_t>(n));
-    if (std::fread(file.data(), 1, file.size(), fp) != file.size()) {
+    if (_fseeki64(fp, 0, SEEK_END) != 0) {
+        std::fclose(fp);
+        return false;
+    }
+    const int64_t n = _ftelli64(fp);
+    _fseeki64(fp, 0, SEEK_SET);
+    if (n <= 0 || n > (256ll << 20)) {
+        std::fclose(fp);
+        return false;
+    }
+    blob_.resize(static_cast<size_t>(n));
+    if (std::fread(blob_.data(), 1, blob_.size(), fp) != blob_.size()) {
         std::fclose(fp);
         return false;
     }
     std::fclose(fp);
 
-    if (!parse(file)) return false;
+    segs_.clear();
+    relocs_.clear();
+    imports_.clear();
+    span_ = 0;
+    if (!parse(blob_)) return false;
 
     const uint64_t align = 0x10000;
     const uint64_t want = (span_ + align - 1) & ~(align - 1);
