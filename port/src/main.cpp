@@ -277,14 +277,70 @@ int main(int argc, char** argv) {
     std::printf("nidhogg x64 host\n");
     g_mainThread = GetCurrentThreadId();
 
-    const char* elf = (argc > 1) ? argv[1] : "work/nidhogg.elf";
-    uint64_t callAt = 0;
-    if (argc > 3 && std::strcmp(argv[2], "--call") == 0)
-        callAt = std::strtoull(argv[3], nullptr, 0);
+    if (!cliUserDir.empty()) ps4::core::SetUserDirOverride(cliUserDir);
+
+    const std::string logPath = ps4::core::LogsDirPath() + "\\nidhogg.log";
+    ps4::core::InitLogger(logPath, hasConsole);
+    LOG_INFO("Nidhogg Windows x64 Runtime starting (userDir=%s)", ps4::core::UserDir().c_str());
+
+    auto& settings = ps4::core::CurrentSettings();
+    if (!ps4::core::LoadSettings(settings)) {
+        ps4::core::SaveSettings(settings);
+    }
+
+    const char* assetHint = !cliAssets.empty()
+                                ? cliAssets.c_str()
+                                : (!positionalPath.empty() ? positionalPath.c_str() : nullptr);
+    ps4::core::AssetValidation assets = ps4::core::AutoDiscoverAssets(settings, assetHint);
+
+    while (!assets.valid && !g_noGuiPrompts && !verifyOnly) {
+        std::ostringstream msg;
+        msg << "Nidhogg requires your legally acquired PS4 game files (CUSA00920).\n\n"
+            << "Status: " << assets.summary << "\n\n"
+            << "Required folder contents:\n"
+            << "  - eboot.bin (or extracted nidhogg.elf)\n"
+            << "  - Data\\ (atlas, audio, fonts, shader_vv.sb, shader_p.sb)\n\n"
+            << "Would you like to browse to your Nidhogg game folder now?";
+        std::wstring wmsg = ps4::core::Utf8ToWide(msg.str());
+        int pick = MessageBoxW(nullptr, wmsg.c_str(), L"Nidhogg — Locate Game Files",
+                               MB_ICONINFORMATION | MB_YESNO);
+        if (pick != IDYES) break;
+        std::string chosen;
+        if (!ps4::core::PromptForAssetDirectoryGui(nullptr, chosen)) break;
+        assets = ps4::core::ValidateAssetsAt(chosen);
+        if (assets.valid) {
+            settings.assetPath = assets.rootDir;
+            ps4::core::SaveSettings(settings);
+        }
+    }
+
+    if (verifyOnly) {
+        LOG_INFO("[verify] valid=%d summary=%s", assets.valid ? 1 : 0, assets.summary.c_str());
+        return assets.valid ? 0 : 2;
+    }
+
+    if (!assets.valid) {
+        LOG_ERROR("Asset validation failed: %s", assets.summary.c_str());
+        ps4::core::ShutdownLogger();
+        return 2;
+    }
+
+    if (settings.assetPath != assets.rootDir) {
+        settings.assetPath = assets.rootDir;
+        ps4::core::SaveSettings(settings);
+    }
+    ps4::HleSetApp0(assets.rootDir);
 
     ps4::Image image;
-    if (!image.load(elf)) {
-        std::printf("load failed: %s\n", elf);
+    if (!image.load(assets.executablePath)) {
+        LOG_ERROR("Failed to load guest executable: %s", assets.executablePath.c_str());
+        if (!g_noGuiPrompts) {
+            std::wstring werr = ps4::core::Utf8ToWide(
+                "Failed to load or parse guest executable:\n" + assets.executablePath +
+                "\n\nEnsure eboot.bin is a decrypted PS4 SELF or valid ELF image.");
+            MessageBoxW(nullptr, werr.c_str(), L"Nidhogg — Load Error", MB_ICONERROR | MB_OK);
+        }
+        ps4::core::ShutdownLogger();
         return 1;
     }
 
