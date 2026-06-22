@@ -315,13 +315,11 @@ int main(int argc, char** argv) {
         std::printf("probe only, not entering\n");
         return 0;
     }
+    if (probeEnv) std::free(probeEnv);
 
     AddVectoredExceptionHandler(1, OnFault);
 
     if (callAt) {
-        // Smoke test: run one function out of the mapped image.  Proves the
-        // segment map, the relocations and the ABI handoff all work, without
-        // dragging the SCE layer into it.
         using Fn = uint64_t (*)();
         auto fn = reinterpret_cast<Fn>(image.at(callAt));
         const uint64_t r = fn();
