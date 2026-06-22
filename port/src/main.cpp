@@ -373,6 +373,30 @@ int main(int argc, char** argv) {
     auto call = MakeSysvCall();
     call(reinterpret_cast<uint64_t>(image.at(image.entry())),
          reinterpret_cast<uint64_t>(block), 0);
-    std::printf("\nentry returned\n");
+    ps4::HleShutdown();
     return 0;
+}
+
+std::vector<std::string> ParseWideCommandLine() {
+    std::vector<std::string> out;
+    int argc = 0;
+    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    if (!argv) return out;
+    out.reserve(static_cast<size_t>(argc));
+    for (int i = 0; i < argc; ++i) out.push_back(ps4::core::WideToUtf8(argv[i]));
+    LocalFree(argv);
+    return out;
+}
+
+}  // namespace
+
+int main(int, char**) {
+    return RunMain(ParseWideCommandLine(), true);
+}
+
+int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    const bool redirected = (hOut != nullptr && hOut != INVALID_HANDLE_VALUE &&
+                             GetFileType(hOut) != FILE_TYPE_UNKNOWN);
+    return RunMain(ParseWideCommandLine(), redirected);
 }
