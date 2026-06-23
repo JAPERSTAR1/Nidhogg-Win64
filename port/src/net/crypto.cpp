@@ -94,3 +94,80 @@ std::string RandomHex(size_t numBytes) {
     }
     return out;
 }
+
+bool HmacSha256(const uint8_t* key, size_t keyLen, const uint8_t* data, size_t dataLen,
+                uint8_t outMac[32]) {
+    BCRYPT_ALG_HANDLE hAlg = nullptr;
+    if (BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_SHA256_ALGORITHM, nullptr,
+                                    BCRYPT_ALG_HANDLE_HMAC_FLAG) != 0)
+        return false;
+    BCRYPT_HASH_HANDLE hHash = nullptr;
+    bool ok = false;
+    if (BCryptCreateHash(hAlg, &hHash, nullptr, 0, const_cast<PUCHAR>(key),
+                         static_cast<ULONG>(keyLen), 0) == 0) {
+        if (BCryptHashData(hHash, const_cast<PUCHAR>(data), static_cast<ULONG>(dataLen), 0) == 0 &&
+            BCryptFinishHash(hHash, outMac, 32, 0) == 0) {
+            ok = true;
+        }
+        BCryptDestroyHash(hHash);
+    }
+    BCryptCloseAlgorithmProvider(hAlg, 0);
+    return ok;
+}
+
+// Wire layout: [aad (aadLen bytes)] [nonce (8 bytes)] [ciphertext (plainLen)] [hmac16 (16 bytes)]
+bool SealPacket(const uint8_t sessionKey[32], uint64_t nonce, const uint8_t* headerAad,
+                size_t aadLen, const uint8_t* plaintext, size_t plainLen,
+                std::vector<uint8_t>& outPacket) {
+    (void)Aes128BlockEncrypt;
+    outPacket.resize(aadLen + 8 + plainLen + 16);
+    if (aadLen && headerAad) std::memcpy(outPacket.data(), headerAad, aadLen);
+    std::memcpy(outPacket.data() + aadLen, &nonce, 8);
+    if (plainLen > 0) {
+        if (!Aes128CtrXor(sessionKey, nonce, plaintext, plainLen,
+                          outPacket.data() + aadLen + 8))
+            return false;
+    }
+    uint8_t fullMac[32]{};
+    if (!HmacSha256(sessionKey + 16, 16, outPacket.data(), aadLen + 8 + plainLen, fullMac))
+        return false;
+    std::memcpy(outPacket.data() + aadLen + 8 + plainLen, fullMac, 16);
+    return true;
+}
+
+bool OpenPacket(const uint8_t sessionKey[32], const uint8_t* packet, size_t packetLen,
+                size_t aadLen, uint64_t& outNonce, std::vector<uint8_t>& outPlaintext) {
+    if (!packet || packetLen < aadLen + 8 + 16) return false;
+    const size_t cipherLen = packetLen - aadLen - 8 - 16;
+    uint8_t fullMac[32]{};
+    if (!HmacSha256(sessionKey + 16, 16, packet, aadLen + 8 + cipherLen, fullMac)) return false;
+    if (!ConstantTimeEq(fullMac, packet + aadLen + 8 + cipherLen, 16)) return false;
+
+    std::memcpy(&outNonce, packet + aadLen, 8);
+    outPlaintext.resize(cipherLen);
+    if (cipherLen > 0) {
+        if (!Aes128CtrXor(sessionKey, outNonce, packet + aadLen + 8, cipherLen,
+                          outPlaintext.data()))
+            return false;
+    }
+    return true;
+}
+
+bool HexToBytes(const std::string& hex, uint8_t* out, size_t expectedBytes) {
+    if (hex.size() != expectedBytes * 2) return false;
+    auto nib = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    };
+    for (size_t i = 0; i < expectedBytes; ++i) {
+        int hi = nib(hex[i * 2]);
+        int lo = nib(hex[i * 2 + 1]);
+        if (hi < 0 || lo < 0) return false;
+        out[i] = static_cast<uint8_t>((hi << 4) | lo);
+    }
+    return true;
+}
+
+}  // namespace ps4::net
