@@ -622,3 +622,99 @@ void PumpUdpRxLocked() {
                 for (uint8_t k = 0; k < count; ++k) {
                     if (ip.latestFrame >= k) {
                         g_net.remoteInputs[ip.latestFrame - k] = ip.buttonsHistory[k];
+                    }
+                }
+                if (ip.flags & 1u) {
+                    g_net.remoteStateHashes[ip.stateHashFrame] = ip.stateHash;
+                    VerifyHashesForFrameLocked(ip.stateHashFrame);
+                }
+                break;
+            }
+            case kPktDisconnect: {
+                g_net.snap.phase = SessionPhase::Disconnected;
+                g_net.snap.remoteConnected = false;
+                g_net.snap.statusText = "Opponent disconnected from match.";
+                LOG_WARN("[netplay] received peer disconnect notification");
+                break;
+            }
+            default:
+                break;
+        }
+    }
+}
+
+void SendInputPacketForFrameLocked(uint64_t targetFrame, bool includeHash, uint64_t hashFrame,
+                                   uint64_t hashVal) {
+    InputPayload ip{};
+    ip.latestFrame = targetFrame;
+    ip.historyCount = static_cast<uint8_t>(std::min<uint64_t>(targetFrame + 1, 16));
+    for (uint8_t k = 0; k < ip.historyCount; ++k) {
+        auto it = g_net.localInputs.find(targetFrame - k);
+        ip.buttonsHistory[k] = (it != g_net.localInputs.end()) ? it->second : 0u;
+    }
+    if (includeHash) {
+        ip.flags |= 1u;
+        ip.stateHashFrame = hashFrame;
+        ip.stateHash = hashVal;
+    }
+    ip.sendTimeUsec = MonoUsec();
+    ip.echoTimeUsec = g_net.lastPeerTimestampUsec;
+    SendSealedPeerPacketLocked(kPktInput, &ip, sizeof(ip));
+}
+
+bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
+                             uint32_t& outP1Buttons, uint32_t& outP2Buttons,
+                             uint32_t& ioRandState) {
+    std::unique_lock<std::mutex> lk(g_net.mtx);
+    PumpUdpRxLocked();
+
+    if (g_net.snap.phase == SessionPhase::ConnectingTransport) {
+        const uint64_t now = MonoUsec();
+        if (now - g_net.connectStartUsec > 1200000ULL &&
+            g_net.snap.transport == TransportMode::PunchingP2P) {
+            g_net.snap.transport = TransportMode::RelayFallback;
+        }
+        uint64_t ts = now;
+        SendSealedPeerPacketLocked(kPktPunch, &ts, sizeof(ts));
+        outP1Buttons = 0;
+        outP2Buttons = 0;
+        return true;
+    }
+
+    if (g_net.snap.phase == SessionPhase::SyncingMenu) {
+        const std::string room = ps4::CurrentRoom();
+        uint32_t navBtn = 0;
+        if (room == "rLevelSelect") {
+            g_net.localAtBarrier = true;
+        } else {
+            g_net.localAtBarrier = false;
+            ++g_net.menuPulseCounter;
+            // Pulse Cross for 8 frames every 50 frames to advance rLogos -> rMainMenu ->
+            // Multiplayer -> Offline Versus -> rLevelSelect cleanly.
+            if ((g_net.menuPulseCounter % 50) < 8) navBtn = 0x4000u;
+        }
+
+        SyncBarrierPayload sb{};
+        sb.atLevelSelect = g_net.localAtBarrier ? 1 : 0;
+        sb.ackPeerBarrier = g_net.peerAtBarrier ? 1 : 0;
+        sb.stageIndex = static_cast<uint8_t>(g_net.snap.stageIndex);
+        sb.inputDelay = static_cast<uint8_t>(g_net.snap.inputDelayFrames);
+        sb.matchSeed = g_net.matchSeed;
+        sb.sendTimeUsec = MonoUsec();
+        sb.echoTimeUsec = g_net.lastPeerTimestampUsec;
+        SendSealedPeerPacketLocked(kPktSyncBarrier, &sb, sizeof(sb));
+
+        if (g_net.localAtBarrier && g_net.peerAtBarrier && g_net.peerAckedBarrier) {
+            // Both instances are parked at rLevelSelect and have ACKed the barrier!
+            // Lock RNG + clock and transition synchronously into InMatch frame 0.
+            g_net.snap.phase = SessionPhase::InMatch;
+            g_net.snap.statusText = "In Match — Synchronized";
+            g_net.matchFrame = 0;
+            g_net.localInputs.clear();
+            g_net.remoteInputs.clear();
+            g_net.localStateHashes.clear();
+            g_net.remoteStateHashes.clear();
+            const int delay = std::clamp(g_net.snap.inputDelayFrames, 1, 8);
+            for (int d = 0; d < delay; ++d) {
+                g_net.localInputs[static_cast<uint64_t>(d)] = 0u;
+                g_net.remoteInputs[static_cast<uint64_t>(d)] = 0u;
