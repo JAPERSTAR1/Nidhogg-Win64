@@ -718,3 +718,99 @@ bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
             for (int d = 0; d < delay; ++d) {
                 g_net.localInputs[static_cast<uint64_t>(d)] = 0u;
                 g_net.remoteInputs[static_cast<uint64_t>(d)] = 0u;
+            }
+            ioRandState = g_net.matchSeed;
+            LOG_INFO("[netplay] BARRIER SYNCED -> entering InMatch (seed=0x%08x, stage=%d, delay=%df, mode=%s)",
+                     g_net.matchSeed, g_net.snap.stageIndex, delay,
+                     g_net.snap.transport == TransportMode::DirectP2P ? "DirectP2P" : "Relay");
+        } else {
+            outP1Buttons = navBtn;
+            outP2Buttons = 0;
+            return true;
+        }
+    }
+
+    if (g_net.snap.phase != SessionPhase::InMatch) {
+        return false;
+    }
+
+    const uint64_t f = g_net.matchFrame;
+    const uint32_t delay = static_cast<uint32_t>(std::clamp(g_net.snap.inputDelayFrames, 1, 8));
+
+    // Deterministic stage-selection macro on frames 0..150 inside rLevelSelect so
+    // both peers enter the exact chosen stage on the exact same simulation frame.
+    uint32_t effectiveLocal = localButtons;
+    if (f < 160) {
+        effectiveLocal = 0;
+        if (g_net.snap.isHost) {
+            const int stg = g_net.snap.stageIndex;
+            if (stg == 3 && f >= 15 && f < 23) effectiveLocal = 0x0040u;        // Down -> Wilds
+            else if (stg == 1 && ((f >= 15 && f < 23) || (f >= 60 && f < 68)))  // Down x2 -> Mines
+                effectiveLocal = 0x0040u;
+            else if (stg == 2 && f >= 15 && f < 23) effectiveLocal = 0x0010u;   // Up -> Clouds
+            if (f >= 115 && f < 125) effectiveLocal = 0x4000u;                  // Cross -> Start Match!
+        }
+    }
+
+    const uint64_t futureFrame = f + delay;
+    g_net.localInputs[futureFrame] = effectiveLocal;
+
+    bool sendHash = false;
+    uint64_t curHash = 0;
+    if (f > 0 && (f % 30) == 0) {
+        curHash = ps4::ComputeGuestStateHash();
+        g_net.localStateHashes[f] = curHash;
+        VerifyHashesForFrameLocked(f);
+        sendHash = true;
+    }
+
+    SendInputPacketForFrameLocked(futureFrame, sendHash, f, curHash);
+    FlushTxQueueLocked();
+
+    // Wait for remote input for frame `f`, pumping UDP RX & retransmitting every 4 ms.
+    const uint64_t waitStart = MonoUsec();
+    uint64_t lastRetx = waitStart;
+    while (g_net.remoteInputs.find(f) == g_net.remoteInputs.end()) {
+        PumpUdpRxLocked();
+        if (g_net.remoteInputs.find(f) != g_net.remoteInputs.end()) break;
+        if (g_net.snap.phase != SessionPhase::InMatch || ps4::IsQuitRequested()) {
+            return false;
+        }
+        const uint64_t now = MonoUsec();
+        if (now - waitStart > 5000000ULL) {  // 5.0s peer timeout
+            g_net.snap.phase = SessionPhase::Disconnected;
+            g_net.snap.remoteConnected = false;
+            g_net.snap.statusText = "Connection lost (peer timed out).";
+            LOG_WARN("[netplay] peer timed out waiting for frame %llu",
+                     static_cast<unsigned long long>(f));
+            return false;
+        }
+        if (now - lastRetx >= 4000ULL) {
+            SendInputPacketForFrameLocked(futureFrame, sendHash, f, curHash);
+            FlushTxQueueLocked();
+            lastRetx = now;
+        }
+        lk.unlock();
+        MSG msg;
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        Sleep(1);
+        lk.lock();
+    }
+
+    const uint32_t myInput = g_net.localInputs[f];
+    const uint32_t peerInput = g_net.remoteInputs[f];
+    if (g_net.snap.isHost) {
+        outP1Buttons = myInput;
+        outP2Buttons = peerInput;
+    } else {
+        outP1Buttons = peerInput;
+        outP2Buttons = myInput;
+    }
+
+    if (f > 64) {
+        g_net.localInputs.erase(f - 64);
+        g_net.remoteInputs.erase(f - 64);
+    }
