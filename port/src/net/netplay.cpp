@@ -238,3 +238,99 @@ bool HttpRequestJson(const std::string& method, const std::string& path, const s
     BOOL sent = WinHttpSendRequest(
         hReq, headers.c_str(), static_cast<DWORD>(headers.size()),
         body.empty() ? WINHTTP_NO_REQUEST_DATA : const_cast<char*>(body.data()),
+        static_cast<DWORD>(body.size()), static_cast<DWORD>(body.size()), 0);
+    if (!sent || !WinHttpReceiveResponse(hReq, nullptr)) {
+        WinHttpCloseHandle(hReq);
+        WinHttpCloseHandle(hConnect);
+        WinHttpCloseHandle(hSession);
+        outErr = "Lobby server unreachable (" + core::CurrentSettings().lobbyServerUrl + ")";
+        return false;
+    }
+
+    DWORD statusCode = 0;
+    DWORD sz = sizeof(statusCode);
+    WinHttpQueryHeaders(hReq, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                        WINHTTP_HEADER_NAME_BY_INDEX, &statusCode, &sz, WINHTTP_NO_HEADER_INDEX);
+    outStatus = static_cast<int>(statusCode);
+
+    outResponse.clear();
+    for (;;) {
+        DWORD avail = 0;
+        if (!WinHttpQueryDataAvailable(hReq, &avail) || avail == 0) break;
+        std::string chunk(avail, '\0');
+        DWORD got = 0;
+        if (!WinHttpReadData(hReq, chunk.data(), avail, &got) || got == 0) break;
+        chunk.resize(got);
+        outResponse += chunk;
+    }
+
+    if (outRttMs) {
+        *outRttMs = static_cast<uint32_t>((MonoUsec() - t0) / 1000ULL);
+    }
+
+    WinHttpCloseHandle(hReq);
+    WinHttpCloseHandle(hConnect);
+    WinHttpCloseHandle(hSession);
+    return true;
+}
+
+struct NetState {
+    std::mutex mtx;
+    bool initialized = false;
+    SOCKET udpSock = INVALID_SOCKET;
+    uint16_t localUdpPort = 0;
+    std::string localLanIp = "127.0.0.1";
+
+    // Network condition simulator (for Phase 11 testing)
+    int simOneWayLatencyMs = 0;  // half of simulated RTT
+    int simJitterMs = 0;
+    int simLossPct = 0;
+    bool forceRelay = false;
+    uint32_t simRng = 0x9E3779B9u;
+    std::deque<DelayedPacket> txQueue;
+
+    // Lobby & room state
+    NetStatsSnapshot snap;
+    std::string authToken;
+    uint64_t sessionId = 0;
+    uint8_t sessionKey[32]{};
+    bool hasSessionKey = false;
+    uint32_t matchSeed = 0xCAFE1234u;
+    uint16_t relayUdpPort = 27881;
+    sockaddr_in relayAddr{};
+    bool hasRelayAddr = false;
+
+    sockaddr_in peerPublicAddr{};
+    bool hasPeerPublic = false;
+    sockaddr_in peerLanAddr{};
+    bool hasPeerLan = false;
+    sockaddr_in activePeerAddr{};
+    bool directEstablished = false;
+
+    uint64_t connectStartUsec = 0;
+    uint64_t lastHeartbeatUsec = 0;
+    uint64_t lastRxUsec = 0;
+    uint64_t lastPeerTimestampUsec = 0;
+    uint64_t nextNonce = 1;
+
+    // Match barrier & frame-indexed lockstep buffers
+    bool localAtBarrier = false;
+    bool peerAtBarrier = false;
+    bool peerAckedBarrier = false;
+    uint64_t menuPulseCounter = 0;
+
+    uint64_t matchFrame = 0;
+    std::unordered_map<uint64_t, uint32_t> localInputs;
+    std::unordered_map<uint64_t, uint32_t> remoteInputs;
+    std::unordered_map<uint64_t, uint64_t> localStateHashes;
+    std::unordered_map<uint64_t, uint64_t> remoteStateHashes;
+
+    // CLI auto-test state
+    bool cliHandled = false;
+    bool cliAutoStart = false;
+};
+
+NetState g_net;
+
+std::string DetectLocalLanIp() {
+    SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
