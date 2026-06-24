@@ -161,14 +161,19 @@ LONG WINAPI OnFault(EXCEPTION_POINTERS* ep) {    const auto* rec = ep->Exception
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
-}  // namespace
+int RunMain(const std::vector<std::string>& args, bool hasConsole) {
+    EnableDpiAwareness();
+    g_mainThread = GetCurrentThreadId();
 
-// Sampling profiler.  The image parks itself in loops that make no imports, so
-// "last HLE call" stops being informative exactly when it matters.  Taking the
-// main thread's RIP a thousand times a second answers the only question worth
-// asking at that point: which loop is it in.  Hashed into a fixed table -- this
-// is a diagnostic, not an instrument, and it must never perturb the guest.
-namespace {
+    std::string positionalPath;
+    std::string cliAssets;
+    std::string cliUserDir;
+    uint64_t callAt = 0;
+    uint64_t maxFrames = 0;
+    bool wantConsole = hasConsole;
+    bool openOnlineMenu = false;
+    bool openSettingsMenu = false;
+    bool verifyOnly = false;
 
     for (size_t i = 1; i < args.size(); ++i) {
         const std::string& a = args[i];
