@@ -814,3 +814,99 @@ bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
         g_net.localInputs.erase(f - 64);
         g_net.remoteInputs.erase(f - 64);
     }
+
+    g_net.matchFrame = f + 1;
+    g_net.snap.matchFrame = g_net.matchFrame;
+    return true;
+}
+
+void ApplyRoomStateFromJsonLocked(const std::string& resp) {
+    JsonGetStr(resp, "roomId", g_net.snap.roomId);
+    JsonGetStr(resp, "roomName", g_net.snap.roomName);
+    JsonGetStr(resp, "roomCode", g_net.snap.roomCode);
+    JsonGetStr(resp, "region", g_net.snap.region);
+    JsonGetStr(resp, "hostName", g_net.snap.hostName);
+    JsonGetStr(resp, "guestName", g_net.snap.guestName);
+    JsonGetBool(resp, "isPublic", g_net.snap.isPublic);
+    JsonGetBool(resp, "guestConnected", g_net.snap.remoteConnected);
+
+    bool hostReady = false, guestReady = false;
+    JsonGetBool(resp, "hostReady", hostReady);
+    JsonGetBool(resp, "guestReady", guestReady);
+    if (g_net.snap.isHost) {
+        g_net.snap.localReady = hostReady;
+        g_net.snap.remoteReady = guestReady;
+    } else {
+        g_net.snap.localReady = guestReady;
+        g_net.snap.remoteReady = hostReady;
+    }
+
+    int64_t pCount = 1, stageIdx = 0, relayPort = 27881;
+    if (JsonGetInt(resp, "playerCount", pCount)) g_net.snap.playerCount = static_cast<int>(pCount);
+    if (JsonGetInt(resp, "stageIndex", stageIdx)) g_net.snap.stageIndex = static_cast<int>(stageIdx);
+    if (JsonGetInt(resp, "relayUdpPort", relayPort) && relayPort > 0 && relayPort <= 65535)
+        g_net.relayUdpPort = static_cast<uint16_t>(relayPort);
+
+    uint64_t sid = 0, seed = 0;
+    if (JsonGetU64(resp, "sessionId", sid) && sid != 0) g_net.sessionId = sid;
+    if (JsonGetU64(resp, "matchSeed", seed) && seed != 0)
+        g_net.matchSeed = static_cast<uint32_t>(seed);
+
+    std::string keyHex;
+    if (JsonGetStr(resp, "sessionKey", keyHex) && keyHex.size() == 64) {
+        if (HexToBytes(keyHex, g_net.sessionKey, 32)) g_net.hasSessionKey = true;
+    }
+
+    // Configure relay UDP sockaddr
+    const ParsedUrl u = ParseServerUrl(core::CurrentSettings().lobbyServerUrl);
+    sockaddr_in raddr{};
+    raddr.sin_family = AF_INET;
+    raddr.sin_port = htons(g_net.relayUdpPort);
+    if (inet_pton(AF_INET, u.hostUtf8.c_str(), &raddr.sin_addr) == 1) {
+        g_net.relayAddr = raddr;
+        g_net.hasRelayAddr = true;
+    }
+
+    // Peer endpoints for UDP hole punching
+    std::string peerPubIp, peerLanIp;
+    int64_t peerPubPort = 0, peerLanPort = 0;
+    if (JsonGetStr(resp, "peerPublicIp", peerPubIp) && JsonGetInt(resp, "peerPublicPort", peerPubPort) &&
+        !peerPubIp.empty() && peerPubPort > 0) {
+        sockaddr_in pa{};
+        pa.sin_family = AF_INET;
+        pa.sin_port = htons(static_cast<uint16_t>(peerPubPort));
+        if (inet_pton(AF_INET, peerPubIp.c_str(), &pa.sin_addr) == 1) {
+            g_net.peerPublicAddr = pa;
+            g_net.hasPeerPublic = true;
+        }
+    }
+    if (JsonGetStr(resp, "peerLanIp", peerLanIp) && JsonGetInt(resp, "peerLanPort", peerLanPort) &&
+        !peerLanIp.empty() && peerLanPort > 0) {
+        sockaddr_in la{};
+        la.sin_family = AF_INET;
+        la.sin_port = htons(static_cast<uint16_t>(peerLanPort));
+        if (inet_pton(AF_INET, peerLanIp.c_str(), &la.sin_addr) == 1) {
+            g_net.peerLanAddr = la;
+            g_net.hasPeerLan = true;
+        }
+    }
+
+    bool kicked = false;
+    if (JsonGetBool(resp, "kicked", kicked) && kicked) {
+        g_net.snap.phase = SessionPhase::Disconnected;
+        g_net.snap.statusText = "Removed from room by host.";
+        g_net.authToken.clear();
+        ps4::SetNetplayStepCallback(nullptr);
+        return;
+    }
+
+    std::string roomStatus;
+    JsonGetStr(resp, "status", roomStatus);
+    if (roomStatus == "closed") {
+        g_net.snap.phase = SessionPhase::Disconnected;
+        g_net.snap.statusText = "Host closed the room.";
+        g_net.authToken.clear();
+        ps4::SetNetplayStepCallback(nullptr);
+        return;
+    }
+
