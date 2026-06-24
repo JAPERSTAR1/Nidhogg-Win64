@@ -910,3 +910,99 @@ void ApplyRoomStateFromJsonLocked(const std::string& resp) {
         return;
     }
 
+    if (roomStatus == "in_match" && g_net.snap.phase == SessionPhase::LobbyWaiting &&
+        g_net.hasSessionKey) {
+        g_net.snap.phase = SessionPhase::ConnectingTransport;
+        g_net.snap.transport = g_net.forceRelay ? TransportMode::RelayFallback
+                                                : TransportMode::PunchingP2P;
+        g_net.snap.inputDelayFrames = std::clamp(core::CurrentSettings().inputDelayFrames, 1, 8);
+        g_net.snap.desyncDetected = false;
+        g_net.snap.stateChecks = 0;
+        g_net.directEstablished = false;
+        g_net.localAtBarrier = false;
+        g_net.peerAtBarrier = false;
+        g_net.peerAckedBarrier = false;
+        g_net.menuPulseCounter = 0;
+        g_net.connectStartUsec = MonoUsec();
+        g_net.snap.statusText = "Starting match — negotiating encrypted P2P...";
+        SendRegisterEndpointToRelayLocked();
+        ps4::SetNetplayStepCallback(&NetplayStepCallbackImpl);
+        LOG_INFO("[netplay] transitioning to ConnectingTransport (sessionId=%llu, role=%s)",
+                 static_cast<unsigned long long>(g_net.sessionId),
+                 g_net.snap.isHost ? "Host/P1" : "Guest/P2");
+    }
+}
+
+void CheckEnvSimConfigLocked() {
+    auto envInt = [](const char* k, int defVal) {
+        char* v = nullptr;
+        size_t len = 0;
+        if (_dupenv_s(&v, &len, k) == 0 && v && *v) {
+            int x = std::atoi(v);
+            std::free(v);
+            return x;
+        }
+        if (v) std::free(v);
+        return defVal;
+    };
+    const int rttMs = envInt("NIDHOGG_NET_SIM_LATENCY_MS", 0);
+    g_net.simOneWayLatencyMs = std::max(0, rttMs / 2);
+    g_net.simJitterMs = std::max(0, envInt("NIDHOGG_NET_SIM_JITTER_MS", 0));
+    g_net.simLossPct = std::clamp(envInt("NIDHOGG_NET_SIM_LOSS_PCT", 0), 0, 90);
+    g_net.forceRelay = envInt("NIDHOGG_FORCE_RELAY", 0) != 0;
+}
+
+}  // namespace
+
+void InitNetplay() {
+    std::scoped_lock lk(g_net.mtx);
+    if (g_net.initialized) return;
+    WSADATA wsa{};
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+    CheckEnvSimConfigLocked();
+    g_net.initialized = true;
+}
+
+void ShutdownNetplay() {
+    LeaveRoom();
+    std::scoped_lock lk(g_net.mtx);
+    if (g_net.udpSock != INVALID_SOCKET) {
+        closesocket(g_net.udpSock);
+        g_net.udpSock = INVALID_SOCKET;
+    }
+    if (g_net.initialized) {
+        WSACleanup();
+        g_net.initialized = false;
+    }
+}
+
+bool RefreshPublicRooms(const std::string& regionFilter, bool availableOnly,
+                        std::vector<PublicRoomEntry>& outRooms, std::string& outError) {
+    InitNetplay();
+    outRooms.clear();
+    std::string path = "/api/rooms?available=" + std::string(availableOnly ? "1" : "0");
+    if (!regionFilter.empty() && regionFilter != "all") path += "&region=" + regionFilter;
+
+    int status = 0;
+    std::string resp;
+    uint32_t rttMs = 0;
+    if (!HttpRequestJson("GET", path, "", status, resp, outError, &rttMs)) return false;
+    if (status == 426) {
+        JsonGetStr(resp, "error", outError);
+        if (outError.empty()) outError = "Client/server protocol version mismatch.";
+        return false;
+    }
+    if (status != 200) {
+        JsonGetStr(resp, "error", outError);
+        if (outError.empty()) outError = "Failed to fetch rooms (HTTP " + std::to_string(status) + ")";
+        return false;
+    }
+
+    // Parse JSON array of room objects inside `"rooms":[ ... ]`
+    size_t arrPos = resp.find("\"rooms\"");
+    size_t pos = (arrPos != std::string::npos) ? resp.find('[', arrPos) : 0;
+    while (pos != std::string::npos && pos < resp.size()) {
+        size_t objStart = resp.find('{', pos);
+        if (objStart == std::string::npos) break;
+        size_t objEnd = resp.find('}', objStart);
+        if (objEnd == std::string::npos) break;
