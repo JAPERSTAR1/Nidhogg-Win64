@@ -1246,3 +1246,99 @@ bool SetRoomVisibility(bool isPublic, std::string& outError) {
         }
         roomId = g_net.snap.roomId;
         token = g_net.authToken;
+    }
+
+    std::ostringstream body;
+    body << "{\"roomId\":\"" << JsonEsc(roomId) << "\","
+         << "\"authToken\":\"" << JsonEsc(token) << "\","
+         << "\"isPublic\":" << (isPublic ? "true" : "false") << "}";
+
+    int status = 0;
+    std::string resp;
+    if (!HttpRequestJson("POST", "/api/rooms/visibility", body.str(), status, resp, outError))
+        return false;
+    if (status != 200) {
+        if (!JsonGetStr(resp, "error", outError) || outError.empty())
+            outError = "Visibility update failed.";
+        return false;
+    }
+
+    std::scoped_lock lk(g_net.mtx);
+    ApplyRoomStateFromJsonLocked(resp);
+    g_net.snap.statusText = isPublic ? "Room switched to PUBLIC (listed in browser)."
+                                     : "Room switched to PRIVATE (hidden, join by code only).";
+    LOG_INFO("[netplay] switched room %s visibility -> %s", roomId.c_str(),
+             isPublic ? "PUBLIC" : "PRIVATE");
+    return true;
+}
+
+bool SetReady(bool ready, std::string& outError) {
+    std::string roomId, token;
+    {
+        std::scoped_lock lk(g_net.mtx);
+        roomId = g_net.snap.roomId;
+        token = g_net.authToken;
+    }
+    if (roomId.empty()) { outError = "Not in a room."; return false; }
+
+    std::ostringstream body;
+    body << "{\"roomId\":\"" << JsonEsc(roomId) << "\","
+         << "\"authToken\":\"" << JsonEsc(token) << "\","
+         << "\"ready\":" << (ready ? "true" : "false") << "}";
+    int status = 0;
+    std::string resp;
+    if (!HttpRequestJson("POST", "/api/rooms/ready", body.str(), status, resp, outError))
+        return false;
+    if (status != 200) {
+        JsonGetStr(resp, "error", outError);
+        return false;
+    }
+    std::scoped_lock lk(g_net.mtx);
+    ApplyRoomStateFromJsonLocked(resp);
+    return true;
+}
+
+bool KickGuest(std::string& outError) {
+    std::string roomId, token;
+    {
+        std::scoped_lock lk(g_net.mtx);
+        if (!g_net.snap.isHost || g_net.snap.roomId.empty()) {
+            outError = "Only the host can kick a player.";
+            return false;
+        }
+        roomId = g_net.snap.roomId;
+        token = g_net.authToken;
+    }
+    std::ostringstream body;
+    body << "{\"roomId\":\"" << JsonEsc(roomId) << "\",\"authToken\":\"" << JsonEsc(token) << "\"}";
+    int status = 0;
+    std::string resp;
+    if (!HttpRequestJson("POST", "/api/rooms/kick", body.str(), status, resp, outError))
+        return false;
+    if (status != 200) {
+        JsonGetStr(resp, "error", outError);
+        return false;
+    }
+    std::scoped_lock lk(g_net.mtx);
+    ApplyRoomStateFromJsonLocked(resp);
+    g_net.snap.statusText = "Removed guest from room.";
+    return true;
+}
+
+bool StartMatch(std::string& outError) {
+    std::string roomId, token;
+    {
+        std::scoped_lock lk(g_net.mtx);
+        if (!g_net.snap.isHost || g_net.snap.roomId.empty()) {
+            outError = "Only the host can start the match.";
+            return false;
+        }
+        roomId = g_net.snap.roomId;
+        token = g_net.authToken;
+    }
+    std::ostringstream body;
+    body << "{\"roomId\":\"" << JsonEsc(roomId) << "\",\"authToken\":\"" << JsonEsc(token) << "\"}";
+    int status = 0;
+    std::string resp;
+    if (!HttpRequestJson("POST", "/api/rooms/start", body.str(), status, resp, outError))
+        return false;
