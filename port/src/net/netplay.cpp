@@ -1006,3 +1006,147 @@ bool RefreshPublicRooms(const std::string& regionFilter, bool availableOnly,
         if (objStart == std::string::npos) break;
         size_t objEnd = resp.find('}', objStart);
         if (objEnd == std::string::npos) break;
+        std::string item = resp.substr(objStart, objEnd - objStart + 1);
+        PublicRoomEntry e;
+        if (JsonGetStr(item, "roomId", e.roomId)) {
+            JsonGetStr(item, "roomName", e.roomName);
+            JsonGetStr(item, "region", e.region);
+            JsonGetStr(item, "status", e.status);
+            int64_t pc = 1, mp = 2, stg = 0, ping = 0;
+            if (JsonGetInt(item, "playerCount", pc)) e.playerCount = static_cast<int>(pc);
+            if (JsonGetInt(item, "maxPlayers", mp)) e.maxPlayers = static_cast<int>(mp);
+            if (JsonGetInt(item, "stageIndex", stg)) e.stageIndex = static_cast<int>(stg);
+            if (JsonGetInt(item, "pingMs", ping) && ping > 0)
+                e.estimatedPingMs = static_cast<int>(ping) + static_cast<int>(rttMs);
+            else
+                e.estimatedPingMs = static_cast<int>(rttMs);
+            outRooms.push_back(std::move(e));
+        }
+        pos = objEnd + 1;
+    }
+    return true;
+}
+
+bool CreateRoom(const std::string& roomName, bool isPublic, int stageIndex, std::string& outError) {
+    InitNetplay();
+    LeaveRoom();
+
+    uint16_t udpPort = 0;
+    std::string lanIp;
+    {
+        std::scoped_lock lk(g_net.mtx);
+        if (!EnsureUdpSocketLocked()) {
+            outError = "Failed to bind local UDP socket.";
+            return false;
+        }
+        udpPort = g_net.localUdpPort;
+        lanIp = g_net.localLanIp;
+    }
+
+    const auto& cfg = core::CurrentSettings();
+    const std::string rName = roomName.empty() ? (cfg.playerName + "'s Arena") : roomName;
+    std::ostringstream body;
+    body << "{\"roomName\":\"" << JsonEsc(rName) << "\","
+         << "\"hostName\":\"" << JsonEsc(cfg.playerName) << "\","
+         << "\"region\":\"" << JsonEsc(cfg.region) << "\","
+         << "\"isPublic\":" << (isPublic ? "true" : "false") << ","
+         << "\"stageIndex\":" << stageIndex << ","
+         << "\"lanIp\":\"" << JsonEsc(lanIp) << "\","
+         << "\"lanPort\":" << udpPort << "}";
+
+    int status = 0;
+    std::string resp;
+    if (!HttpRequestJson("POST", "/api/rooms/create", body.str(), status, resp, outError))
+        return false;
+    if (status != 200) {
+        if (!JsonGetStr(resp, "error", outError) || outError.empty())
+            outError = "CreateRoom failed (HTTP " + std::to_string(status) + ")";
+        return false;
+    }
+
+    std::scoped_lock lk(g_net.mtx);
+    g_net.snap = NetStatsSnapshot{};
+    g_net.snap.phase = SessionPhase::LobbyWaiting;
+    g_net.snap.isHost = true;
+    g_net.snap.localPlayerNum = 1;
+    g_net.snap.playerCount = 1;
+    g_net.snap.statusText = isPublic ? "Hosting Public Room — waiting for challenger..."
+                                     : "Hosting Private Room — share Room Code with friend.";
+    JsonGetStr(resp, "authToken", g_net.authToken);
+    ApplyRoomStateFromJsonLocked(resp);
+    SendRegisterEndpointToRelayLocked();
+    g_net.lastHeartbeatUsec = MonoUsec();
+    LOG_INFO("[netplay] created %s room id=%s code=%s",
+             isPublic ? "PUBLIC" : "PRIVATE", g_net.snap.roomId.c_str(),
+             g_net.snap.roomCode.c_str());
+    return true;
+}
+
+bool JoinRoomById(const std::string& roomId, std::string& outError) {
+    InitNetplay();
+    LeaveRoom();
+
+    uint16_t udpPort = 0;
+    std::string lanIp;
+    {
+        std::scoped_lock lk(g_net.mtx);
+        if (!EnsureUdpSocketLocked()) { outError = "Failed to bind UDP socket."; return false; }
+        udpPort = g_net.localUdpPort;
+        lanIp = g_net.localLanIp;
+    }
+
+    const auto& cfg = core::CurrentSettings();
+    std::ostringstream body;
+    body << "{\"roomId\":\"" << JsonEsc(roomId) << "\","
+         << "\"playerName\":\"" << JsonEsc(cfg.playerName) << "\","
+         << "\"lanIp\":\"" << JsonEsc(lanIp) << "\","
+         << "\"lanPort\":" << udpPort << "}";
+
+    int status = 0;
+    std::string resp;
+    if (!HttpRequestJson("POST", "/api/rooms/join", body.str(), status, resp, outError))
+        return false;
+    if (status != 200) {
+        if (!JsonGetStr(resp, "error", outError) || outError.empty())
+            outError = "Failed to join room (HTTP " + std::to_string(status) + ")";
+        return false;
+    }
+
+    std::scoped_lock lk(g_net.mtx);
+    g_net.snap = NetStatsSnapshot{};
+    g_net.snap.phase = SessionPhase::LobbyWaiting;
+    g_net.snap.isHost = false;
+    g_net.snap.localPlayerNum = 2;
+    g_net.snap.remoteConnected = true;
+    g_net.snap.statusText = "Joined room — toggle Ready when prepared.";
+    JsonGetStr(resp, "authToken", g_net.authToken);
+    ApplyRoomStateFromJsonLocked(resp);
+    SendRegisterEndpointToRelayLocked();
+    g_net.lastHeartbeatUsec = MonoUsec();
+    LOG_INFO("[netplay] joined room id=%s host=%s", g_net.snap.roomId.c_str(),
+             g_net.snap.hostName.c_str());
+    return true;
+}
+
+bool JoinRoomByCode(const std::string& roomCode, std::string& outError) {
+    InitNetplay();
+    LeaveRoom();
+
+    std::string cleanCode;
+    for (char c : roomCode) {
+        if (std::isalnum(static_cast<unsigned char>(c)))
+            cleanCode.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+    }
+    if (cleanCode.size() != 6) {
+        outError = "Room code must be 6 characters.";
+        return false;
+    }
+
+    uint16_t udpPort = 0;
+    std::string lanIp;
+    {
+        std::scoped_lock lk(g_net.mtx);
+        if (!EnsureUdpSocketLocked()) { outError = "Failed to bind UDP socket."; return false; }
+        udpPort = g_net.localUdpPort;
+        lanIp = g_net.localLanIp;
+    }
