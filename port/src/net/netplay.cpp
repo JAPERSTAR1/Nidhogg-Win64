@@ -1342,3 +1342,99 @@ bool StartMatch(std::string& outError) {
     std::string resp;
     if (!HttpRequestJson("POST", "/api/rooms/start", body.str(), status, resp, outError))
         return false;
+    if (status != 200) {
+        if (!JsonGetStr(resp, "error", outError) || outError.empty())
+            outError = "Cannot start match yet (need 2 players).";
+        return false;
+    }
+    std::scoped_lock lk(g_net.mtx);
+    ApplyRoomStateFromJsonLocked(resp);
+    return true;
+}
+
+void LeaveRoom() {
+    ps4::SetNetplayStepCallback(nullptr);
+    std::string roomId, token;
+    {
+        std::scoped_lock lk(g_net.mtx);
+        if (g_net.hasSessionKey && g_net.sessionId != 0 &&
+            (g_net.snap.phase == SessionPhase::InMatch ||
+             g_net.snap.phase == SessionPhase::SyncingMenu ||
+             g_net.snap.phase == SessionPhase::ConnectingTransport)) {
+            uint64_t bye = MonoUsec();
+            SendSealedPeerPacketLocked(kPktDisconnect, &bye, sizeof(bye));
+            FlushTxQueueLocked();
+        }
+        roomId = g_net.snap.roomId;
+        token = g_net.authToken;
+        g_net.snap = NetStatsSnapshot{};
+        g_net.authToken.clear();
+        g_net.sessionId = 0;
+        g_net.hasSessionKey = false;
+        g_net.directEstablished = false;
+        g_net.hasPeerPublic = false;
+        g_net.hasPeerLan = false;
+        g_net.txQueue.clear();
+    }
+    if (!roomId.empty() && !token.empty()) {
+        std::ostringstream body;
+        body << "{\"roomId\":\"" << JsonEsc(roomId) << "\",\"authToken\":\"" << JsonEsc(token) << "\"}";
+        int st = 0;
+        std::string resp, err;
+        HttpRequestJson("POST", "/api/rooms/leave", body.str(), st, resp, err);
+    }
+}
+
+bool CopyRoomCodeToClipboard() {
+    std::string code;
+    {
+        std::scoped_lock lk(g_net.mtx);
+        code = g_net.snap.roomCode;
+    }
+    if (code.empty()) return false;
+    if (!OpenClipboard(static_cast<HWND>(ps4::GameWindow()))) return false;
+    EmptyClipboard();
+    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, code.size() + 1);
+    if (!hMem) { CloseClipboard(); return false; }
+    void* dst = GlobalLock(hMem);
+    if (dst) {
+        std::memcpy(dst, code.c_str(), code.size() + 1);
+        GlobalUnlock(hMem);
+        SetClipboardData(CF_TEXT, hMem);
+    }
+    CloseClipboard();
+    return true;
+}
+
+void TickNetplayLobby() {
+    InitNetplay();
+
+    // Optional automated multi-instance CLI/env workflow triggers (used by Phase 11 QA)
+    bool doEnvSetup = false;
+    {
+        std::scoped_lock lk(g_net.mtx);
+        if (!g_net.cliHandled && ps4::SubmittedFrames() >= 15) {
+            g_net.cliHandled = true;
+            doEnvSetup = true;
+        }
+    }
+    if (doEnvSetup) {
+        auto getEnv = [](const char* k) -> std::string {
+            char* v = nullptr;
+            size_t len = 0;
+            std::string s;
+            if (_dupenv_s(&v, &len, k) == 0 && v) { s = v; std::free(v); }
+            return s;
+        };
+        const std::string mode = getEnv("NIDHOGG_NET_AUTO");
+        const std::string arg = getEnv("NIDHOGG_NET_ARG");
+        std::string err;
+        if (mode == "host_public") {
+            g_net.cliAutoStart = true;
+            CreateRoom(arg.empty() ? "QA Public Room" : arg, true, 0, err);
+        } else if (mode == "host_private") {
+            g_net.cliAutoStart = true;
+            CreateRoom("QA Private Room", false, 0, err);
+            const std::string codeOut = getEnv("NIDHOGG_NET_CODE_OUT");
+            if (!codeOut.empty()) {
+                if (std::FILE* f = core::FopenUtf8(codeOut, "wb")) {
