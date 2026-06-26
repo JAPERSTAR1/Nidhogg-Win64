@@ -11,8 +11,10 @@
 #include <cstring>
 #include <string>
 
-#include "image.h"
+#include "core/logger.h"
+#include "core/settings.h"
 #include "hle.h"
+#include "image.h"
 #include "thunks.h"
 
 namespace {
