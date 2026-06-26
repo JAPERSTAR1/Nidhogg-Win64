@@ -9,7 +9,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <sstream>
 #include <string>
+#include <vector>
 
 #include "core/logger.h"
 #include "core/settings.h"
