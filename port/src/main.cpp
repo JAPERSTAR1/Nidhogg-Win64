@@ -137,12 +137,26 @@ LONG WINAPI OnFault(EXCEPTION_POINTERS* ep) {    const auto* rec = ep->Exception
     std::printf("[fault] rsp=%p rbp=%p r8=%p r9=%p\n",
                 (void*)c->Rsp, (void*)c->Rbp, (void*)c->R8, (void*)c->R9);
 
-    // The image is built with frame pointers, so the rbp chain gives the
-    // call stack the SCE code actually took.
-    std::printf("[fault] stack:");
+    std::ostringstream report;
+    report << "Nidhogg Fatal Exception Report\n"
+           << "Code: 0x" << std::hex << rec->ExceptionCode
+           << " at " << rec->ExceptionAddress
+           << " (" << modName << "+0x"
+           << (reinterpret_cast<uint64_t>(rec->ExceptionAddress) - modBase) << ")\n";
+    if (rec->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && rec->NumberParameters >= 2) {
+        report << "Access: " << (rec->ExceptionInformation[0] ? "WRITE" : "READ")
+               << " at 0x" << rec->ExceptionInformation[1] << "\n";
+    }
+    report << "Guest RIP offset: +0x" << (static_cast<uint64_t>(c->Rip) - g_imageBase)
+           << " | Last HLE slot: " << std::dec << ps4::LastSlot() << " ("
+           << (ps4::SlotName(ps4::LastSlot()) ? ps4::SlotName(ps4::LastSlot()) : "?")
+           << ") from +0x" << std::hex << (ps4::LastCallSite() - g_imageBase) << "\n"
+           << "Frame: " << std::dec << ps4::SubmittedFrames()
+           << " | Room: " << ps4::CurrentRoom() << "\n"
+           << "Stack:";
+
     uint64_t bp = c->Rbp;
     for (int i = 0; i < 20 && bp; ++i) {
-        uint64_t savedBp = 0, ret = 0;
         MEMORY_BASIC_INFORMATION mbi{};
         if (!VirtualQuery(reinterpret_cast<void*>(bp), &mbi, sizeof(mbi)) ||
             mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) ||
