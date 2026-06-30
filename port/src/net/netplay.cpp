@@ -430,3 +430,99 @@ void SendSealedPeerPacketLocked(uint8_t pktType, const void* payload, size_t pay
     aad.senderRole = g_net.snap.isHost ? 1 : 2;
     aad.sessionId = g_net.sessionId;
 
+    std::vector<uint8_t> sealed;
+    if (!SealPacket(g_net.sessionKey, g_net.nextNonce++, reinterpret_cast<const uint8_t*>(&aad),
+                    sizeof(aad), static_cast<const uint8_t*>(payload), payloadLen, sealed))
+        return;
+
+    auto sendViaRelay = [&]() {
+        if (!g_net.hasRelayAddr) return;
+        std::vector<uint8_t> env(1 + 8 + 1 + sealed.size());
+        env[0] = kPktRelayEnvelope;
+        std::memcpy(&env[1], &g_net.sessionId, 8);
+        env[9] = aad.senderRole;
+        std::memcpy(&env[10], sealed.data(), sealed.size());
+        QueueUdpSendLocked(g_net.relayAddr, env.data(), env.size());
+    };
+
+    if (g_net.forceRelay) {
+        sendViaRelay();
+        return;
+    }
+
+    if (g_net.directEstablished) {
+        QueueUdpSendLocked(g_net.activePeerAddr, sealed.data(), sealed.size());
+    } else {
+        if (g_net.hasPeerPublic)
+            QueueUdpSendLocked(g_net.peerPublicAddr, sealed.data(), sealed.size());
+        if (g_net.hasPeerLan)
+            QueueUdpSendLocked(g_net.peerLanAddr, sealed.data(), sealed.size());
+        sendViaRelay();
+    }
+}
+
+void SendRegisterEndpointToRelayLocked() {
+    if (!g_net.hasRelayAddr || !g_net.hasSessionKey || g_net.sessionId == 0) return;
+    WireAad aad{};
+    aad.magic = kWireMagic;
+    aad.type = kPktRegisterEndpoint;
+    aad.senderRole = g_net.snap.isHost ? 1 : 2;
+    aad.sessionId = g_net.sessionId;
+    const uint64_t ts = MonoUsec();
+    std::vector<uint8_t> sealed;
+    if (SealPacket(g_net.sessionKey, g_net.nextNonce++, reinterpret_cast<const uint8_t*>(&aad),
+                   sizeof(aad), reinterpret_cast<const uint8_t*>(&ts), sizeof(ts), sealed)) {
+        QueueUdpSendLocked(g_net.relayAddr, sealed.data(), sealed.size());
+    }
+}
+
+void UpdateRttLocked(uint64_t echoedSendTimeUsec) {
+    if (!echoedSendTimeUsec) return;
+    const uint64_t now = MonoUsec();
+    if (now < echoedSendTimeUsec) return;
+    const double sampleMs = static_cast<double>(now - echoedSendTimeUsec) / 1000.0;
+    if (sampleMs > 5000.0) return;
+    if (g_net.snap.rttMs <= 0.01) {
+        g_net.snap.rttMs = sampleMs;
+        g_net.snap.jitterMs = 0.0;
+    } else {
+        const double delta = std::fabs(sampleMs - g_net.snap.rttMs);
+        g_net.snap.jitterMs = g_net.snap.jitterMs * 0.85 + delta * 0.15;
+        g_net.snap.rttMs = g_net.snap.rttMs * 0.85 + sampleMs * 0.15;
+    }
+}
+
+void VerifyHashesForFrameLocked(uint64_t f) {
+    auto lit = g_net.localStateHashes.find(f);
+    auto rit = g_net.remoteStateHashes.find(f);
+    if (lit == g_net.localStateHashes.end() || rit == g_net.remoteStateHashes.end()) return;
+
+    ++g_net.snap.stateChecks;
+    g_net.snap.lastLocalHash = lit->second;
+    g_net.snap.lastRemoteHash = rit->second;
+    if (lit->second != rit->second && !g_net.snap.desyncDetected) {
+        g_net.snap.desyncDetected = true;
+        g_net.snap.desyncFrame = f;
+        LOG_ERROR("[netplay] DESYNC DETECTED at matchFrame=%llu local=%016llx remote=%016llx",
+                  static_cast<unsigned long long>(f),
+                  static_cast<unsigned long long>(lit->second),
+                  static_cast<unsigned long long>(rit->second));
+    } else if ((f % 120) == 0) {
+        LOG_INFO("[netplay] frame=%llu mode=%s rtt=%.1fms jitter=%.1fms hash=%016llx sync=OK",
+                 static_cast<unsigned long long>(f),
+                 g_net.snap.transport == TransportMode::DirectP2P ? "DirectP2P" : "Relay",
+                 g_net.snap.rttMs, g_net.snap.jitterMs,
+                 static_cast<unsigned long long>(lit->second));
+    }
+    g_net.localStateHashes.erase(lit);
+    g_net.remoteStateHashes.erase(rit);
+}
+
+void PumpUdpRxLocked() {
+    if (g_net.udpSock == INVALID_SOCKET || !g_net.hasSessionKey) return;
+    FlushTxQueueLocked();
+
+    uint8_t buf[2048];
+    for (int iter = 0; iter < 64; ++iter) {
+        sockaddr_in from{};
+        int fromLen = sizeof(from);
