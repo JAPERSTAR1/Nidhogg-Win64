@@ -382,3 +382,99 @@ void RefreshHardwareLists() {
                 break;
             }
         }
+    }
+}
+
+int* KeySlotPtr(core::Settings& s, int bindId) {
+    switch (bindId) {
+        case 0: return &s.p1Keys.up;
+        case 1: return &s.p1Keys.down;
+        case 2: return &s.p1Keys.left;
+        case 3: return &s.p1Keys.right;
+        case 4: return &s.p1Keys.jump;
+        case 5: return &s.p1Keys.attack;
+        case 6: return &s.p1Keys.back;
+        case 7: return &s.p1Keys.start;
+        case 8: return &s.p2Keys.up;
+        case 9: return &s.p2Keys.down;
+        case 10: return &s.p2Keys.left;
+        case 11: return &s.p2Keys.right;
+        case 12: return &s.p2Keys.jump;
+        case 13: return &s.p2Keys.attack;
+        case 14: return &s.p2Keys.back;
+        case 15: return &s.p2Keys.start;
+        default: return nullptr;
+    }
+}
+
+void TriggerDisplayApply(void* hwnd) {
+    auto& cfg = core::CurrentSettings();
+    gnm::ApplyDisplaySettings(hwnd);
+    core::SaveSettings(cfg);
+    g_ui.confirmDisplayPending = true;
+    g_ui.confirmDisplayDeadlineSec = NowSec() + 15.0;
+}
+
+void RevertDisplayChanges(void* hwnd) {
+    auto& cfg = core::CurrentSettings();
+    cfg.displayMode = g_ui.backupDisplaySettings.displayMode;
+    cfg.displayWidth = g_ui.backupDisplaySettings.displayWidth;
+    cfg.displayHeight = g_ui.backupDisplaySettings.displayHeight;
+    cfg.monitorIndex = g_ui.backupDisplaySettings.monitorIndex;
+    g_ui.confirmDisplayPending = false;
+    gnm::ApplyDisplaySettings(hwnd);
+    core::SaveSettings(cfg);
+    RefreshHardwareLists();
+}
+
+std::string ReadClipboardText() {
+    std::string out;
+    if (!OpenClipboard(nullptr)) return out;
+    HANDLE h = GetClipboardData(CF_TEXT);
+    if (h) {
+        const char* p = static_cast<const char*>(GlobalLock(h));
+        if (p) {
+            out = p;
+            GlobalUnlock(h);
+        }
+    }
+    CloseClipboard();
+    return out;
+}
+
+const char* StageName(int idx) {
+    switch (idx & 3) {
+        case 0: return "Castle";
+        case 1: return "Mines";
+        case 2: return "Clouds";
+        case 3: return "Wilds";
+        default: return "Castle";
+    }
+}
+
+void AdjustSettingRow(void* hwnd, int tab, int row, int dir, bool activated) {
+    auto& cfg = core::CurrentSettings();
+    bool save = false;
+
+    if (tab == 0) {  // Graphics
+        switch (row) {
+            case 0: {  // Quality Preset
+                int q = (static_cast<int>(cfg.qualityPreset) + (dir ? dir : 1) + 5) % 5;
+                core::ApplyQualityPreset(cfg, static_cast<core::QualityPreset>(q));
+                save = true;
+                break;
+            }
+            case 1: {  // Internal Render Scale
+                const float scales[] = {0.50f, 0.75f, 1.00f, 1.25f, 1.50f, 2.00f};
+                int cur = 2;
+                for (int i = 0; i < 6; ++i)
+                    if (std::fabs(cfg.renderScale - scales[i]) < 0.05f) cur = i;
+                cur = std::clamp(cur + (dir ? dir : 1), 0, 5);
+                cfg.renderScale = scales[cur];
+                cfg.qualityPreset = core::QualityPreset::Custom;
+                save = true;
+                break;
+            }
+            case 2: {  // Texture / Presentation Filter
+                int f = (static_cast<int>(cfg.textureFilter) + (dir ? dir : 1) + 4) % 4;
+                cfg.textureFilter = static_cast<core::TextureFilterMode>(f);
