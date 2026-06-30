@@ -526,3 +526,99 @@ void PumpUdpRxLocked() {
     for (int iter = 0; iter < 64; ++iter) {
         sockaddr_in from{};
         int fromLen = sizeof(from);
+        int n = recvfrom(g_net.udpSock, reinterpret_cast<char*>(buf), sizeof(buf), 0,
+                         reinterpret_cast<sockaddr*>(&from), &fromLen);
+        if (n <= 0) break;
+
+        bool cameFromRelay = false;
+        const uint8_t* pkt = buf;
+        size_t pktLen = static_cast<size_t>(n);
+        if (pktLen > 10 && pkt[0] == kPktRelayEnvelope) {
+            cameFromRelay = true;
+            pkt += 10;
+            pktLen -= 10;
+        }
+        if (pktLen < sizeof(WireAad) + 8 + 16) continue;
+
+        WireAad aad{};
+        std::memcpy(&aad, pkt, sizeof(aad));
+        if (aad.magic != kWireMagic || aad.sessionId != g_net.sessionId) continue;
+        const uint8_t expectedPeerRole = g_net.snap.isHost ? 2 : 1;
+        if (aad.senderRole != expectedPeerRole) continue;
+
+        uint64_t nonce = 0;
+        std::vector<uint8_t> plain;
+        if (!OpenPacket(g_net.sessionKey, pkt, pktLen, sizeof(WireAad), nonce, plain)) {
+            continue;  // Failed HMAC authentication
+        }
+
+        ++g_net.snap.packetsReceived;
+        g_net.lastRxUsec = MonoUsec();
+
+        if (!cameFromRelay && !g_net.forceRelay) {
+            g_net.directEstablished = true;
+            g_net.activePeerAddr = from;
+            g_net.snap.transport = TransportMode::DirectP2P;
+        } else if (g_net.snap.transport != TransportMode::DirectP2P) {
+            g_net.snap.transport = TransportMode::RelayFallback;
+        }
+
+        switch (aad.type) {
+            case kPktPunch: {
+                uint64_t peerTs = 0;
+                if (plain.size() >= 8) std::memcpy(&peerTs, plain.data(), 8);
+                g_net.lastPeerTimestampUsec = peerTs;
+                uint64_t ackTs[2] = {MonoUsec(), peerTs};
+                SendSealedPeerPacketLocked(kPktPunchAck, ackTs, sizeof(ackTs));
+                break;
+            }
+            case kPktPunchAck: {
+                if (plain.size() >= 16) {
+                    uint64_t peerTs = 0, echoed = 0;
+                    std::memcpy(&peerTs, plain.data(), 8);
+                    std::memcpy(&echoed, plain.data() + 8, 8);
+                    g_net.lastPeerTimestampUsec = peerTs;
+                    UpdateRttLocked(echoed);
+                }
+                if (g_net.snap.phase == SessionPhase::ConnectingTransport) {
+                    g_net.snap.phase = SessionPhase::SyncingMenu;
+                    g_net.snap.statusText = "Connected — synchronizing stage entry...";
+                    LOG_INFO("[netplay] transport established (%s, rtt=%.1fms)",
+                             g_net.snap.transport == TransportMode::DirectP2P ? "DirectP2P" : "Relay",
+                             g_net.snap.rttMs);
+                }
+                break;
+            }
+            case kPktSyncBarrier: {
+                if (plain.size() < sizeof(SyncBarrierPayload)) break;
+                SyncBarrierPayload sb{};
+                std::memcpy(&sb, plain.data(), sizeof(sb));
+                g_net.lastPeerTimestampUsec = sb.sendTimeUsec;
+                UpdateRttLocked(sb.echoTimeUsec);
+                if (g_net.snap.phase == SessionPhase::ConnectingTransport) {
+                    g_net.snap.phase = SessionPhase::SyncingMenu;
+                }
+                if (!g_net.snap.isHost) {
+                    g_net.snap.stageIndex = sb.stageIndex;
+                    g_net.snap.inputDelayFrames = std::clamp<int>(sb.inputDelay, 1, 8);
+                    g_net.matchSeed = sb.matchSeed;
+                }
+                if (sb.atLevelSelect) g_net.peerAtBarrier = true;
+                if (sb.ackPeerBarrier) g_net.peerAckedBarrier = true;
+                break;
+            }
+            case kPktInput: {
+                if (plain.size() < sizeof(InputPayload)) break;
+                InputPayload ip{};
+                std::memcpy(&ip, plain.data(), sizeof(ip));
+                g_net.lastPeerTimestampUsec = ip.sendTimeUsec;
+                UpdateRttLocked(ip.echoTimeUsec);
+
+                // Peer entering InMatch means peer passed the barrier too
+                g_net.peerAtBarrier = true;
+                g_net.peerAckedBarrier = true;
+
+                const uint8_t count = std::min<uint8_t>(ip.historyCount, 16);
+                for (uint8_t k = 0; k < count; ++k) {
+                    if (ip.latestFrame >= k) {
+                        g_net.remoteInputs[ip.latestFrame - k] = ip.buttonsHistory[k];
