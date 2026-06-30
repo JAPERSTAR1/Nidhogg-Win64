@@ -478,3 +478,99 @@ void AdjustSettingRow(void* hwnd, int tab, int row, int dir, bool activated) {
             case 2: {  // Texture / Presentation Filter
                 int f = (static_cast<int>(cfg.textureFilter) + (dir ? dir : 1) + 4) % 4;
                 cfg.textureFilter = static_cast<core::TextureFilterMode>(f);
+                cfg.qualityPreset = core::QualityPreset::Custom;
+                save = true;
+                break;
+            }
+            case 3: {  // Anisotropy
+                const int levels[] = {1, 2, 4, 8, 16};
+                int idx = 0;
+                for (int i = 0; i < 5; ++i) if (cfg.anisotropy == levels[i]) idx = i;
+                idx = (idx + (dir ? dir : 1) + 5) % 5;
+                cfg.anisotropy = levels[idx];
+                cfg.qualityPreset = core::QualityPreset::Custom;
+                save = true;
+                break;
+            }
+            case 4:  // Scanlines Post-FX
+                cfg.postScanlines = !cfg.postScanlines;
+                cfg.qualityPreset = core::QualityPreset::Custom;
+                save = true;
+                break;
+            case 5: {  // VSync
+                int v = (static_cast<int>(cfg.vsync) + (dir ? dir : 1) + 3) % 3;
+                cfg.vsync = static_cast<core::VSyncMode>(v);
+                save = true;
+                break;
+            }
+            case 6:  // Swap Buffers
+                cfg.swapBuffers = (cfg.swapBuffers == 2) ? 3 : 2;
+                save = true;
+                break;
+            case 7: {  // Presentation FPS Limit
+                const int caps[] = {30, 60, 120, 144, 240, 0};
+                int idx = 1;
+                for (int i = 0; i < 6; ++i) if (cfg.presentationFpsLimit == caps[i]) idx = i;
+                idx = (idx + (dir ? dir : 1) + 6) % 6;
+                cfg.presentationFpsLimit = caps[idx];
+                save = true;
+                break;
+            }
+        }
+    } else if (tab == 1) {  // Display
+        if (g_ui.monitors.empty()) RefreshHardwareLists();
+        const int monCount = std::max(1, static_cast<int>(g_ui.monitors.size()));
+        const int mi = std::clamp(cfg.monitorIndex, 0, monCount - 1);
+        const auto& modes = g_ui.monitors[mi].modes;
+        switch (row) {
+            case 0: {  // Display Mode
+                if (!g_ui.confirmDisplayPending) g_ui.backupDisplaySettings = cfg;
+                int dm = (static_cast<int>(cfg.displayMode) + (dir ? dir : 1) + 3) % 3;
+                cfg.displayMode = static_cast<core::DisplayMode>(dm);
+                break;
+            }
+            case 1: {  // Monitor
+                if (!g_ui.confirmDisplayPending) g_ui.backupDisplaySettings = cfg;
+                cfg.monitorIndex = (cfg.monitorIndex + (dir ? dir : 1) + monCount) % monCount;
+                RefreshHardwareLists();
+                break;
+            }
+            case 2: {  // Resolution
+                if (!modes.empty()) {
+                    if (!g_ui.confirmDisplayPending) g_ui.backupDisplaySettings = cfg;
+                    const int n = static_cast<int>(modes.size());
+                    g_ui.selectedResolutionIdx =
+                        (g_ui.selectedResolutionIdx + (dir ? dir : 1) + n) % n;
+                    cfg.displayWidth = modes[g_ui.selectedResolutionIdx].width;
+                    cfg.displayHeight = modes[g_ui.selectedResolutionIdx].height;
+                }
+                break;
+            }
+            case 3: {  // Aspect Ratio Scaling
+                cfg.aspectMode = (cfg.aspectMode == core::AspectMode::Preserve16x9)
+                                     ? core::AspectMode::IntegerScale
+                                     : core::AspectMode::Preserve16x9;
+                save = true;
+                break;
+            }
+            case 4: {  // Apply Display Settings button
+                if (activated) {
+                    TriggerDisplayApply(hwnd);
+                }
+                break;
+            }
+        }
+    } else if (tab == 2) {  // Audio
+        if (g_ui.audioDevices.empty()) RefreshHardwareLists();
+        const float step = 0.05f * (dir ? static_cast<float>(dir) : 1.0f);
+        switch (row) {
+            case 0: cfg.masterVolume = std::clamp(cfg.masterVolume + step, 0.0f, 1.0f); save = true; break;
+            case 1: cfg.musicVolume  = std::clamp(cfg.musicVolume  + step, 0.0f, 1.0f); save = true; break;
+            case 2: cfg.sfxVolume    = std::clamp(cfg.sfxVolume    + step, 0.0f, 1.0f); save = true; break;
+            case 3: cfg.mute = !cfg.mute; save = true; break;
+            case 4: {
+                const int n = static_cast<int>(g_ui.audioDevices.size());
+                if (n > 0) {
+                    int cur = 0;
+                    for (int i = 0; i < n; ++i)
+                        if (g_ui.audioDevices[i].id == cfg.audioDeviceId) cur = i;
