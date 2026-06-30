@@ -334,3 +334,99 @@ NetState g_net;
 
 std::string DetectLocalLanIp() {
     SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (s == INVALID_SOCKET) return "127.0.0.1";
+    sockaddr_in dst{};
+    dst.sin_family = AF_INET;
+    dst.sin_port = htons(53);
+    inet_pton(AF_INET, "8.8.8.8", &dst.sin_addr);
+    connect(s, reinterpret_cast<sockaddr*>(&dst), sizeof(dst));
+    sockaddr_in name{};
+    int namelen = sizeof(name);
+    std::string ip = "127.0.0.1";
+    if (getsockname(s, reinterpret_cast<sockaddr*>(&name), &namelen) == 0) {
+        char buf[64]{};
+        if (inet_ntop(AF_INET, &name.sin_addr, buf, sizeof(buf)) && std::strcmp(buf, "0.0.0.0") != 0)
+            ip = buf;
+    }
+    closesocket(s);
+    return ip;
+}
+
+bool EnsureUdpSocketLocked() {
+    if (g_net.udpSock != INVALID_SOCKET) return true;
+    SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (s == INVALID_SOCKET) return false;
+    u_long nonBlock = 1;
+    ioctlsocket(s, FIONBIO, &nonBlock);
+    int bufSz = 256 * 1024;
+    setsockopt(s, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char*>(&bufSz), sizeof(bufSz));
+    setsockopt(s, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<const char*>(&bufSz), sizeof(bufSz));
+
+    sockaddr_in bindAddr{};
+    bindAddr.sin_family = AF_INET;
+    bindAddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    bindAddr.sin_port = 0;
+    if (bind(s, reinterpret_cast<sockaddr*>(&bindAddr), sizeof(bindAddr)) != 0) {
+        closesocket(s);
+        return false;
+    }
+    sockaddr_in bound{};
+    int blen = sizeof(bound);
+    getsockname(s, reinterpret_cast<sockaddr*>(&bound), &blen);
+    g_net.localUdpPort = ntohs(bound.sin_port);
+    g_net.localLanIp = DetectLocalLanIp();
+    g_net.udpSock = s;
+    LOG_INFO("[netplay] opened UDP socket on %s:%u", g_net.localLanIp.c_str(), g_net.localUdpPort);
+    return true;
+}
+
+void FlushTxQueueLocked() {
+    if (g_net.udpSock == INVALID_SOCKET) return;
+    const uint64_t now = MonoUsec();
+    for (auto it = g_net.txQueue.begin(); it != g_net.txQueue.end();) {
+        if (now >= it->deliverAtUsec) {
+            sendto(g_net.udpSock, reinterpret_cast<const char*>(it->bytes.data()),
+                   static_cast<int>(it->bytes.size()), 0,
+                   reinterpret_cast<const sockaddr*>(&it->dst), sizeof(it->dst));
+            ++g_net.snap.packetsSent;
+            it = g_net.txQueue.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void QueueUdpSendLocked(const sockaddr_in& dst, const uint8_t* data, size_t len) {
+    if (g_net.udpSock == INVALID_SOCKET || !data || !len) return;
+    if (g_net.simLossPct > 0) {
+        g_net.simRng = g_net.simRng * 1664525u + 1013904223u;
+        const int roll = static_cast<int>((g_net.simRng >> 16) % 100u);
+        if (roll < g_net.simLossPct) return;  // Simulated packet drop
+    }
+    uint64_t delayUsec = static_cast<uint64_t>(std::max(0, g_net.simOneWayLatencyMs)) * 1000ULL;
+    if (g_net.simJitterMs > 0) {
+        g_net.simRng = g_net.simRng * 1664525u + 1013904223u;
+        const uint32_t j = (g_net.simRng >> 16) % static_cast<uint32_t>(g_net.simJitterMs * 1000 + 1);
+        delayUsec += j;
+    }
+    if (delayUsec == 0) {
+        sendto(g_net.udpSock, reinterpret_cast<const char*>(data), static_cast<int>(len), 0,
+               reinterpret_cast<const sockaddr*>(&dst), sizeof(dst));
+        ++g_net.snap.packetsSent;
+    } else {
+        DelayedPacket dp;
+        dp.deliverAtUsec = MonoUsec() + delayUsec;
+        dp.dst = dst;
+        dp.bytes.assign(data, data + len);
+        g_net.txQueue.push_back(std::move(dp));
+    }
+}
+
+void SendSealedPeerPacketLocked(uint8_t pktType, const void* payload, size_t payloadLen) {
+    if (!g_net.hasSessionKey || g_net.sessionId == 0) return;
+    WireAad aad{};
+    aad.magic = kWireMagic;
+    aad.type = pktType;
+    aad.senderRole = g_net.snap.isHost ? 1 : 2;
+    aad.sessionId = g_net.sessionId;
+
