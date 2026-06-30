@@ -190,3 +190,99 @@ enum class OnlineSubPage : int {
     Home = 0,
     Browser = 1,
     JoinCode = 2,
+    OnlineSettings = 3,
+};
+
+enum class EditTarget : int {
+    None = 0,
+    RoomCode = 1,
+    PlayerName = 2,
+    ServerUrl = 3,
+};
+
+struct OverlayState {
+    bool gpuReady = false;
+    ComPtr<ID3D11VertexShader> vs;
+    ComPtr<ID3D11PixelShader> ps;
+    ComPtr<ID3D11InputLayout> layout;
+    ComPtr<ID3D11Buffer> vb;
+    ComPtr<ID3D11Buffer> cb;
+    ComPtr<ID3D11ShaderResourceView> atlasSrv;
+    ComPtr<ID3D11SamplerState> pointSmp;
+    ComPtr<ID3D11BlendState> alphaBlend;
+    ComPtr<ID3D11RasterizerState> raster;
+    ComPtr<ID3D11DepthStencilState> depthOff;
+    uint32_t vbCap = 0;
+    std::vector<UiVertex> verts;
+
+    // UI state
+    bool open = false;
+    bool checkedStartupFlags = false;
+    int tab = 0;           // 0..5
+    int selectedRow = 0;
+    int rowCount = 1;
+    int mouseX = -1;
+    int mouseY = -1;
+    bool mouseClicked = false;
+    bool mouseDown = false;
+
+    // Hardware lists cached when opening overlay
+    std::vector<core::MonitorInfo> monitors;
+    std::vector<core::AudioDeviceInfo> audioDevices;
+    int selectedResolutionIdx = 2;
+
+    // Display mode confirmation revert timer (Phase 3.6)
+    bool confirmDisplayPending = false;
+    double confirmDisplayDeadlineSec = 0.0;
+    core::Settings backupDisplaySettings;
+
+    // Keybinding capture (Phase 4)
+    int capturingBindId = -1;  // -1 = none, 0..15 = P1/P2 key slot
+
+    // Online UI state (Phases 7 & 8)
+    OnlineSubPage onlinePage = OnlineSubPage::Home;
+    EditTarget editingText = EditTarget::None;
+    std::string joinCodeInput;
+    std::string browserRegion = "all";
+    bool browserAvailableOnly = true;
+    int createStageIndex = 0;
+    bool offerCreateAfterQuickMatch = false;
+    std::vector<net::PublicRoomEntry> publicRooms;
+    std::string onlineBanner;
+    bool onlineBannerIsError = false;
+
+    // Frame timing diagnostics
+    uint64_t lastPresentUsec = 0;
+    uint64_t lastSimUsec = 0;
+    double smoothPresFps = 60.0;
+    double smoothSimHz = 60.0;
+    std::array<float, 120> frameTimesMs{};
+    size_t frameTimeCursor = 0;
+
+    // Controller edge detection for overlay navigation
+    WORD prevPadButtons = 0;
+};
+
+OverlayState g_ui;
+
+double NowSec() {
+    static LARGE_INTEGER freq{};
+    static LARGE_INTEGER start{};
+    if (!freq.QuadPart) {
+        QueryPerformanceFrequency(&freq);
+        QueryPerformanceCounter(&start);
+    }
+    LARGE_INTEGER now{};
+    QueryPerformanceCounter(&now);
+    return static_cast<double>(now.QuadPart - start.QuadPart) / static_cast<double>(freq.QuadPart);
+}
+
+// Atlas layout: 128x64 texels.
+// Cell (0,0) [0..7, 0..7] is solid white (used for solid rectangles).
+// Glyphs 0..94 occupy 16 columns x 6 rows starting at cell index 1.
+void BuildFontAtlas(ID3D11Device* dev) {
+    constexpr uint32_t W = 128, H = 64;
+    std::vector<uint32_t> px(W * H, 0u);
+
+    // Solid white block at cell 0 (top-left 8x8)
+    for (uint32_t y = 0; y < 8; ++y)
