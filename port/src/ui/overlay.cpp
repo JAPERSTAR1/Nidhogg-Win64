@@ -1006,3 +1006,99 @@ bool OnWindowMessage(void* hwnd, uint32_t msg, uint64_t wp, int64_t lp) {
             cfg.displayMode = (cfg.displayMode == core::DisplayMode::Windowed)
                                   ? core::DisplayMode::Borderless
                                   : core::DisplayMode::Windowed;
+            gnm::ApplyDisplaySettings(hwnd);
+            core::SaveSettings(cfg);
+            return true;
+        }
+
+        if (vk == VK_F1 || vk == VK_F10) {
+            g_ui.open = !g_ui.open;
+            g_ui.editingText = EditTarget::None;
+            g_ui.capturingBindId = -1;
+            if (g_ui.open) RefreshHardwareLists();
+            return true;
+        }
+
+        if (!g_ui.open) return false;
+
+        if (g_ui.confirmDisplayPending) {
+            if (vk == VK_RETURN) g_ui.confirmDisplayPending = false;
+            else if (vk == VK_ESCAPE) RevertDisplayChanges(hwnd);
+            return true;
+        }
+
+        if (g_ui.editingText != EditTarget::None) {
+            auto& cfg = core::CurrentSettings();
+            std::string* target = nullptr;
+            size_t maxLen = 64;
+            if (g_ui.editingText == EditTarget::RoomCode) { target = &g_ui.joinCodeInput; maxLen = 6; }
+            else if (g_ui.editingText == EditTarget::PlayerName) { target = &cfg.playerName; maxLen = 24; }
+            else if (g_ui.editingText == EditTarget::ServerUrl) { target = &cfg.lobbyServerUrl; maxLen = 96; }
+
+            if (vk == VK_RETURN || vk == VK_ESCAPE) {
+                g_ui.editingText = EditTarget::None;
+                core::SaveSettings(cfg);
+            } else if (vk == VK_BACK && target && !target->empty()) {
+                target->pop_back();
+            } else if (vk == 'V' && (GetKeyState(VK_CONTROL) & 0x8000) && target) {
+                std::string clip = ReadClipboardText();
+                for (char c : clip) {
+                    if (g_ui.editingText == EditTarget::RoomCode) {
+                        if (std::isalnum(static_cast<unsigned char>(c)) && target->size() < maxLen)
+                            target->push_back(
+                                static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+                    } else if (c >= 32 && c <= 126 && target->size() < maxLen) {
+                        target->push_back(c);
+                    }
+                }
+            }
+            return true;
+        }
+
+        if (vk == VK_ESCAPE) {
+            if (g_ui.tab == 4 && g_ui.onlinePage != OnlineSubPage::Home) {
+                g_ui.onlinePage = OnlineSubPage::Home;
+                g_ui.selectedRow = 0;
+            } else {
+                g_ui.open = false;
+            }
+            return true;
+        }
+        if (vk == VK_TAB) {
+            const int delta = (GetKeyState(VK_SHIFT) & 0x8000) ? 5 : 1;
+            g_ui.tab = (g_ui.tab + delta) % 6;
+            g_ui.selectedRow = 0;
+            return true;
+        }
+        if (vk == VK_UP || vk == 'W') {
+            g_ui.selectedRow = (g_ui.selectedRow + g_ui.rowCount - 1) % std::max(1, g_ui.rowCount);
+            return true;
+        }
+        if (vk == VK_DOWN || vk == 'S') {
+            g_ui.selectedRow = (g_ui.selectedRow + 1) % std::max(1, g_ui.rowCount);
+            return true;
+        }
+        if (vk == VK_LEFT || vk == 'A') {
+            AdjustSettingRow(hwnd, g_ui.tab, g_ui.selectedRow, -1, false);
+            return true;
+        }
+        if (vk == VK_RIGHT || vk == 'D') {
+            AdjustSettingRow(hwnd, g_ui.tab, g_ui.selectedRow, +1, false);
+            return true;
+        }
+        if (vk == VK_RETURN || vk == VK_SPACE) {
+            AdjustSettingRow(hwnd, g_ui.tab, g_ui.selectedRow, +1, true);
+            return true;
+        }
+        return true;
+    }
+
+    if (msg == WM_CHAR && g_ui.open && g_ui.editingText != EditTarget::None) {
+        const wchar_t wc = static_cast<wchar_t>(wp);
+        if (wc >= 32 && wc <= 126) {
+            const char c = static_cast<char>(wc);
+            auto& cfg = core::CurrentSettings();
+            if (g_ui.editingText == EditTarget::RoomCode) {
+                if (std::isalnum(static_cast<unsigned char>(c)) && g_ui.joinCodeInput.size() < 6)
+                    g_ui.joinCodeInput.push_back(
+                        static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
