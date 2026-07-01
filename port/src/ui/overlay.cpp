@@ -910,3 +910,99 @@ void InitOverlay(ID3D11Device* device) {
     device->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &g_ui.ps);
 
     const D3D11_INPUT_ELEMENT_DESC il[] = {
+        {"POSITION", 0, DXGI_FORMAT_R32G32_FLOAT,       0, 0,  D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,       0, 8,  D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"COLOR",    0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 16, D3D11_INPUT_PER_VERTEX_DATA, 0},
+    };
+    device->CreateInputLayout(il, 3, vsb->GetBufferPointer(), vsb->GetBufferSize(), &g_ui.layout);
+
+    D3D11_BUFFER_DESC cbd{};
+    cbd.Usage = D3D11_USAGE_DYNAMIC;
+    cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    cbd.ByteWidth = 16;
+    cbd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    device->CreateBuffer(&cbd, nullptr, &g_ui.cb);
+
+    D3D11_SAMPLER_DESC sd{};
+    sd.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+    sd.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+    sd.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+    sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+    device->CreateSamplerState(&sd, &g_ui.pointSmp);
+
+    D3D11_BLEND_DESC bd{};
+    bd.RenderTarget[0].BlendEnable = TRUE;
+    bd.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
+    bd.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
+    bd.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+    bd.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+    bd.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
+    bd.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+    bd.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+    device->CreateBlendState(&bd, &g_ui.alphaBlend);
+
+    D3D11_RASTERIZER_DESC rd{};
+    rd.FillMode = D3D11_FILL_SOLID;
+    rd.CullMode = D3D11_CULL_NONE;
+    rd.DepthClipEnable = TRUE;
+    device->CreateRasterizerState(&rd, &g_ui.raster);
+
+    D3D11_DEPTH_STENCIL_DESC dd{};
+    dd.DepthEnable = FALSE;
+    dd.StencilEnable = FALSE;
+    device->CreateDepthStencilState(&dd, &g_ui.depthOff);
+
+    BuildFontAtlas(device);
+    g_ui.gpuReady = true;
+}
+
+void ShutdownOverlay() {
+    g_ui.vb.Reset();
+    g_ui.cb.Reset();
+    g_ui.vs.Reset();
+    g_ui.ps.Reset();
+    g_ui.layout.Reset();
+    g_ui.atlasSrv.Reset();
+    g_ui.pointSmp.Reset();
+    g_ui.alphaBlend.Reset();
+    g_ui.raster.Reset();
+    g_ui.depthOff.Reset();
+    g_ui.vbCap = 0;
+    g_ui.gpuReady = false;
+}
+
+void OpenOverlayTab(int tabIndex) {
+    g_ui.open = true;
+    g_ui.tab = std::clamp(tabIndex, 0, 5);
+    g_ui.selectedRow = 0;
+    RefreshHardwareLists();
+}
+
+bool IsOverlayOpen() {
+    return g_ui.open;
+}
+
+bool OnWindowMessage(void* hwnd, uint32_t msg, uint64_t wp, int64_t lp) {
+    if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) {
+        const int vk = static_cast<int>(wp);
+
+        // Keybinding capture mode
+        if (g_ui.open && g_ui.capturingBindId >= 0) {
+            if (vk != VK_ESCAPE && vk != VK_F1 && vk != VK_F10) {
+                auto& cfg = core::CurrentSettings();
+                if (int* slot = KeySlotPtr(cfg, g_ui.capturingBindId)) {
+                    *slot = vk;
+                    core::SaveSettings(cfg);
+                }
+            }
+            g_ui.capturingBindId = -1;
+            return true;
+        }
+
+        // Alt+Enter fullscreen toggle
+        if (vk == VK_RETURN && (GetKeyState(VK_MENU) & 0x8000)) {
+            auto& cfg = core::CurrentSettings();
+            if (!g_ui.confirmDisplayPending) g_ui.backupDisplaySettings = cfg;
+            cfg.displayMode = (cfg.displayMode == core::DisplayMode::Windowed)
+                                  ? core::DisplayMode::Borderless
+                                  : core::DisplayMode::Windowed;
