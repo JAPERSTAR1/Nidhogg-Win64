@@ -1102,3 +1102,99 @@ bool OnWindowMessage(void* hwnd, uint32_t msg, uint64_t wp, int64_t lp) {
                 if (std::isalnum(static_cast<unsigned char>(c)) && g_ui.joinCodeInput.size() < 6)
                     g_ui.joinCodeInput.push_back(
                         static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+            } else if (g_ui.editingText == EditTarget::PlayerName) {
+                if (cfg.playerName.size() < 24) cfg.playerName.push_back(c);
+            } else if (g_ui.editingText == EditTarget::ServerUrl) {
+                if (cfg.lobbyServerUrl.size() < 96) cfg.lobbyServerUrl.push_back(c);
+            }
+        }
+        return true;
+    }
+
+    if (msg == WM_MOUSEMOVE) {
+        g_ui.mouseX = GET_X_LPARAM(lp);
+        g_ui.mouseY = GET_Y_LPARAM(lp);
+        return g_ui.open;
+    }
+    if (msg == WM_LBUTTONDOWN) {
+        g_ui.mouseX = GET_X_LPARAM(lp);
+        g_ui.mouseY = GET_Y_LPARAM(lp);
+        if (g_ui.open) {
+            g_ui.mouseClicked = true;
+            g_ui.mouseDown = true;
+            return true;
+        }
+    }
+    if (msg == WM_LBUTTONUP) {
+        g_ui.mouseDown = false;
+        return g_ui.open;
+    }
+    return false;
+}
+
+void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* context,
+                   uint32_t targetWidth, uint32_t targetHeight, bool isNewSimFrame) {
+    if (!device || !context || !targetWidth || !targetHeight) return;
+    InitOverlay(device);
+    if (!g_ui.gpuReady) return;
+
+    if (!g_ui.checkedStartupFlags && ps4::SubmittedFrames() >= 5) {
+        g_ui.checkedStartupFlags = true;
+        char* v = nullptr;
+        size_t len = 0;
+        if (_dupenv_s(&v, &len, "NIDHOGG_OPEN_ONLINE") == 0 && v && *v == '1') {
+            OpenOverlayTab(4);
+        }
+        if (v) { std::free(v); v = nullptr; }
+        if (_dupenv_s(&v, &len, "NIDHOGG_OPEN_SETTINGS") == 0 && v && *v == '1') {
+            OpenOverlayTab(0);
+        }
+        if (v) std::free(v);
+    }
+
+    net::TickNetplayLobby();
+    PollControllerForOverlay(hwnd);
+
+    // Check 15s display revert timeout
+    if (g_ui.confirmDisplayPending && NowSec() >= g_ui.confirmDisplayDeadlineSec) {
+        RevertDisplayChanges(hwnd);
+    }
+
+    // Update FPS & frame-time diagnostics
+    static LARGE_INTEGER s_qpcFreq{};
+    if (!s_qpcFreq.QuadPart) QueryPerformanceFrequency(&s_qpcFreq);
+    LARGE_INTEGER qpcNow{};
+    QueryPerformanceCounter(&qpcNow);
+    const uint64_t nowUsec = static_cast<uint64_t>(qpcNow.QuadPart * 1000000ULL / s_qpcFreq.QuadPart);
+    if (g_ui.lastPresentUsec != 0 && nowUsec > g_ui.lastPresentUsec) {
+        const float dtMs = static_cast<float>(nowUsec - g_ui.lastPresentUsec) / 1000.0f;
+        const double instFps = 1000.0 / std::max(0.1f, dtMs);
+        g_ui.smoothPresFps = g_ui.smoothPresFps * 0.90 + instFps * 0.10;
+        g_ui.frameTimesMs[g_ui.frameTimeCursor] = dtMs;
+        g_ui.frameTimeCursor = (g_ui.frameTimeCursor + 1) % g_ui.frameTimesMs.size();
+    }
+    g_ui.lastPresentUsec = nowUsec;
+
+    if (isNewSimFrame) {
+        if (g_ui.lastSimUsec != 0 && nowUsec > g_ui.lastSimUsec) {
+            const double dtSimMs = static_cast<double>(nowUsec - g_ui.lastSimUsec) / 1000.0;
+            const double instSimHz = 1000.0 / std::max(0.5, dtSimMs);
+            g_ui.smoothSimHz = g_ui.smoothSimHz * 0.90 + instSimHz * 0.10;
+        }
+        g_ui.lastSimUsec = nowUsec;
+    }
+
+    g_ui.verts.clear();
+    const float W = static_cast<float>(targetWidth);
+    const float H = static_cast<float>(targetHeight);
+    const float S = std::clamp(std::floor(H / 500.0f + 0.4f), 1.0f, 5.0f);
+    const auto& cfg = core::CurrentSettings();
+    const auto netSnap = net::GetSnapshot();
+
+    // ---- 1. Diagnostics HUD (FPS / Frame-Time Graph / Netplay Status) ----
+    float hudY = 12.0f * S;
+    if (cfg.showFps) {
+        char fpsBuf[128];
+        const uint32_t intW = static_cast<uint32_t>(1920.0f * cfg.renderScale + 0.5f);
+        const uint32_t intH = static_cast<uint32_t>(1080.0f * cfg.renderScale + 0.5f);
+        std::snprintf(fpsBuf, sizeof(fpsBuf), "PRES %5.1f FPS | SIM %4.1f Hz | INT %ux%u",
