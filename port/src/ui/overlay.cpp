@@ -1198,3 +1198,99 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
         const uint32_t intW = static_cast<uint32_t>(1920.0f * cfg.renderScale + 0.5f);
         const uint32_t intH = static_cast<uint32_t>(1080.0f * cfg.renderScale + 0.5f);
         std::snprintf(fpsBuf, sizeof(fpsBuf), "PRES %5.1f FPS | SIM %4.1f Hz | INT %ux%u",
+                      g_ui.smoothPresFps, g_ui.smoothSimHz, intW, intH);
+        const float bw = MeasureTextWidth(S, fpsBuf) + 16.0f * S;
+        const float bh = 16.0f * S;
+        DrawRect(12.0f * S, hudY, bw, bh, Rgba(12, 14, 20, 200));
+        DrawOutline(12.0f * S, hudY, bw, bh, 1.0f * S, kColBorder);
+        DrawTextUi(20.0f * S, hudY + 4.0f * S, S, kColGold, fpsBuf);
+        hudY += bh + 6.0f * S;
+    }
+
+    if (cfg.showFrameGraph) {
+        const float gw = 124.0f * 2.0f * S;
+        const float gh = 44.0f * S;
+        DrawRect(12.0f * S, hudY, gw, gh, Rgba(12, 14, 20, 200));
+        DrawOutline(12.0f * S, hudY, gw, gh, 1.0f * S, kColBorder);
+        // 16.67 ms target line
+        const float y16 = hudY + gh - (16.67f / 33.33f) * (gh - 6.0f * S) - 2.0f * S;
+        DrawRect(14.0f * S, y16, gw - 4.0f * S, 1.0f * S, Rgba(72, 214, 122, 120));
+        for (size_t i = 0; i < g_ui.frameTimesMs.size(); ++i) {
+            const size_t idx = (g_ui.frameTimeCursor + i) % g_ui.frameTimesMs.size();
+            const float ms = std::clamp(g_ui.frameTimesMs[idx], 0.0f, 33.33f);
+            const float barH = (ms / 33.33f) * (gh - 6.0f * S);
+            const Color bc = (ms <= 18.0f) ? kColGreen : (ms <= 26.0f ? kColGold : kColRed);
+            DrawRect(14.0f * S + static_cast<float>(i) * 2.0f * S,
+                     hudY + gh - 2.0f * S - barH, 1.6f * S, barH, bc);
+        }
+        hudY += gh + 6.0f * S;
+    }
+
+    if (cfg.showNetStats && netSnap.phase != net::SessionPhase::Offline) {
+        char netBuf[192];
+        const char* tmode =
+            (netSnap.transport == net::TransportMode::DirectP2P) ? "P2P-AES" :
+            (netSnap.transport == net::TransportMode::RelayFallback) ? "RELAY-AES" : "NEGOTIATING";
+        const char* syncTxt = netSnap.desyncDetected ? "DESYNC!" : "SYNC OK";
+        std::snprintf(netBuf, sizeof(netBuf), "ONLINE [%s] P%d | RTT %.1fms | D:%df | %s #%llu",
+                      tmode, netSnap.localPlayerNum, netSnap.rttMs, netSnap.inputDelayFrames,
+                      syncTxt, static_cast<unsigned long long>(netSnap.matchFrame));
+        const float bw = MeasureTextWidth(S, netBuf) + 16.0f * S;
+        const float bh = 16.0f * S;
+        const Color col = netSnap.desyncDetected ? kColRed : kColGreen;
+        DrawRect(W - bw - 12.0f * S, 12.0f * S, bw, bh, Rgba(12, 14, 20, 215));
+        DrawOutline(W - bw - 12.0f * S, 12.0f * S, bw, bh, 1.0f * S, col);
+        DrawTextUi(W - bw - 4.0f * S, 16.0f * S, S, col, netBuf);
+    }
+
+    // ---- 2. Full Settings & Online Overlay (F1) ----
+    if (g_ui.open) {
+        DrawRect(0, 0, W, H, Rgba(6, 8, 14, 175));
+
+        const float pw = std::min(W - 40.0f * S, 460.0f * S);
+        const float ph = std::min(H - 36.0f * S, 360.0f * S);
+        const float px = std::floor((W - pw) * 0.5f);
+        const float py = std::floor((H - ph) * 0.5f);
+
+        DrawRect(px, py, pw, ph, kColPanelBg);
+        DrawOutline(px, py, pw, ph, 2.0f * S, kColGold);
+
+        // Title header
+        DrawRect(px + 2.0f * S, py + 2.0f * S, pw - 4.0f * S, 24.0f * S, kColHeaderBg);
+        DrawTextUi(px + 12.0f * S, py + 9.0f * S, S, kColGold,
+                   "NIDHOGG  //  PC SETTINGS & ONLINE MULTIPLAYER");
+        const std::string closeHint = "[F1 / ESC]";
+        DrawTextUi(px + pw - MeasureTextWidth(S, closeHint) - 12.0f * S, py + 9.0f * S,
+                   S, kColMuted, closeHint);
+
+        // Navigation Tabs
+        const char* tabNames[6] = {"GRAPHICS", "DISPLAY", "AUDIO", "CONTROLS", "ONLINE", "GENERAL"};
+        const float tabY = py + 30.0f * S;
+        const float tabW = (pw - 24.0f * S) / 6.0f;
+        const float tabH = 20.0f * S;
+        for (int t = 0; t < 6; ++t) {
+            const float tx = px + 12.0f * S + t * tabW;
+            const bool hovered = (g_ui.mouseX >= tx && g_ui.mouseX < tx + tabW - 3.0f * S &&
+                                  g_ui.mouseY >= tabY && g_ui.mouseY < tabY + tabH);
+            if (hovered && g_ui.mouseClicked && !g_ui.confirmDisplayPending &&
+                g_ui.capturingBindId < 0) {
+                g_ui.tab = t;
+                g_ui.selectedRow = 0;
+                g_ui.editingText = EditTarget::None;
+            }
+            const bool active = (g_ui.tab == t);
+            DrawRect(tx, tabY, tabW - 3.0f * S, tabH,
+                     active ? kColGold : (hovered ? kColRowHover : kColRowIdle));
+            const Color tc = active ? Rgba(14, 16, 22, 255) : kColText;
+            const float tw = MeasureTextWidth(S, tabNames[t]);
+            DrawTextUi(tx + (tabW - 3.0f * S - tw) * 0.5f, tabY + 6.0f * S, S, tc, tabNames[t]);
+        }
+
+        // Build rows for active tab
+        struct RowItem {
+            std::string label;
+            std::string value;
+            bool isButton = false;
+            Color valColor = kColGold;
+        };
+        std::vector<RowItem> rows;
