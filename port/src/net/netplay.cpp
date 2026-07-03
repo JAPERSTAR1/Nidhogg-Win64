@@ -1150,3 +1150,99 @@ bool JoinRoomByCode(const std::string& roomCode, std::string& outError) {
         udpPort = g_net.localUdpPort;
         lanIp = g_net.localLanIp;
     }
+
+    const auto& cfg = core::CurrentSettings();
+    std::ostringstream body;
+    body << "{\"roomCode\":\"" << JsonEsc(cleanCode) << "\","
+         << "\"playerName\":\"" << JsonEsc(cfg.playerName) << "\","
+         << "\"lanIp\":\"" << JsonEsc(lanIp) << "\","
+         << "\"lanPort\":" << udpPort << "}";
+
+    int status = 0;
+    std::string resp;
+    if (!HttpRequestJson("POST", "/api/rooms/join_code", body.str(), status, resp, outError))
+        return false;
+    if (status != 200) {
+        if (!JsonGetStr(resp, "error", outError) || outError.empty())
+            outError = "Invalid or expired room code.";
+        return false;
+    }
+
+    std::scoped_lock lk(g_net.mtx);
+    g_net.snap = NetStatsSnapshot{};
+    g_net.snap.phase = SessionPhase::LobbyWaiting;
+    g_net.snap.isHost = false;
+    g_net.snap.localPlayerNum = 2;
+    g_net.snap.remoteConnected = true;
+    g_net.snap.statusText = "Joined private room via code — toggle Ready!";
+    JsonGetStr(resp, "authToken", g_net.authToken);
+    ApplyRoomStateFromJsonLocked(resp);
+    SendRegisterEndpointToRelayLocked();
+    g_net.lastHeartbeatUsec = MonoUsec();
+    LOG_INFO("[netplay] joined room by code=%s (id=%s)", cleanCode.c_str(),
+             g_net.snap.roomId.c_str());
+    return true;
+}
+
+bool QuickMatch(const std::string& preferredRegion, bool& outNoRoomsAvailable,
+                std::string& outError) {
+    InitNetplay();
+    outNoRoomsAvailable = false;
+    LeaveRoom();
+
+    uint16_t udpPort = 0;
+    std::string lanIp;
+    {
+        std::scoped_lock lk(g_net.mtx);
+        if (!EnsureUdpSocketLocked()) { outError = "Failed to bind UDP socket."; return false; }
+        udpPort = g_net.localUdpPort;
+        lanIp = g_net.localLanIp;
+    }
+
+    const auto& cfg = core::CurrentSettings();
+    std::ostringstream body;
+    body << "{\"region\":\"" << JsonEsc(preferredRegion.empty() ? cfg.region : preferredRegion) << "\","
+         << "\"playerName\":\"" << JsonEsc(cfg.playerName) << "\","
+         << "\"lanIp\":\"" << JsonEsc(lanIp) << "\","
+         << "\"lanPort\":" << udpPort << "}";
+
+    int status = 0;
+    std::string resp;
+    if (!HttpRequestJson("POST", "/api/quickmatch", body.str(), status, resp, outError))
+        return false;
+    if (status == 404) {
+        outNoRoomsAvailable = true;
+        outError = "No open public rooms found. Create a public room?";
+        return false;
+    }
+    if (status != 200) {
+        if (!JsonGetStr(resp, "error", outError) || outError.empty())
+            outError = "Quick Match failed (HTTP " + std::to_string(status) + ")";
+        return false;
+    }
+
+    std::scoped_lock lk(g_net.mtx);
+    g_net.snap = NetStatsSnapshot{};
+    g_net.snap.phase = SessionPhase::LobbyWaiting;
+    g_net.snap.isHost = false;
+    g_net.snap.localPlayerNum = 2;
+    g_net.snap.remoteConnected = true;
+    g_net.snap.statusText = "Quick Match found opponent! Toggle Ready.";
+    JsonGetStr(resp, "authToken", g_net.authToken);
+    ApplyRoomStateFromJsonLocked(resp);
+    SendRegisterEndpointToRelayLocked();
+    g_net.lastHeartbeatUsec = MonoUsec();
+    LOG_INFO("[netplay] quickmatch joined room id=%s", g_net.snap.roomId.c_str());
+    return true;
+}
+
+bool SetRoomVisibility(bool isPublic, std::string& outError) {
+    std::string roomId, token;
+    {
+        std::scoped_lock lk(g_net.mtx);
+        if (!g_net.snap.isHost || g_net.snap.roomId.empty()) {
+            outError = "Only the room host can change visibility.";
+            return false;
+        }
+        roomId = g_net.snap.roomId;
+        token = g_net.authToken;
