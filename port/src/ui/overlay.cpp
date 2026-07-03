@@ -1390,3 +1390,99 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
             if (netSnap.phase == net::SessionPhase::LobbyWaiting ||
                 netSnap.phase == net::SessionPhase::ConnectingTransport ||
                 netSnap.phase == net::SessionPhase::SyncingMenu ||
+                netSnap.phase == net::SessionPhase::InMatch) {
+                const std::string visStr = netSnap.isPublic ? "PUBLIC ROOM" : "PRIVATE ROOM";
+                const std::string p1Line = netSnap.hostName + (netSnap.isHost
+                    ? (netSnap.localReady ? " [READY]" : " [NOT READY]")
+                    : (netSnap.remoteReady ? " [READY]" : " [NOT READY]"));
+                const std::string p2Line = netSnap.remoteConnected
+                    ? (netSnap.guestName + (!netSnap.isHost
+                        ? (netSnap.localReady ? " [READY]" : " [NOT READY]")
+                        : (netSnap.remoteReady ? " [READY]" : " [NOT READY]")))
+                    : "(Waiting for Player 2...)";
+
+                rows.push_back({"Room Code (" + visStr + ")",
+                                netSnap.roomCode + "  [Copy]", true, kColGold});
+                rows.push_back({"Ready Status (" + std::to_string(netSnap.playerCount) + "/2)  " +
+                                    p1Line + " vs " + p2Line,
+                                netSnap.localReady ? "READY" : "NOT READY", true,
+                                netSnap.localReady ? kColGreen : kColGold});
+                rows.push_back({"Switch Room Visibility",
+                                netSnap.isHost ? (netSnap.isPublic ? "Make PRIVATE" : "Make PUBLIC")
+                                               : "Host Only",
+                                true, netSnap.isHost ? kColGold : kColMuted});
+                rows.push_back({"[ START ONLINE MATCH ]",
+                                netSnap.isHost ? StageName(netSnap.stageIndex) : "Waiting on Host",
+                                true, netSnap.isHost ? kColGreen : kColMuted});
+                rows.push_back({"Host Kick Challenger",
+                                (netSnap.isHost && netSnap.remoteConnected) ? "Kick P2" : "---",
+                                true, kColRed});
+                rows.push_back({"[ Leave / Close Room ]", "Disconnect", true, kColRed});
+                footerNote = netSnap.statusText;
+            } else if (g_ui.onlinePage == OnlineSubPage::Home) {
+                rows.push_back({g_ui.offerCreateAfterQuickMatch
+                                    ? "1. [ Create Public Room Now ]"
+                                    : "1. Quick Match",
+                                g_ui.offerCreateAfterQuickMatch ? "No open room found" : "Auto-Match",
+                                true, kColGreen});
+                rows.push_back({"2. Browse Public Rooms", "Server List", true, kColGold});
+                rows.push_back({"3. Create Public Room", "Visible in Browser", true, kColGold});
+                rows.push_back({"4. Create Private Room", "Hidden (6-Char Code)", true, kColGold});
+                rows.push_back({"5. Join Private Room", "Enter Room Code", true, kColGold});
+                rows.push_back({"   Host Stage Selection", StageName(g_ui.createStageIndex)});
+                rows.push_back({"6. Online Settings", cfg.playerName + " @ " + cfg.region, true, kColMuted});
+                footerNote = g_ui.onlineBanner.empty()
+                                 ? "Native P2P encrypted UDP lockstep + automatic relay fallback."
+                                 : g_ui.onlineBanner;
+            } else if (g_ui.onlinePage == OnlineSubPage::Browser) {
+                rows.push_back({"[ Refresh Public Rooms ]",
+                                std::to_string(g_ui.publicRooms.size()) + " found", true, kColGreen});
+                rows.push_back({"Region Filter", g_ui.browserRegion});
+                rows.push_back({"Available Rooms Only", g_ui.browserAvailableOnly ? "Yes (1/2)" : "All"});
+                rows.push_back({"[ < Back to Online Menu ]", "Esc", true, kColMuted});
+                for (const auto& rm : g_ui.publicRooms) {
+                    char info[96];
+                    std::snprintf(info, sizeof(info), "%s | %d/%d | ~%dms | %s [JOIN]",
+                                  rm.region.c_str(), rm.playerCount, rm.maxPlayers,
+                                  rm.estimatedPingMs, rm.status.c_str());
+                    rows.push_back({rm.roomName, info, true,
+                                    rm.playerCount < rm.maxPlayers ? kColGreen : kColMuted});
+                }
+                footerNote = g_ui.onlineBanner.empty()
+                                 ? "Private rooms are never shown in public listings."
+                                 : g_ui.onlineBanner;
+            } else if (g_ui.onlinePage == OnlineSubPage::JoinCode) {
+                const std::string shown = g_ui.joinCodeInput +
+                                          (g_ui.editingText == EditTarget::RoomCode ? "_" : "");
+                rows.push_back({"6-Char Room Code", shown.empty() ? "(Type Code)" : shown, true, kColGold});
+                rows.push_back({"[ Paste Code from Clipboard ]", "Ctrl+V", true, kColMuted});
+                rows.push_back({"[ JOIN PRIVATE ROOM ]", "Connect", true, kColGreen});
+                rows.push_back({"[ < Back ]", "Esc", true, kColMuted});
+                footerNote = g_ui.onlineBanner.empty()
+                                 ? "Type the 6-character code shared by the room host."
+                                 : g_ui.onlineBanner;
+            } else if (g_ui.onlinePage == OnlineSubPage::OnlineSettings) {
+                rows.push_back({"Player Name",
+                                cfg.playerName + (g_ui.editingText == EditTarget::PlayerName ? "_" : ""),
+                                true});
+                rows.push_back({"Preferred Region", cfg.region});
+                rows.push_back({"Lockstep Input Delay", std::to_string(cfg.inputDelayFrames) + " frames"});
+                rows.push_back({"Lobby Server URL",
+                                cfg.lobbyServerUrl + (g_ui.editingText == EditTarget::ServerUrl ? "_" : ""),
+                                true});
+                rows.push_back({"[ < Back to Online Menu ]", "Save & Return", true, kColGreen});
+                footerNote = "Click Player Name or Server URL to edit text (Ctrl+V supported).";
+            }
+        } else if (g_ui.tab == 5) {
+            rows.push_back({"Game Language", "English (Original CUSA00920)"});
+            rows.push_back({"Show FPS Counter", cfg.showFps ? "Shown" : "Hidden"});
+            rows.push_back({"Show Frame-Time Graph", cfg.showFrameGraph ? "Shown" : "Hidden"});
+            rows.push_back({"Show Network Statistics", cfg.showNetStats ? "Shown" : "Hidden"});
+            rows.push_back({"Startup Mode", cfg.launchDirectly ? "Direct to Game" : "Show Launcher"});
+            rows.push_back({"[ Reset All Settings to Defaults ]", "Reset", true, kColRed});
+            rows.push_back({"[ Resume Game ]", "F1", true, kColGreen});
+            rows.push_back({"[ Quit to Desktop ]", "Clean Exit", true, kColRed});
+            footerNote = "Settings saved automatically to " + core::ConfigFilePath();
+        }
+
+        g_ui.rowCount = static_cast<int>(rows.size());
