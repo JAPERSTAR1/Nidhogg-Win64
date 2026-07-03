@@ -1486,3 +1486,99 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
         }
 
         g_ui.rowCount = static_cast<int>(rows.size());
+        if (g_ui.selectedRow >= g_ui.rowCount) g_ui.selectedRow = std::max(0, g_ui.rowCount - 1);
+
+        // Scrollable row viewport (displays up to 11 rows cleanly)
+        const int maxVis = 11;
+        int startRow = 0;
+        if (g_ui.rowCount > maxVis) {
+            startRow = std::clamp(g_ui.selectedRow - maxVis / 2, 0, g_ui.rowCount - maxVis);
+        }
+        const int endRow = std::min(g_ui.rowCount, startRow + maxVis);
+
+        float ry = tabY + tabH + 10.0f * S;
+        const float rowH = 22.0f * S;
+        const float rowX = px + 12.0f * S;
+        const float rowW = pw - 24.0f * S;
+
+        for (int r = startRow; r < endRow; ++r) {
+            const bool hovered = (g_ui.mouseX >= rowX && g_ui.mouseX < rowX + rowW &&
+                                  g_ui.mouseY >= ry && g_ui.mouseY < ry + rowH - 2.0f * S);
+            if (hovered && !g_ui.confirmDisplayPending && g_ui.capturingBindId < 0) {
+                g_ui.selectedRow = r;
+                if (g_ui.mouseClicked) {
+                    const int clickDir = (!rows[r].isButton && g_ui.mouseX > rowX + rowW * 0.72f)
+                                             ? ((g_ui.mouseX > rowX + rowW * 0.86f) ? +1 : -1)
+                                             : +1;
+                    AdjustSettingRow(hwnd, g_ui.tab, r, clickDir, true);
+                }
+            }
+            const bool sel = (g_ui.selectedRow == r);
+            DrawRect(rowX, ry, rowW, rowH - 2.0f * S,
+                     sel ? kColRowFocus : (hovered ? kColRowHover : kColRowIdle));
+            if (sel) DrawOutline(rowX, ry, rowW, rowH - 2.0f * S, 1.0f * S, kColGoldDim);
+
+            std::string lbl = rows[r].label;
+            if (lbl.size() > 34) lbl.resize(34);
+            DrawTextUi(rowX + 8.0f * S, ry + 6.0f * S, S, kColText, lbl);
+
+            std::string val = rows[r].isButton ? rows[r].value : ("< " + rows[r].value + " >");
+            if (val.size() > 30) val = val.substr(0, 30);
+            const float vw = MeasureTextWidth(S, val);
+            DrawTextUi(rowX + rowW - vw - 8.0f * S, ry + 6.0f * S, S, rows[r].valColor, val);
+            ry += rowH;
+        }
+
+        // Footer bar
+        DrawRect(px + 2.0f * S, py + ph - 24.0f * S, pw - 4.0f * S, 22.0f * S, kColHeaderBg);
+        if (footerNote.size() > 54) footerNote.resize(54);
+        const Color footCol = (g_ui.tab == 4 && g_ui.onlineBannerIsError) ? kColRed : kColMuted;
+        DrawTextUi(px + 10.0f * S, py + ph - 16.0f * S, S, footCol, footerNote);
+
+        // 15-Second Display Mode Confirmation Modal
+        if (g_ui.confirmDisplayPending) {
+            DrawRect(px, py, pw, ph, Rgba(6, 8, 14, 220));
+            const float mw = 320.0f * S, mh = 110.0f * S;
+            const float mx = px + (pw - mw) * 0.5f, my = py + (ph - mh) * 0.5f;
+            DrawRect(mx, my, mw, mh, kColHeaderBg);
+            DrawOutline(mx, my, mw, mh, 2.0f * S, kColGold);
+            DrawTextUi(mx + 14.0f * S, my + 14.0f * S, S, kColGold, "KEEP DISPLAY SETTINGS?");
+            char timerMsg[96];
+            const int rem = std::max(0, static_cast<int>(std::ceil(g_ui.confirmDisplayDeadlineSec - NowSec())));
+            std::snprintf(timerMsg, sizeof(timerMsg), "Reverting automatically in %d seconds...", rem);
+            DrawTextUi(mx + 14.0f * S, my + 38.0f * S, S, kColText, timerMsg);
+            DrawTextUi(mx + 14.0f * S, my + 62.0f * S, S, kColGreen, "[ENTER] Keep Changes");
+            DrawTextUi(mx + 14.0f * S, my + 82.0f * S, S, kColRed,   "[ESC]   Revert Now");
+        }
+    }
+
+    g_ui.mouseClicked = false;
+    if (g_ui.verts.empty()) return;
+
+    // Upload and draw UI batch
+    if (!g_ui.vb || g_ui.vbCap < g_ui.verts.size()) {
+        g_ui.vb.Reset();
+        g_ui.vbCap = static_cast<uint32_t>(g_ui.verts.size() + 1024);
+        D3D11_BUFFER_DESC vbd{};
+        vbd.Usage = D3D11_USAGE_DYNAMIC;
+        vbd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+        vbd.ByteWidth = g_ui.vbCap * sizeof(UiVertex);
+        vbd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        if (FAILED(device->CreateBuffer(&vbd, nullptr, &g_ui.vb))) return;
+    }
+
+    D3D11_MAPPED_SUBRESOURCE map{};
+    if (SUCCEEDED(context->Map(g_ui.vb.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &map))) {
+        std::memcpy(map.pData, g_ui.verts.data(), g_ui.verts.size() * sizeof(UiVertex));
+        context->Unmap(g_ui.vb.Get(), 0);
+    }
+    if (SUCCEEDED(context->Map(g_ui.cb.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &map))) {
+        const float cbData[4] = {1.0f / W, 1.0f / H, 0.0f, 0.0f};
+        std::memcpy(map.pData, cbData, sizeof(cbData));
+        context->Unmap(g_ui.cb.Get(), 0);
+    }
+
+    const D3D11_VIEWPORT vp{0.0f, 0.0f, W, H, 0.0f, 1.0f};
+    context->RSSetViewports(1, &vp);
+    context->RSSetState(g_ui.raster.Get());
+    context->OMSetDepthStencilState(g_ui.depthOff.Get(), 0);
