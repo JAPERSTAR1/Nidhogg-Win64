@@ -94,3 +94,99 @@ for ($t = 0; $t -lt 60; $t++) {
         if ($hwnd -eq [IntPtr]::Zero) { $hwnd = $proc.MainWindowHandle }
         if ($hwnd -ne [IntPtr]::Zero) {
             [WinCloseHelper2]::PostMessageW($hwnd, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+            $closedViaWm = $proc.WaitForExit(5000)
+            break
+        }
+    }
+}
+if (-not $proc.HasExited) { $proc.Kill() }
+Clear-QaEnv
+$logReload = Get-Content (Join-Path $u1 "logs\nidhogg.log") -Raw
+Record-Check "Save Data" "Save loading persistence on relaunch" `
+    ($prefsExists -and (-not ($logReload -match "0x809f0008"))) `
+    "SAVEDATA00 mounted & prefs.bin loaded with 0 mount errors"
+Record-Check "Startup & Menus" "Clean exit via Win32 WM_CLOSE & repeated launch" `
+    ($closedViaWm -and ($proc.ExitCode -eq 0)) `
+    "WM_CLOSE handled=$closedViaWm, exitCode=$($proc.ExitCode)"
+
+# ---------------------------------------------------------------------------
+# 2. Save Data Resilience: Truncated, Corrupted CRC/NaN, and Read-Only
+# ---------------------------------------------------------------------------
+$uCorrupt1 = Join-Path $outRoot "u_save_truncated"
+New-Item -ItemType Directory -Force -Path (Join-Path $uCorrupt1 "config"), (Join-Path $uCorrupt1 "saves\SAVEDATA00") | Out-Null
+Set-Content -Path (Join-Path $uCorrupt1 "config\settings.json") -Value '{ "vsync": 0 }'
+[System.IO.File]::WriteAllBytes((Join-Path $uCorrupt1 "saves\SAVEDATA00\prefs.bin"), [byte[]]@(1,2,3,4,5))
+$env:NIDHOGG_QA_UNFOCUSED = "1"
+$env:NIDHOGG_UNCAPPED = "1"
+$env:NIDHOGG_SCREENSHOT_DIR = Join-Path $uCorrupt1 "shots"
+$env:NIDHOGG_SCREENSHOT = "130,220"
+$env:NIDHOGG_AUTOPRESS = "90:0x4000:8,160:0x4000:10"
+& $exe --no-prompt --user-dir $uCorrupt1 --assets $assets --max-frames 260 | Out-Null
+$ecC1 = $LASTEXITCODE
+Clear-QaEnv
+$logC1 = Get-Content (Join-Path $uCorrupt1 "logs\nidhogg.log") -Raw
+Record-Check "Save Data" "Truncated 5-byte prefs.bin recovery to rMainMenu" `
+    (($ecC1 -eq 0) -and ($logC1 -match "Created room rMainMenu")) `
+    "exit=$ecC1, showed recovery prompt & recovered to rMainMenu"
+
+$uCorrupt2 = Join-Path $outRoot "u_save_badcrc"
+New-Item -ItemType Directory -Force -Path (Join-Path $uCorrupt2 "config"), (Join-Path $uCorrupt2 "saves\SAVEDATA00") | Out-Null
+Set-Content -Path (Join-Path $uCorrupt2 "config\settings.json") -Value '{ "vsync": 0 }'
+[System.IO.File]::WriteAllBytes((Join-Path $uCorrupt2 "saves\SAVEDATA00\prefs.bin"), [byte[]](@(0xFF)*16))
+$env:NIDHOGG_QA_UNFOCUSED = "1"
+$env:NIDHOGG_UNCAPPED = "1"
+$env:NIDHOGG_AUTOPRESS = "90:0x4000:8,160:0x4000:10"
+& $exe --no-prompt --user-dir $uCorrupt2 --assets $assets --max-frames 260 | Out-Null
+$ecC2 = $LASTEXITCODE
+Clear-QaEnv
+$logC2 = Get-Content (Join-Path $uCorrupt2 "logs\nidhogg.log") -Raw
+Record-Check "Save Data" "Corrupted 16-byte NaN/bad-CRC prefs.bin recovery" `
+    (($ecC2 -eq 0) -and ($logC2 -match "Created room rMainMenu")) `
+    "exit=$ecC2, recovered cleanly with default settings"
+
+$uRo = Join-Path $outRoot "u_save_readonly"
+New-Item -ItemType Directory -Force -Path (Join-Path $uRo "config"), (Join-Path $uRo "saves\SAVEDATA00") | Out-Null
+Set-Content -Path (Join-Path $uRo "config\settings.json") -Value '{ "vsync": 0 }'
+$roPath = Join-Path $uRo "saves\SAVEDATA00\prefs.bin"
+Copy-Item $prefsFile $roPath -Force
+Set-ItemProperty -Path $roPath -Name IsReadOnly -Value $true
+$env:NIDHOGG_QA_UNFOCUSED = "1"
+$env:NIDHOGG_UNCAPPED = "1"
+$env:NIDHOGG_AUTOPRESS = "100:0x4000:8,160:0x4000:8,280:0x4000:8,330:0x0040:6,360:0x0040:6,390:0x4000:8,430:0x0080:14,470:0x2000:8"
+& $exe --no-prompt --user-dir $uRo --assets $assets --max-frames 540 | Out-Null
+$ecRo = $LASTEXITCODE
+Set-ItemProperty -Path $roPath -Name IsReadOnly -Value $false
+Clear-QaEnv
+$logRo = Get-Content (Join-Path $uRo "logs\nidhogg.log") -Raw
+Record-Check "Save Data" "Filesystem write-permission failure (read-only prefs.bin)" `
+    (($ecRo -eq 0) -and ($logRo -match "0x8002000d")) `
+    "exit=$ecRo, graceful SCE_KERNEL_ERROR_EACCES (0x8002000d) without crash"
+
+# ---------------------------------------------------------------------------
+# 3. All 4 Worlds Verification (Castle, Wilds, Mines, Clouds/Sky)
+# ---------------------------------------------------------------------------
+$worlds = @(
+    @{ Name = "Castle"; Nav = "";                             Room = "rCastleCenter"; StartF = 440 },
+    @{ Name = "Wilds";  Nav = ",430:0x0040:8";                Room = "rWildsCenter";  StartF = 485 },
+    @{ Name = "Mines";  Nav = ",430:0x0040:8,475:0x0040:8";   Room = "rMinesCenter";  StartF = 530 },
+    @{ Name = "Clouds"; Nav = ",430:0x0010:8";                Room = "rSkyCenter";    StartF = 485 }
+)
+foreach ($w in $worlds) {
+    $uw = Join-Path $outRoot ("u_world_" + $w.Name)
+    New-Item -ItemType Directory -Force -Path (Join-Path $uw "config") | Out-Null
+    Set-Content -Path (Join-Path $uw "config\settings.json") -Value '{ "vsync": 0 }'
+    $sf = $w.StartF
+    $seq = "100:0x4000:8,280:0x4000:8,330:0x4000:8,380:0x4000:8" + $w.Nav + ",${sf}:0x4000:8,$($sf+80):0x8000:10,$($sf+100):0x0020:60"
+    $shotFrame = $sf + 140
+    $env:NIDHOGG_QA_UNFOCUSED = "1"
+    $env:NIDHOGG_UNCAPPED = "1"
+    $env:NIDHOGG_SCREENSHOT_DIR = Join-Path $uw "shots"
+    $env:NIDHOGG_SCREENSHOT = "$shotFrame"
+    $env:NIDHOGG_AUTOPRESS = $seq
+    $env:NIDHOGG_AUTOPRESS_P2 = "$($sf+90):0x0080:40,$($sf+105):0x8000:8"
+    & $exe --no-prompt --user-dir $uw --assets $assets --max-frames ($shotFrame + 30) | Out-Null
+    $ecW = $LASTEXITCODE
+    Clear-QaEnv
+    $logW = Get-Content (Join-Path $uw "logs\nidhogg.log") -Raw
+    $shotOk = Test-Path (Join-Path $uw "shots\shot_${shotFrame}.png")
+    Record-Check "Worlds & Rendering" ("Stage load + 2P combat + screenshot: " + $w.Name) `
