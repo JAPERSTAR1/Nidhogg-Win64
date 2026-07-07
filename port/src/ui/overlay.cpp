@@ -1582,3 +1582,23 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
     context->RSSetViewports(1, &vp);
     context->RSSetState(g_ui.raster.Get());
     context->OMSetDepthStencilState(g_ui.depthOff.Get(), 0);
+    const float bf[4] = {1, 1, 1, 1};
+    context->OMSetBlendState(g_ui.alphaBlend.Get(), bf, 0xffffffffu);
+
+    const UINT stride = sizeof(UiVertex), offset = 0;
+    ID3D11Buffer* vb = g_ui.vb.Get();
+    ID3D11Buffer* cb = g_ui.cb.Get();
+    ID3D11ShaderResourceView* srv = g_ui.atlasSrv.Get();
+    ID3D11SamplerState* smp = g_ui.pointSmp.Get();
+    context->IASetVertexBuffers(0, 1, &vb, &stride, &offset);
+    context->IASetInputLayout(g_ui.layout.Get());
+    context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    context->VSSetShader(g_ui.vs.Get(), nullptr, 0);
+    context->VSSetConstantBuffers(0, 1, &cb);
+    context->PSSetShader(g_ui.ps.Get(), nullptr, 0);
+    context->PSSetShaderResources(0, 1, &srv);
+    context->PSSetSamplers(0, 1, &smp);
+    context->Draw(static_cast<UINT>(g_ui.verts.size()), 0);
+}
+
+}  // namespace ps4::ui
