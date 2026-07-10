@@ -286,3 +286,99 @@ void BuildFontAtlas(ID3D11Device* dev) {
 
     // Solid white block at cell 0 (top-left 8x8)
     for (uint32_t y = 0; y < 8; ++y)
+        for (uint32_t x = 0; x < 8; ++x)
+            px[y * W + x] = 0xFFFFFFFFu;
+
+    for (int gi = 0; gi < 95; ++gi) {
+        const int cell = gi + 1;
+        const int cx = (cell % 16) * 8;
+        const int cy = (cell / 16) * 8;
+        for (int r = 0; r < 8; ++r) {
+            const uint8_t bits = kFont8x8[gi][r];
+            for (int c = 0; c < 8; ++c) {
+                if (bits & (0x80u >> c)) {
+                    px[(cy + r) * W + (cx + c)] = 0xFFFFFFFFu;
+                }
+            }
+        }
+    }
+
+    D3D11_TEXTURE2D_DESC td{};
+    td.Width = W;
+    td.Height = H;
+    td.MipLevels = 1;
+    td.ArraySize = 1;
+    td.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    td.SampleDesc.Count = 1;
+    td.Usage = D3D11_USAGE_IMMUTABLE;
+    td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    D3D11_SUBRESOURCE_DATA sd{px.data(), W * 4, 0};
+    ComPtr<ID3D11Texture2D> tex;
+    if (SUCCEEDED(dev->CreateTexture2D(&td, &sd, &tex))) {
+        dev->CreateShaderResourceView(tex.Get(), nullptr, &g_ui.atlasSrv);
+    }
+}
+
+void PushQuad(float x, float y, float w, float h, float u0, float v0, float u1, float v1,
+              Color c) {
+    const float x1 = x + w, y1 = y + h;
+    g_ui.verts.push_back({x,  y,  u0, v0, c.r, c.g, c.b, c.a});
+    g_ui.verts.push_back({x1, y,  u1, v0, c.r, c.g, c.b, c.a});
+    g_ui.verts.push_back({x1, y1, u1, v1, c.r, c.g, c.b, c.a});
+    g_ui.verts.push_back({x,  y,  u0, v0, c.r, c.g, c.b, c.a});
+    g_ui.verts.push_back({x1, y1, u1, v1, c.r, c.g, c.b, c.a});
+    g_ui.verts.push_back({x,  y1, u0, v1, c.r, c.g, c.b, c.a});
+}
+
+void DrawRect(float x, float y, float w, float h, Color c) {
+    const float u = 2.0f / 128.0f;
+    const float v = 2.0f / 64.0f;
+    PushQuad(x, y, w, h, u, v, u, v, c);
+}
+
+void DrawOutline(float x, float y, float w, float h, float thick, Color c) {
+    DrawRect(x, y, w, thick, c);
+    DrawRect(x, y + h - thick, w, thick, c);
+    DrawRect(x, y, thick, h, c);
+    DrawRect(x + w - thick, y, thick, h, c);
+}
+
+void DrawTextUi(float x, float y, float scale, Color c, const std::string& text) {
+    const float glyphW = 8.0f * scale;
+    const float glyphH = 8.0f * scale;
+    float cx = x;
+    for (unsigned char ch : text) {
+        if (ch == '\n') {
+            cx = x;
+            y += glyphH + 4.0f * scale;
+            continue;
+        }
+        if (ch < 32 || ch > 126) ch = '?';
+        const int cell = (ch - 32) + 1;
+        const float u0 = ((cell % 16) * 8) / 128.0f;
+        const float v0 = ((cell / 16) * 8) / 64.0f;
+        const float u1 = u0 + 8.0f / 128.0f;
+        const float v1 = v0 + 8.0f / 64.0f;
+        PushQuad(cx, y, glyphW, glyphH, u0, v0, u1, v1, c);
+        cx += glyphW;
+    }
+}
+
+float MeasureTextWidth(float scale, const std::string& text) {
+    return static_cast<float>(text.size()) * 8.0f * scale;
+}
+
+void RefreshHardwareLists() {
+    g_ui.monitors = core::EnumerateMonitors();
+    g_ui.audioDevices = core::EnumerateAudioDevices();
+    const auto& cfg = core::CurrentSettings();
+    const int mi = std::clamp(cfg.monitorIndex, 0,
+                              std::max(0, static_cast<int>(g_ui.monitors.size()) - 1));
+    if (!g_ui.monitors.empty()) {
+        const auto& modes = g_ui.monitors[mi].modes;
+        for (size_t i = 0; i < modes.size(); ++i) {
+            if (modes[i].width == cfg.displayWidth && modes[i].height == cfg.displayHeight) {
+                g_ui.selectedResolutionIdx = static_cast<int>(i);
+                break;
+            }
+        }
