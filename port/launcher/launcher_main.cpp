@@ -142,3 +142,99 @@ void AsyncCheckServerStatus(HWND hwnd, std::string configuredUrl) {
     }).detach();
 }
 
+std::string GetControlUtf8(HWND ctrl) {
+    int len = GetWindowTextLengthW(ctrl);
+    if (len <= 0) return {};
+    std::wstring w(static_cast<size_t>(len) + 1, L'\0');
+    GetWindowTextW(ctrl, w.data(), len + 1);
+    w.resize(static_cast<size_t>(len));
+    return ps4::core::WideToUtf8(w);
+}
+
+void PullUiIntoSettings() {
+    auto& s = ps4::core::CurrentSettings();
+    int dm = static_cast<int>(SendMessageW(g_cmbMode, CB_GETCURSEL, 0, 0));
+    if (dm >= 0 && dm <= 2) s.displayMode = static_cast<ps4::core::DisplayMode>(dm);
+
+    int ri = static_cast<int>(SendMessageW(g_cmbRes, CB_GETCURSEL, 0, 0));
+    if (ri >= 0 && ri < static_cast<int>(std::size(kResList))) {
+        s.displayWidth = kResList[ri].w;
+        s.displayHeight = kResList[ri].h;
+    }
+
+    int qi = static_cast<int>(SendMessageW(g_cmbQual, CB_GETCURSEL, 0, 0));
+    if (qi >= 0 && qi <= 3) {
+        ps4::core::ApplyQualityPreset(s, static_cast<ps4::core::QualityPreset>(qi));
+    }
+
+    std::string nm = GetControlUtf8(g_edtName);
+    if (!nm.empty()) s.playerName = nm;
+    std::string url = GetControlUtf8(g_edtUrl);
+    if (!url.empty()) s.lobbyServerUrl = url;
+    ps4::core::SaveSettings(s);
+}
+
+void RefreshAssetStatus(bool showPopup) {
+    auto& s = ps4::core::CurrentSettings();
+    auto v = ps4::core::AutoDiscoverAssets(s, nullptr);
+    if (v.valid && s.assetPath != v.rootDir) {
+        s.assetPath = v.rootDir;
+        ps4::core::SaveSettings(s);
+    }
+    std::wstring statusText = ps4::core::Utf8ToWide(
+        v.valid ? ("READY: " + v.rootDir) : ("MISSING GAME FILES: " + v.summary));
+    SetWindowTextW(g_lblAssets, statusText.c_str());
+
+    if (showPopup) {
+        MessageBoxW(g_hwnd, statusText.c_str(),
+                    v.valid ? L"Game Files Verified" : L"Game Files Incomplete",
+                    v.valid ? (MB_ICONINFORMATION | MB_OK) : (MB_ICONWARNING | MB_OK));
+    }
+}
+
+void LaunchGameExe(const wchar_t* extraFlag) {
+    PullUiIntoSettings();
+    auto& s = ps4::core::CurrentSettings();
+    auto v = ps4::core::AutoDiscoverAssets(s, nullptr);
+    if (!v.valid) {
+        int r = MessageBoxW(
+            g_hwnd,
+            L"Nidhogg game files (eboot.bin + Data\\) have not been selected yet.\n\n"
+            L"Select your CUSA00920 game folder now?",
+            L"Nidhogg — Game Files Required", MB_ICONQUESTION | MB_YESNO);
+        if (r == IDYES) {
+            std::string chosen;
+            if (ps4::core::PromptForAssetDirectoryGui(g_hwnd, chosen)) {
+                auto cv = ps4::core::ValidateAssetsAt(chosen);
+                if (cv.valid) {
+                    s.assetPath = cv.rootDir;
+                    ps4::core::SaveSettings(s);
+                    v = cv;
+                    RefreshAssetStatus(false);
+                } else {
+                    std::wstring werr = ps4::core::Utf8ToWide(cv.summary);
+                    MessageBoxW(g_hwnd, werr.c_str(), L"Invalid Game Folder", MB_ICONERROR | MB_OK);
+                    return;
+                }
+            } else {
+                return;
+            }
+        } else {
+            return;
+        }
+    }
+
+    const std::string exeDir = ps4::core::ExeDir();
+    std::string gameExe = exeDir + "\\Nidhogg.exe";
+    if (!ps4::core::FileExistsUtf8(gameExe)) gameExe = exeDir + "\\nidhogg_host.exe";
+    if (!ps4::core::FileExistsUtf8(gameExe)) {
+        MessageBoxW(g_hwnd, L"Could not find Nidhogg.exe next to NidhoggLauncher.exe.",
+                    L"Launch Error", MB_ICONERROR | MB_OK);
+        return;
+    }
+
+    std::wstring cmd = L"\"" + ps4::core::Utf8ToWide(gameExe) + L"\"";
+    if (extraFlag && *extraFlag) {
+        cmd += L" ";
+        cmd += extraFlag;
+    }
