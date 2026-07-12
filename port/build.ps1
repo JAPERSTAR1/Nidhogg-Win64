@@ -23,8 +23,10 @@ if ($Target -eq "clean") {
 }
 
 New-Item -ItemType Directory -Force -Path $out | Out-Null
-
 New-Item -ItemType Directory -Force -Path (Join-Path $out "c") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $out "srv") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $out "lnch") | Out-Null
+
 $cpp = Get-ChildItem (Join-Path $root "src") -Recurse -Filter *.cpp | ForEach-Object { '"' + $_.FullName + '"' }
 $csrc = Get-ChildItem (Join-Path $root "src") -Recurse -Filter *.c | ForEach-Object { '"' + $_.FullName + '"' }
 $cStep = if ($csrc) { "cl /nologo /c /TC /O2 /MT /W0 /Fo:`"$out\c\\`" $($csrc -join ' ') && " } else { "" }
