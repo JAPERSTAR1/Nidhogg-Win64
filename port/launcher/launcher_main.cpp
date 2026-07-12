@@ -430,3 +430,74 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR cmdLine, int) {
     // Settings controls
     mkLabel(L"Display Mode:", 24, 118, 130, 22, g_fontUi);
     g_cmbMode = CreateWindowExW(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
+                                160, 114, 220, 140, g_hwnd,
+                                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_CMB_MODE)), hInst, nullptr);
+    SendMessageW(g_cmbMode, WM_SETFONT, reinterpret_cast<WPARAM>(g_fontUi), TRUE);
+    SendMessageW(g_cmbMode, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Windowed"));
+    SendMessageW(g_cmbMode, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Borderless Windowed"));
+    SendMessageW(g_cmbMode, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Exclusive Fullscreen"));
+    SendMessageW(g_cmbMode, CB_SETCURSEL, static_cast<WPARAM>(cfg.displayMode), 0);
+
+    mkLabel(L"Resolution:", 24, 152, 130, 22, g_fontUi);
+    g_cmbRes = CreateWindowExW(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
+                               160, 148, 220, 160, g_hwnd,
+                               reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_CMB_RES)), hInst, nullptr);
+    SendMessageW(g_cmbRes, WM_SETFONT, reinterpret_cast<WPARAM>(g_fontUi), TRUE);
+    int selRes = 2;
+    for (int i = 0; i < static_cast<int>(std::size(kResList)); ++i) {
+        SendMessageW(g_cmbRes, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(kResList[i].label));
+        if (kResList[i].w == cfg.displayWidth && kResList[i].h == cfg.displayHeight) selRes = i;
+    }
+    SendMessageW(g_cmbRes, CB_SETCURSEL, selRes, 0);
+
+    mkLabel(L"Graphics Quality:", 24, 186, 130, 22, g_fontUi);
+    g_cmbQual = CreateWindowExW(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
+                                160, 182, 220, 160, g_hwnd,
+                                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_CMB_QUAL)), hInst, nullptr);
+    SendMessageW(g_cmbQual, WM_SETFONT, reinterpret_cast<WPARAM>(g_fontUi), TRUE);
+    for (const wchar_t* q : {L"Low (0.5x)", L"Medium (1.0x)", L"High (1.0x Native)", L"Ultra (2.0x SSAA)", L"Custom"})
+        SendMessageW(g_cmbQual, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(q));
+    SendMessageW(g_cmbQual, CB_SETCURSEL, static_cast<WPARAM>(cfg.qualityPreset), 0);
+
+    mkLabel(L"Online Name:", 24, 220, 130, 22, g_fontUi);
+    std::wstring wName = ps4::core::Utf8ToWide(cfg.playerName);
+    g_edtName = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", wName.c_str(),
+                                WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 160, 217, 220, 24, g_hwnd,
+                                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDT_NAME)), hInst, nullptr);
+    SendMessageW(g_edtName, WM_SETFONT, reinterpret_cast<WPARAM>(g_fontUi), TRUE);
+
+    mkLabel(L"Lobby Server:", 24, 254, 130, 22, g_fontUi);
+    std::wstring wUrl = ps4::core::Utf8ToWide(cfg.lobbyServerUrl);
+    g_edtUrl = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", wUrl.c_str(),
+                               WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 160, 251, 280, 24, g_hwnd,
+                               reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDT_URL)), hInst, nullptr);
+    SendMessageW(g_edtUrl, WM_SETFONT, reinterpret_cast<WPARAM>(g_fontUi), TRUE);
+
+    // Primary Play / Online / Settings buttons
+    mkBtn(L"PLAY NIDHOGG",       IDC_BTN_PLAY,     24,  302, 200, 46, g_fontBold);
+    mkBtn(L"ONLINE MULTIPLAYER", IDC_BTN_ONLINE,   236, 302, 205, 46, g_fontBold);
+    mkBtn(L"SETTINGS (F1)",      IDC_BTN_SETTINGS, 452, 302, 190, 46, g_fontBold);
+
+    // Utility buttons
+    mkBtn(L"Game Files...",      IDC_BTN_BROWSE,   24,  366, 148, 36, g_fontUi);
+    mkBtn(L"Verify Game Files",  IDC_BTN_VERIFY,   182, 366, 148, 36, g_fontUi);
+    mkBtn(L"Open Save Folder",   IDC_BTN_SAVES,    340, 366, 148, 36, g_fontUi);
+    mkBtn(L"View Logs",          IDC_BTN_LOGS,     498, 366, 144, 36, g_fontUi);
+
+    g_btnServer = mkBtn(FindServerProcessId() ? L"Stop Local Server" : L"Start Local Server",
+                        IDC_BTN_SERVER, 24, 418, 200, 36, g_fontUi);
+    mkBtn(L"Save & Exit",        IDC_BTN_EXIT,     498, 418, 144, 36, g_fontUi);
+
+    mkLabel(L"Tip: Press F1 inside the game at any time to adjust Graphics, Audio, Controls, or Online Rooms.",
+            24, 468, 620, 22, g_fontUi);
+
+    RefreshAssetStatus(false);
+    AsyncCheckServerStatus(g_hwnd, cfg.lobbyServerUrl);
+
+    MSG msg{};
+    while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+    return 0;
+}
