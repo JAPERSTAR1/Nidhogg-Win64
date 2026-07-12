@@ -670,3 +670,147 @@ void AdjustSettingRow(void* hwnd, int tab, int row, int dir, bool activated) {
                         if (g_ui.offerCreateAfterQuickMatch) {
                             g_ui.offerCreateAfterQuickMatch = false;
                             if (!net::CreateRoom("", true, g_ui.createStageIndex, err)) {
+                                g_ui.onlineBanner = err;
+                                g_ui.onlineBannerIsError = true;
+                            }
+                        } else {
+                            bool noRooms = false;
+                            if (!net::QuickMatch(cfg.region, noRooms, err)) {
+                                g_ui.offerCreateAfterQuickMatch = noRooms;
+                                g_ui.onlineBanner = err;
+                                g_ui.onlineBannerIsError = !noRooms;
+                            }
+                        }
+                    }
+                    break;
+                case 1:  // Browse Public Rooms
+                    if (activated) {
+                        g_ui.onlinePage = OnlineSubPage::Browser;
+                        g_ui.selectedRow = 0;
+                        if (!net::RefreshPublicRooms(g_ui.browserRegion, g_ui.browserAvailableOnly,
+                                                     g_ui.publicRooms, err)) {
+                            g_ui.onlineBanner = err;
+                            g_ui.onlineBannerIsError = true;
+                        } else {
+                            g_ui.onlineBanner = "Loaded " + std::to_string(g_ui.publicRooms.size()) +
+                                                " public room(s).";
+                            g_ui.onlineBannerIsError = false;
+                        }
+                    }
+                    break;
+                case 2:  // Create Public Room
+                    if (activated) {
+                        if (!net::CreateRoom("", true, g_ui.createStageIndex, err)) {
+                            g_ui.onlineBanner = err;
+                            g_ui.onlineBannerIsError = true;
+                        }
+                    }
+                    break;
+                case 3:  // Create Private Room
+                    if (activated) {
+                        if (!net::CreateRoom("", false, g_ui.createStageIndex, err)) {
+                            g_ui.onlineBanner = err;
+                            g_ui.onlineBannerIsError = true;
+                        }
+                    }
+                    break;
+                case 4:  // Join Private Room by Code
+                    if (activated) {
+                        g_ui.onlinePage = OnlineSubPage::JoinCode;
+                        g_ui.editingText = EditTarget::RoomCode;
+                        g_ui.selectedRow = 0;
+                    }
+                    break;
+                case 5:  // Preferred Stage
+                    g_ui.createStageIndex = (g_ui.createStageIndex + (dir ? dir : 1) + 4) % 4;
+                    break;
+                case 6:  // Online Settings
+                    if (activated) {
+                        g_ui.onlinePage = OnlineSubPage::OnlineSettings;
+                        g_ui.selectedRow = 0;
+                    }
+                    break;
+            }
+        } else if (g_ui.onlinePage == OnlineSubPage::Browser) {
+            if (row == 0 && activated) {
+                if (!net::RefreshPublicRooms(g_ui.browserRegion, g_ui.browserAvailableOnly,
+                                             g_ui.publicRooms, err)) {
+                    g_ui.onlineBanner = err;
+                    g_ui.onlineBannerIsError = true;
+                }
+            } else if (row == 1) {
+                const char* regs[] = {"all", "us-east", "us-west", "eu-west", "ap-east"};
+                int idx = 0;
+                for (int i = 0; i < 5; ++i) if (g_ui.browserRegion == regs[i]) idx = i;
+                idx = (idx + (dir ? dir : 1) + 5) % 5;
+                g_ui.browserRegion = regs[idx];
+                net::RefreshPublicRooms(g_ui.browserRegion, g_ui.browserAvailableOnly,
+                                        g_ui.publicRooms, err);
+            } else if (row == 2) {
+                g_ui.browserAvailableOnly = !g_ui.browserAvailableOnly;
+                net::RefreshPublicRooms(g_ui.browserRegion, g_ui.browserAvailableOnly,
+                                        g_ui.publicRooms, err);
+            } else if (row == 3 && activated) {
+                g_ui.onlinePage = OnlineSubPage::Home;
+                g_ui.selectedRow = 1;
+            } else if (row >= 4 && activated) {
+                const size_t rIdx = static_cast<size_t>(row - 4);
+                if (rIdx < g_ui.publicRooms.size()) {
+                    if (!net::JoinRoomById(g_ui.publicRooms[rIdx].roomId, err)) {
+                        g_ui.onlineBanner = err;
+                        g_ui.onlineBannerIsError = true;
+                    } else {
+                        g_ui.onlinePage = OnlineSubPage::Home;
+                    }
+                }
+            }
+        } else if (g_ui.onlinePage == OnlineSubPage::JoinCode) {
+            if (row == 0 && activated) {
+                g_ui.editingText = EditTarget::RoomCode;
+            } else if (row == 1 && activated) {
+                std::string clip = ReadClipboardText();
+                g_ui.joinCodeInput.clear();
+                for (char c : clip) {
+                    if (std::isalnum(static_cast<unsigned char>(c)) && g_ui.joinCodeInput.size() < 6)
+                        g_ui.joinCodeInput.push_back(
+                            static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+                }
+            } else if (row == 2 && activated) {
+                g_ui.editingText = EditTarget::None;
+                if (!net::JoinRoomByCode(g_ui.joinCodeInput, err)) {
+                    g_ui.onlineBanner = err;
+                    g_ui.onlineBannerIsError = true;
+                } else {
+                    g_ui.onlinePage = OnlineSubPage::Home;
+                }
+            } else if (row == 3 && activated) {
+                g_ui.editingText = EditTarget::None;
+                g_ui.onlinePage = OnlineSubPage::Home;
+                g_ui.selectedRow = 4;
+            }
+        } else if (g_ui.onlinePage == OnlineSubPage::OnlineSettings) {
+            switch (row) {
+                case 0:
+                    if (activated) g_ui.editingText = (g_ui.editingText == EditTarget::PlayerName)
+                                                          ? EditTarget::None
+                                                          : EditTarget::PlayerName;
+                    break;
+                case 1: {
+                    const char* regs[] = {"us-east", "us-west", "eu-west", "ap-east"};
+                    int idx = 0;
+                    for (int i = 0; i < 4; ++i) if (cfg.region == regs[i]) idx = i;
+                    idx = (idx + (dir ? dir : 1) + 4) % 4;
+                    cfg.region = regs[idx];
+                    save = true;
+                    break;
+                }
+                case 2:
+                    cfg.inputDelayFrames = std::clamp(cfg.inputDelayFrames + (dir ? dir : 1), 1, 8);
+                    save = true;
+                    break;
+                case 3:
+                    if (activated) g_ui.editingText = (g_ui.editingText == EditTarget::ServerUrl)
+                                                          ? EditTarget::None
+                                                          : EditTarget::ServerUrl;
+                    break;
+                case 4:
