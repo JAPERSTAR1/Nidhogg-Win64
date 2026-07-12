@@ -334,3 +334,99 @@ LRESULT CALLBACK LauncherProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     break;
                 }
                 case IDC_BTN_LOGS: {
+                    std::wstring dir = ps4::core::Utf8ToWide(ps4::core::LogsDirPath());
+                    ShellExecuteW(hwnd, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                    break;
+                }
+                case IDC_BTN_SERVER: ToggleLocalServer(); break;
+                case IDC_BTN_EXIT:   PullUiIntoSettings(); DestroyWindow(hwnd); break;
+            }
+            return 0;
+        }
+        case WM_CLOSE:
+            PullUiIntoSettings();
+            DestroyWindow(hwnd);
+            return 0;
+        case WM_DESTROY:
+            PostQuitMessage(0);
+            return 0;
+        default:
+            return DefWindowProcW(hwnd, msg, wp, lp);
+    }
+}
+
+}  // namespace
+
+int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR cmdLine, int) {
+    SetProcessDPIAware();
+    INITCOMMONCONTROLSEX icc{sizeof(icc), ICC_STANDARD_CLASSES};
+    InitCommonControlsEx(&icc);
+
+    auto& cfg = ps4::core::CurrentSettings();
+    ps4::core::LoadSettings(cfg);
+
+    // If user enabled "Launch Directly Into Game" and didn't pass `--launcher`, launch straight in
+    if (cfg.launchDirectly && (!cmdLine || std::wcsstr(cmdLine, L"--launcher") == nullptr)) {
+        auto v = ps4::core::AutoDiscoverAssets(cfg, nullptr);
+        if (v.valid) {
+            std::wstring gameExe = ps4::core::Utf8ToWide(ps4::core::ExeDir() + "\\Nidhogg.exe");
+            STARTUPINFOW si{sizeof(si)};
+            PROCESS_INFORMATION pi{};
+            if (CreateProcessW(gameExe.c_str(), nullptr, nullptr, nullptr, FALSE, 0, nullptr,
+                               nullptr, &si, &pi)) {
+                CloseHandle(pi.hThread);
+                CloseHandle(pi.hProcess);
+                return 0;
+            }
+        }
+    }
+
+    g_bgBrush = CreateSolidBrush(RGB(20, 23, 34));
+    g_panelBrush = CreateSolidBrush(RGB(30, 34, 48));
+    g_fontTitle = CreateFontW(-24, 0, 0, 0, FW_EXTRABOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                              OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                              DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+    g_fontBold = CreateFontW(-15, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                             DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+    g_fontUi = CreateFontW(-14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                           OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                           DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+
+    WNDCLASSW wc{};
+    wc.lpfnWndProc = LauncherProc;
+    wc.hInstance = hInst;
+    wc.hCursor = LoadCursorW(nullptr, reinterpret_cast<LPCWSTR>(IDC_ARROW));
+    wc.hIcon = LoadIconW(nullptr, reinterpret_cast<LPCWSTR>(IDI_APPLICATION));
+    wc.hbrBackground = g_bgBrush;
+    wc.lpszClassName = L"NidhoggLauncherClass";
+    RegisterClassW(&wc);
+
+    const int W = 680, H = 540;
+    const int sx = (GetSystemMetrics(SM_CXSCREEN) - W) / 2;
+    const int sy = (GetSystemMetrics(SM_CYSCREEN) - H) / 2;
+    g_hwnd = CreateWindowExW(0, wc.lpszClassName, L"Nidhogg Launcher",
+                             WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_VISIBLE,
+                             sx, sy, W, H, nullptr, nullptr, hInst, nullptr);
+
+    auto mkLabel = [&](const wchar_t* txt, int x, int y, int w, int h, HFONT f) {
+        HWND c = CreateWindowExW(0, L"STATIC", txt, WS_CHILD | WS_VISIBLE, x, y, w, h, g_hwnd,
+                                 nullptr, hInst, nullptr);
+        SendMessageW(c, WM_SETFONT, reinterpret_cast<WPARAM>(f), TRUE);
+        return c;
+    };
+    auto mkBtn = [&](const wchar_t* txt, int id, int x, int y, int w, int h, HFONT f) {
+        HWND c = CreateWindowExW(0, L"BUTTON", txt, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                 x, y, w, h, g_hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),
+                                 hInst, nullptr);
+        SendMessageW(c, WM_SETFONT, reinterpret_cast<WPARAM>(f), TRUE);
+        return c;
+    };
+
+    mkLabel(L"NIDHOGG  —  WINDOWS x64 EDITION", 24, 18, 620, 32, g_fontTitle);
+    g_lblAssets = mkLabel(L"Checking game files...", 24, 56, 620, 22, g_fontUi);
+    g_lblServer = mkLabel(L"Checking multiplayer server...", 24, 80, 620, 22, g_fontUi);
+
+    // Settings controls
+    mkLabel(L"Display Mode:", 24, 118, 130, 22, g_fontUi);
+    g_cmbMode = CreateWindowExW(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
