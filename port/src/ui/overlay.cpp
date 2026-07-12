@@ -574,3 +574,99 @@ void AdjustSettingRow(void* hwnd, int tab, int row, int dir, bool activated) {
                     int cur = 0;
                     for (int i = 0; i < n; ++i)
                         if (g_ui.audioDevices[i].id == cfg.audioDeviceId) cur = i;
+                    cur = (cur + (dir ? dir : 1) + n) % n;
+                    cfg.audioDeviceId = g_ui.audioDevices[cur].id;
+                    save = true;
+                }
+                break;
+            }
+        }
+    } else if (tab == 3) {  // Controls
+        if (row == 0) {
+            cfg.p1Controller = ((cfg.p1Controller + 1) + (dir ? dir : 1) + 5) % 5 - 1;
+            save = true;
+        } else if (row == 1) {
+            cfg.p2Controller = ((cfg.p2Controller + 1) + (dir ? dir : 1) + 5) % 5 - 1;
+            save = true;
+        } else if (row == 2) {
+            cfg.vibration = !cfg.vibration;
+            save = true;
+        } else if (row >= 3 && row <= 18 && activated) {
+            g_ui.capturingBindId = row - 3;
+        } else if (row == 19 && activated) {
+            const auto def = core::MakeDefaultSettings();
+            cfg.p1Keys = def.p1Keys;
+            cfg.p2Keys = def.p2Keys;
+            cfg.p1Controller = def.p1Controller;
+            cfg.p2Controller = def.p2Controller;
+            save = true;
+        }
+    } else if (tab == 4) {  // Online
+        const auto snap = net::GetSnapshot();
+        std::string err;
+        if (snap.phase == net::SessionPhase::LobbyWaiting ||
+            snap.phase == net::SessionPhase::ConnectingTransport ||
+            snap.phase == net::SessionPhase::SyncingMenu ||
+            snap.phase == net::SessionPhase::InMatch) {
+            // Active Room Lobby controls
+            switch (row) {
+                case 0:
+                    if (activated && net::CopyRoomCodeToClipboard()) {
+                        g_ui.onlineBanner = "Copied Room Code (" + snap.roomCode + ") to clipboard.";
+                        g_ui.onlineBannerIsError = false;
+                    }
+                    break;
+                case 1:
+                    if (activated) {
+                        if (!net::SetReady(!snap.localReady, err)) {
+                            g_ui.onlineBanner = err;
+                            g_ui.onlineBannerIsError = true;
+                        }
+                    }
+                    break;
+                case 2:
+                    if (activated && snap.isHost) {
+                        if (net::SetRoomVisibility(!snap.isPublic, err)) {
+                            g_ui.onlineBanner = !snap.isPublic
+                                ? "Switched room to PUBLIC."
+                                : "Switched room to PRIVATE (hidden from browser).";
+                            g_ui.onlineBannerIsError = false;
+                        } else {
+                            g_ui.onlineBanner = err;
+                            g_ui.onlineBannerIsError = true;
+                        }
+                    }
+                    break;
+                case 3:
+                    if (activated && snap.isHost) {
+                        if (net::StartMatch(err)) {
+                            g_ui.open = false;  // Close overlay as synchronized match begins!
+                        } else {
+                            g_ui.onlineBanner = err;
+                            g_ui.onlineBannerIsError = true;
+                        }
+                    }
+                    break;
+                case 4:
+                    if (activated && snap.isHost && snap.remoteConnected) {
+                        if (!net::KickGuest(err)) {
+                            g_ui.onlineBanner = err;
+                            g_ui.onlineBannerIsError = true;
+                        }
+                    }
+                    break;
+                case 5:
+                    if (activated) {
+                        net::LeaveRoom();
+                        g_ui.onlineBanner = "Left online room.";
+                        g_ui.onlineBannerIsError = false;
+                    }
+                    break;
+            }
+        } else if (g_ui.onlinePage == OnlineSubPage::Home) {
+            switch (row) {
+                case 0:  // Quick Match (or Create Public Room after empty Quick Match)
+                    if (activated) {
+                        if (g_ui.offerCreateAfterQuickMatch) {
+                            g_ui.offerCreateAfterQuickMatch = false;
+                            if (!net::CreateRoom("", true, g_ui.createStageIndex, err)) {
