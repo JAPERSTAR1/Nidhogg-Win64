@@ -814,3 +814,99 @@ void AdjustSettingRow(void* hwnd, int tab, int row, int dir, bool activated) {
                                                           : EditTarget::ServerUrl;
                     break;
                 case 4:
+                    if (activated) {
+                        g_ui.editingText = EditTarget::None;
+                        g_ui.onlinePage = OnlineSubPage::Home;
+                        g_ui.selectedRow = 6;
+                    }
+                    break;
+            }
+        }
+    } else if (tab == 5) {  // General
+        switch (row) {
+            case 0: break;  // Language (English only)
+            case 1: cfg.showFps = !cfg.showFps; save = true; break;
+            case 2: cfg.showFrameGraph = !cfg.showFrameGraph; save = true; break;
+            case 3: cfg.showNetStats = !cfg.showNetStats; save = true; break;
+            case 4: cfg.launchDirectly = !cfg.launchDirectly; save = true; break;
+            case 5:
+                if (activated) {
+                    core::ResetSettingsToDefaults();
+                    RefreshHardwareLists();
+                    gnm::ApplyDisplaySettings(hwnd);
+                }
+                break;
+            case 6:
+                if (activated) g_ui.open = false;
+                break;
+            case 7:
+                if (activated) ps4::RequestQuit();
+                break;
+        }
+    }
+
+    if (save) core::SaveSettings(cfg);
+}
+
+void PollControllerForOverlay(void* hwnd) {
+    XINPUT_STATE xi{};
+    if (XInputGetState(0, &xi) != ERROR_SUCCESS) return;
+    const WORD b = xi.Gamepad.wButtons;
+    const WORD pressed = b & ~g_ui.prevPadButtons;
+    g_ui.prevPadButtons = b;
+
+    // Select/Back + Start toggles native Settings/Online overlay on controller
+    if ((b & XINPUT_GAMEPAD_BACK) && (pressed & XINPUT_GAMEPAD_START)) {
+        g_ui.open = !g_ui.open;
+        if (g_ui.open) RefreshHardwareLists();
+        return;
+    }
+    if (!g_ui.open || g_ui.capturingBindId >= 0) return;
+
+    if (g_ui.confirmDisplayPending) {
+        if (pressed & XINPUT_GAMEPAD_A) {
+            g_ui.confirmDisplayPending = false;
+        } else if (pressed & XINPUT_GAMEPAD_B) {
+            RevertDisplayChanges(hwnd);
+        }
+        return;
+    }
+
+    if (pressed & XINPUT_GAMEPAD_LEFT_SHOULDER) {
+        g_ui.tab = (g_ui.tab + 5) % 6;
+        g_ui.selectedRow = 0;
+    } else if (pressed & XINPUT_GAMEPAD_RIGHT_SHOULDER) {
+        g_ui.tab = (g_ui.tab + 1) % 6;
+        g_ui.selectedRow = 0;
+    } else if (pressed & XINPUT_GAMEPAD_DPAD_UP) {
+        g_ui.selectedRow = (g_ui.selectedRow + g_ui.rowCount - 1) % std::max(1, g_ui.rowCount);
+    } else if (pressed & XINPUT_GAMEPAD_DPAD_DOWN) {
+        g_ui.selectedRow = (g_ui.selectedRow + 1) % std::max(1, g_ui.rowCount);
+    } else if (pressed & XINPUT_GAMEPAD_DPAD_LEFT) {
+        AdjustSettingRow(hwnd, g_ui.tab, g_ui.selectedRow, -1, false);
+    } else if (pressed & XINPUT_GAMEPAD_DPAD_RIGHT) {
+        AdjustSettingRow(hwnd, g_ui.tab, g_ui.selectedRow, +1, false);
+    } else if (pressed & XINPUT_GAMEPAD_A) {
+        AdjustSettingRow(hwnd, g_ui.tab, g_ui.selectedRow, +1, true);
+    } else if (pressed & XINPUT_GAMEPAD_B) {
+        g_ui.open = false;
+    }
+}
+
+}  // namespace
+
+void InitOverlay(ID3D11Device* device) {
+    if (g_ui.gpuReady || !device) return;
+
+    ComPtr<ID3DBlob> vsb, psb, err;
+    if (FAILED(D3DCompile(kUiShader, std::strlen(kUiShader), "ui.hlsl", nullptr, nullptr,
+                          "VSMain", "vs_5_0", D3DCOMPILE_ENABLE_STRICTNESS, 0, &vsb, &err)))
+        return;
+    if (FAILED(D3DCompile(kUiShader, std::strlen(kUiShader), "ui.hlsl", nullptr, nullptr,
+                          "PSMain", "ps_5_0", D3DCOMPILE_ENABLE_STRICTNESS, 0, &psb, &err)))
+        return;
+
+    device->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &g_ui.vs);
+    device->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &g_ui.ps);
+
+    const D3D11_INPUT_ELEMENT_DESC il[] = {
