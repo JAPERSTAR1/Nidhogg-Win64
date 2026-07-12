@@ -1,0 +1,12 @@
+# Example Cloudflare Tunnel configuration for https://lobby.japer.me (+ wss://lobby.japer.me/ws)
+# Generated automatically by .\deploy\setup-lobby-japer-me.ps1 — never commit real credentials JSON.
+tunnel: <YOUR-TUNNEL-UUID>
+credentials-file: C:\Users\<YOU>\.cloudflared\<YOUR-TUNNEL-UUID>.json
+
+ingress:
+  - hostname: lobby.japer.me
+    service: http://127.0.0.1:27880
+    originRequest:
+      connectTimeout: 10s
+      keepAliveTimeout: 90s
+  - service: http_status:404
