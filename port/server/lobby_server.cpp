@@ -1006,3 +1006,71 @@ int main(int argc, char** argv) {
             g_udpPort = static_cast<uint16_t>(std::atoi(argv[++i]));
         } else if (std::strcmp(argv[i], "--bind") == 0 && i + 1 < argc) {
             bindIp = argv[++i];
+        } else if (std::strcmp(argv[i], "--max-rooms") == 0 && i + 1 < argc) {
+            g_maxRooms = std::max(1, std::atoi(argv[++i]));
+        }
+    }
+
+    SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
+    WSADATA wsa{};
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+    g_startSec = NowMs() / 1000ULL;
+
+    SOCKET listenSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (listenSock == INVALID_SOCKET) {
+        std::fprintf(stderr, "[server] TCP socket() failed\n");
+        return 1;
+    }
+    int excl = 1;
+    setsockopt(listenSock, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, reinterpret_cast<const char*>(&excl),
+               sizeof(excl));
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(g_httpPort);
+    if (inet_pton(AF_INET, bindIp.c_str(), &addr.sin_addr) != 1)
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+    if (bind(listenSock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0 ||
+        listen(listenSock, SOMAXCONN) != 0) {
+        std::fprintf(stderr, "[server] Failed to bind/listen on %s:%u (already running?)\n",
+                     bindIp.c_str(), g_httpPort);
+        closesocket(listenSock);
+        return 1;
+    }
+
+    SOCKET udpSock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (udpSock != INVALID_SOCKET) {
+        sockaddr_in uaddr = addr;
+        uaddr.sin_port = htons(g_udpPort);
+        if (bind(udpSock, reinterpret_cast<sockaddr*>(&uaddr), sizeof(uaddr)) == 0) {
+            std::thread(RunUdpRelayLoop, udpSock).detach();
+        } else {
+            closesocket(udpSock);
+            udpSock = INVALID_SOCKET;
+        }
+    }
+
+    std::printf("Nidhogg Multiplayer Server (%s) listening:\n", kExpectedProtocol);
+    std::printf("  HTTP Lobby + WebSocket Relay : http://%s:%u  (and /ws)\n",
+                bindIp.c_str(), g_httpPort);
+    if (udpSock != INVALID_SOCKET) {
+        std::printf("  Direct UDP Endpoint / Relay  : udp://%s:%u\n", bindIp.c_str(), g_udpPort);
+    }
+    std::fflush(stdout);
+
+    while (g_running.load()) {
+        sockaddr_in caddr{};
+        int clen = sizeof(caddr);
+        SOCKET client = accept(listenSock, reinterpret_cast<sockaddr*>(&caddr), &clen);
+        if (client == INVALID_SOCKET) continue;
+        char ipStr[64]{};
+        inet_ntop(AF_INET, &caddr.sin_addr, ipStr, sizeof(ipStr));
+        std::thread(HandleHttpClient, client, std::string(ipStr)).detach();
+    }
+
+    closesocket(listenSock);
+    if (udpSock != INVALID_SOCKET) closesocket(udpSock);
+    WSACleanup();
+    return 0;
+}
