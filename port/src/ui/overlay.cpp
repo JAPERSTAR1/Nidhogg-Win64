@@ -1294,3 +1294,99 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
             Color valColor = kColGold;
         };
         std::vector<RowItem> rows;
+        std::string footerNote;
+
+        if (g_ui.tab == 0) {
+            const char* qNames[] = {"Low", "Medium", "High", "Ultra", "Custom"};
+            const char* fNames[] = {"Pixel Point (Original)", "Sharp Bilinear (Pixel AA)",
+                                    "Bilinear Smooth", "Anisotropic"};
+            const char* vNames[] = {"Off (Lowest Latency)", "On", "Adaptive"};
+            char scaleBuf[64], fpsCapBuf[64], anisoBuf[16];
+            std::snprintf(scaleBuf, sizeof(scaleBuf), "%.2fx (%ux%u)", cfg.renderScale,
+                          static_cast<uint32_t>(1920 * cfg.renderScale + 0.5f),
+                          static_cast<uint32_t>(1080 * cfg.renderScale + 0.5f));
+            if (cfg.presentationFpsLimit == 0) std::strcpy(fpsCapBuf, "Unlimited (Sim 60 Hz)");
+            else std::snprintf(fpsCapBuf, sizeof(fpsCapBuf), "%d FPS (Sim 60 Hz)", cfg.presentationFpsLimit);
+            std::snprintf(anisoBuf, sizeof(anisoBuf), "%dx", cfg.anisotropy);
+
+            rows.push_back({"Quality Preset", qNames[static_cast<int>(cfg.qualityPreset) % 5]});
+            rows.push_back({"Internal Render Scale", scaleBuf});
+            rows.push_back({"Texture / Shader Filter", fNames[static_cast<int>(cfg.textureFilter) % 4]});
+            rows.push_back({"Anisotropic Filtering", anisoBuf});
+            rows.push_back({"Scanline Post-FX", cfg.postScanlines ? "Enabled" : "Off"});
+            rows.push_back({"Vertical Sync (VSync)", vNames[static_cast<int>(cfg.vsync) % 3]});
+            rows.push_back({"Presentation Buffering", cfg.swapBuffers == 3 ? "Triple (3)" : "Double (2)"});
+            rows.push_back({"Presentation FPS Limit", fpsCapBuf});
+            footerNote = "Original 60.00 Hz physics & combat speed is always preserved.";
+        } else if (g_ui.tab == 1) {
+            if (g_ui.monitors.empty()) RefreshHardwareLists();
+            const char* dmNames[] = {"Windowed", "Borderless Windowed", "Exclusive Fullscreen"};
+            const int mi = std::clamp(cfg.monitorIndex, 0,
+                                      std::max(0, static_cast<int>(g_ui.monitors.size()) - 1));
+            std::string monLabel = g_ui.monitors.empty()
+                ? "Primary Display"
+                : ("#" + std::to_string(mi) + " " + std::to_string(g_ui.monitors[mi].width) + "x" +
+                   std::to_string(g_ui.monitors[mi].height));
+            std::string resLabel = std::to_string(cfg.displayWidth) + " x " +
+                                   std::to_string(cfg.displayHeight);
+            rows.push_back({"Display Mode", dmNames[static_cast<int>(cfg.displayMode) % 3]});
+            rows.push_back({"Target Monitor", monLabel});
+            rows.push_back({"Display Resolution", resLabel});
+            rows.push_back({"Aspect Scaling", cfg.aspectMode == core::AspectMode::IntegerScale
+                                                  ? "Integer Pixel Scale"
+                                                  : "Preserve 16:9 (Letterbox)"});
+            rows.push_back({"[ APPLY DISPLAY SETTINGS ]", "Enter / Click", true, kColGreen});
+            footerNote = "Display mode changes auto-revert in 15s unless confirmed. Alt+Enter toggles Fullscreen.";
+        } else if (g_ui.tab == 2) {
+            if (g_ui.audioDevices.empty()) RefreshHardwareLists();
+            auto pct = [](float v) {
+                char b[32];
+                std::snprintf(b, sizeof(b), "%d%%", static_cast<int>(std::round(v * 100.0f)));
+                return std::string(b);
+            };
+            std::string devName = "Windows Default";
+            for (const auto& ad : g_ui.audioDevices)
+                if (ad.id == cfg.audioDeviceId) devName = ad.name;
+            if (devName.size() > 28) devName.resize(28);
+            rows.push_back({"Master Volume", pct(cfg.masterVolume)});
+            rows.push_back({"Music Volume (ATRAC9)", pct(cfg.musicVolume)});
+            rows.push_back({"Sound Effects Volume", pct(cfg.sfxVolume)});
+            rows.push_back({"Mute All Audio", cfg.mute ? "Muted" : "Unmuted",
+                            false, cfg.mute ? kColRed : kColGreen});
+            rows.push_back({"Audio Output Device", devName});
+            footerNote = "Audio levels and output device switch live without restarting.";
+        } else if (g_ui.tab == 3) {
+            auto padStr = [](int idx) {
+                return idx < 0 ? std::string("Disabled") : ("XInput Pad " + std::to_string(idx + 1));
+            };
+            rows.push_back({"Player 1 Controller", padStr(cfg.p1Controller)});
+            rows.push_back({"Player 2 Controller", padStr(cfg.p2Controller)});
+            rows.push_back({"Controller Vibration", cfg.vibration ? "Enabled" : "Off"});
+            const char* actNames[16] = {
+                "P1 Up", "P1 Down", "P1 Left", "P1 Right",
+                "P1 Jump / Confirm", "P1 Attack / Throw", "P1 Back", "P1 Start",
+                "P2 Up", "P2 Down", "P2 Left", "P2 Right",
+                "P2 Jump / Confirm", "P2 Attack / Throw", "P2 Back", "P2 Start",
+            };
+            auto& mutCfg = core::CurrentSettings();
+            for (int i = 0; i < 16; ++i) {
+                int* kp = KeySlotPtr(mutCfg, i);
+                std::string kn = (g_ui.capturingBindId == i)
+                                     ? ">> PRESS KEY <<"
+                                     : core::VirtualKeyName(kp ? *kp : 0);
+                rows.push_back({actNames[i], kn, true,
+                                g_ui.capturingBindId == i ? kColGreen : kColGold});
+            }
+            rows.push_back({"[ Reset Controls to Defaults ]", "Reset", true, kColMuted});
+
+            const auto conflicts = core::DetectKeyConflicts(cfg);
+            if (!conflicts.empty()) {
+                footerNote = "CONFLICT: " + conflicts[0].actionA + " & " + conflicts[0].actionB +
+                             " both bound to [" + core::VirtualKeyName(conflicts[0].vk) + "]!";
+            } else {
+                footerNote = "Select any binding and press Enter/Click to remap. Zero key conflicts.";
+            }
+        } else if (g_ui.tab == 4) {
+            if (netSnap.phase == net::SessionPhase::LobbyWaiting ||
+                netSnap.phase == net::SessionPhase::ConnectingTransport ||
+                netSnap.phase == net::SessionPhase::SyncingMenu ||
