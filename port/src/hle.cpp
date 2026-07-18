@@ -989,6 +989,14 @@ uint32_t ReadLocalPlayerButtons(int playerIndex, uint8_t& lx, uint8_t& ly, uint8
             buttons |= cmd.mask;
         }
     }
+    if (playerIndex == 1 && g_netplayClockLock.load(std::memory_order_relaxed)) {
+        const uint64_t mf = g_netplaySimFrame.load(std::memory_order_relaxed);
+        for (const auto& cmd : s_matchAuto) {
+            if (mf >= cmd.startFrame && mf < cmd.startFrame + cmd.duration) {
+                buttons |= cmd.mask;
+            }
+        }
+    }
     return buttons;
 }
 
@@ -1078,7 +1086,9 @@ uint64_t ComputeGuestStateHash() {
         uint64_t ent = *reinterpret_cast<const uint64_t*>(g_base + 0x3e2230);
         while (ent && entityCount < 2048 && Readable(reinterpret_cast<void*>(ent), 0x128)) {
             const auto* eb = reinterpret_cast<const uint8_t*>(ent);
-            if (eb[0x9b] == 0) {  // not marked destroyed
+            // Hash non-destroyed, room-scoped gameplay entities (exclude boot-time
+            // persistent audio/menu managers `eb[0x9d] != 0` whose timers started before lobby join).
+            if (eb[0x9b] == 0 && eb[0x9d] == 0) {
                 const uint64_t vt = *reinterpret_cast<const uint64_t*>(eb);
                 const uint64_t relVt = (vt >= g_base) ? (vt - g_base) : vt;
                 mixBytes(&relVt, sizeof(relVt));
