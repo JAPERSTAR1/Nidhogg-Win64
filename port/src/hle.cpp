@@ -983,6 +983,7 @@ uint32_t ReadLocalPlayerButtons(int playerIndex, uint8_t& lx, uint8_t& ly, uint8
 
     static std::vector<AutoPressCmd> s_p1Auto = ParseAutoPressEnv("NIDHOGG_AUTOPRESS");
     static std::vector<AutoPressCmd> s_p2Auto = ParseAutoPressEnv("NIDHOGG_AUTOPRESS_P2");
+    static std::vector<AutoPressCmd> s_matchAuto = ParseAutoPressEnv("NIDHOGG_AUTOPRESS_MATCH");
     const auto& seq = (playerIndex == 1) ? s_p1Auto : s_p2Auto;
     for (const auto& cmd : seq) {
         if (g_submits >= cmd.startFrame && g_submits < cmd.startFrame + cmd.duration) {
