@@ -1263,8 +1263,9 @@ bool SetRoomVisibility(bool isPublic, std::string& outError) {
         return false;
     }
 
+    bool needWs = false;
     std::scoped_lock lk(g_net.mtx);
-    ApplyRoomStateFromJsonLocked(resp);
+    ApplyRoomStateFromJsonLocked(resp, needWs);
     g_net.snap.statusText = isPublic ? "Room switched to PUBLIC (listed in browser)."
                                      : "Room switched to PRIVATE (hidden, join by code only).";
     return true;
