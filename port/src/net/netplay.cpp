@@ -1293,8 +1293,16 @@ bool SetReady(bool ready, std::string& outError) {
         JsonGetStr(resp, "error", outError);
         return false;
     }
-    std::scoped_lock lk(g_net.mtx);
-    ApplyRoomStateFromJsonLocked(resp);
+    bool needWs = false;
+    uint64_t sid = 0;
+    int role = 1;
+    {
+        std::scoped_lock lk(g_net.mtx);
+        ApplyRoomStateFromJsonLocked(resp, needWs);
+        sid = g_net.sessionId;
+        role = g_net.snap.isHost ? 1 : 2;
+    }
+    if (needWs) StartWebSocketRelay(sid, role, token);
     return true;
 }
 
@@ -1319,6 +1327,7 @@ bool KickGuest(std::string& outError) {
         JsonGetStr(resp, "error", outError);
         return false;
     }
+    bool needWs = false;
     std::scoped_lock lk(g_net.mtx);
     ApplyRoomStateFromJsonLocked(resp, needWs);
     g_net.snap.statusText = "Removed guest from room.";
