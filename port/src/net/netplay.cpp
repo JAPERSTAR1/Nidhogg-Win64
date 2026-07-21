@@ -1278,13 +1278,15 @@ bool SetReady(bool ready, std::string& outError) {
         std::scoped_lock lk(g_net.mtx);
         roomId = g_net.snap.roomId;
         token = g_net.authToken;
+        epJson = EndpointFieldsJsonLocked();
     }
     if (roomId.empty()) { outError = "Not in a room."; return false; }
 
     std::ostringstream body;
     body << "{\"roomId\":\"" << JsonEsc(roomId) << "\","
          << "\"authToken\":\"" << JsonEsc(token) << "\","
-         << "\"ready\":" << (ready ? "true" : "false") << "}";
+         << "\"ready\":" << (ready ? "true" : "false") << ","
+         << epJson << "}";
     int status = 0;
     std::string resp;
     if (!HttpRequestJson("POST", "/api/rooms/ready", body.str(), status, resp, outError))
