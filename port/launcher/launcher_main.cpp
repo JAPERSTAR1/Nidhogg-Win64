@@ -238,3 +238,99 @@ void LaunchGameExe(const wchar_t* extraFlag) {
         cmd += L" ";
         cmd += extraFlag;
     }
+    std::wstring workDir = ps4::core::Utf8ToWide(exeDir);
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi{};
+    if (CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, workDir.c_str(),
+                       &si, &pi)) {
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        DestroyWindow(g_hwnd);
+    } else {
+        MessageBoxW(g_hwnd, L"Failed to launch Nidhogg.exe.", L"Launch Error", MB_ICONERROR | MB_OK);
+    }
+}
+
+void ToggleLocalServer() {
+    DWORD pid = FindServerProcessId();
+    if (pid != 0) {
+        HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
+        if (h) {
+            TerminateProcess(h, 0);
+            CloseHandle(h);
+        }
+        Sleep(150);
+    } else {
+        std::string srvExe = ps4::core::ExeDir() + "\\NidhoggServer.exe";
+        if (!ps4::core::FileExistsUtf8(srvExe)) {
+            MessageBoxW(g_hwnd, L"NidhoggServer.exe was not found in the application directory.",
+                        L"Server Missing", MB_ICONWARNING | MB_OK);
+            return;
+        }
+        std::wstring wSrv = L"\"" + ps4::core::Utf8ToWide(srvExe) + L"\"";
+        STARTUPINFOW si{};
+        si.cb = sizeof(si);
+        PROCESS_INFORMATION pi{};
+        if (CreateProcessW(nullptr, wSrv.data(), nullptr, nullptr, FALSE,
+                           CREATE_NO_WINDOW | DETACHED_PROCESS, nullptr, nullptr, &si, &pi)) {
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+            Sleep(250);
+        }
+    }
+    SetWindowTextW(g_btnServer,
+                   FindServerProcessId() ? L"Stop Local Server" : L"Start Local Server");
+    AsyncCheckServerStatus(g_hwnd, GetControlUtf8(g_edtUrl));
+}
+
+LRESULT CALLBACK LauncherProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    switch (msg) {
+        case WM_CTLCOLORSTATIC: {
+            HDC hdc = reinterpret_cast<HDC>(wp);
+            SetTextColor(hdc, RGB(236, 239, 246));
+            SetBkColor(hdc, RGB(20, 23, 34));
+            return reinterpret_cast<LRESULT>(g_bgBrush);
+        }
+        case WM_APP_SERVER_STATUS: {
+            const int st = static_cast<int>(wp);
+            if (st == 1) {
+                std::wstring txt = L"Multiplayer Endpoint: ONLINE (" +
+                                   ps4::core::Utf8ToWide(GetControlUtf8(g_edtUrl)) + L")";
+                SetWindowTextW(g_lblServer, txt.c_str());
+            } else if (st == 2) {
+                SetWindowTextW(g_lblServer,
+                               L"Multiplayer Endpoint: Local Lobby Active (http://127.0.0.1:27880)");
+            } else {
+                SetWindowTextW(g_lblServer,
+                               L"Multiplayer Endpoint: Offline (Click 'Start Local Server' to host locally)");
+            }
+            SetWindowTextW(g_btnServer,
+                           FindServerProcessId() ? L"Stop Local Server" : L"Start Local Server");
+            return 0;
+        }
+        case WM_COMMAND: {
+            const int id = LOWORD(wp);
+            switch (id) {
+                case IDC_BTN_PLAY:     LaunchGameExe(nullptr); break;
+                case IDC_BTN_ONLINE:   LaunchGameExe(L"--online"); break;
+                case IDC_BTN_SETTINGS: LaunchGameExe(L"--settings"); break;
+                case IDC_BTN_BROWSE: {
+                    std::string chosen;
+                    if (ps4::core::PromptForAssetDirectoryGui(hwnd, chosen)) {
+                        auto v = ps4::core::ValidateAssetsAt(chosen);
+                        if (v.valid) {
+                            ps4::core::CurrentSettings().assetPath = v.rootDir;
+                            ps4::core::SaveSettings(ps4::core::CurrentSettings());
+                        }
+                        RefreshAssetStatus(true);
+                    }
+                    break;
+                }
+                case IDC_BTN_VERIFY: RefreshAssetStatus(true); break;
+                case IDC_BTN_SAVES: {
+                    std::wstring dir = ps4::core::Utf8ToWide(ps4::core::SavesDirPath());
+                    ShellExecuteW(hwnd, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                    break;
+                }
+                case IDC_BTN_LOGS: {
