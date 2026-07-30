@@ -910,3 +910,99 @@ void HandleHttpClient(SOCKET s, std::string remoteIp) {
     } else {
         SendHttpResponse(s, 404, "Not Found", "{\"error\":\"Unknown endpoint\"}");
     }
+
+    closesocket(s);
+}
+
+void RunUdpRelayLoop(SOCKET udpSock) {
+    uint8_t buf[2048];
+    while (g_running.load()) {
+        sockaddr_in from{};
+        int fromLen = sizeof(from);
+        int n = recvfrom(udpSock, reinterpret_cast<char*>(buf), sizeof(buf), 0,
+                         reinterpret_cast<sockaddr*>(&from), &fromLen);
+        if (n <= 0) continue;
+
+        char ipBuf[64]{};
+        inet_ntop(AF_INET, &from.sin_addr, ipBuf, sizeof(ipBuf));
+        const uint16_t obsPort = ntohs(from.sin_port);
+
+        // 1. Direct UDP endpoint registration packet: [magic(4)][type=1][role(1)][pad(2)][sessionId(8)]...
+        if (n >= 16) {
+            uint32_t magic = 0;
+            std::memcpy(&magic, buf, 4);
+            if (magic == kWireMagic && buf[4] == kPktRegisterEndpoint) {
+                const uint8_t role = buf[5];
+                uint64_t sid = 0;
+                std::memcpy(&sid, buf + 8, 8);
+                std::scoped_lock lk(g_mtx);
+                auto sit = g_sessionToRoom.find(sid);
+                if (sit != g_sessionToRoom.end()) {
+                    auto rit = g_rooms.find(sit->second);
+                    if (rit != g_rooms.end()) {
+                        EndpointInfo& ep = (role == 1) ? rit->second.hostEp : rit->second.guestEp;
+                        ep.publicIp = ipBuf;
+                        ep.publicPort = obsPort;
+                        ep.udpObserved = from;
+                        ep.hasUdpObserved = true;
+                    }
+                }
+                continue;
+            }
+        }
+
+        // 2. UDP Relay envelope: ['R'(1)][sessionId(8)][senderRole(1)][sealedPayload...]
+        if (n > 26 && buf[0] == kPktRelayEnvelope) {
+            uint64_t sid = 0;
+            std::memcpy(&sid, buf + 1, 8);
+            const uint8_t role = buf[9];
+            sockaddr_in dst{};
+            bool haveDst = false;
+            {
+                std::scoped_lock lk(g_mtx);
+                auto sit = g_sessionToRoom.find(sid);
+                if (sit != g_sessionToRoom.end()) {
+                    auto rit = g_rooms.find(sit->second);
+                    if (rit != g_rooms.end()) {
+                        EndpointInfo& myEp = (role == 1) ? rit->second.hostEp : rit->second.guestEp;
+                        myEp.udpObserved = from;
+                        myEp.hasUdpObserved = true;
+                        const EndpointInfo& peerEp = (role == 1) ? rit->second.guestEp : rit->second.hostEp;
+                        if (peerEp.hasUdpObserved) {
+                            dst = peerEp.udpObserved;
+                            haveDst = true;
+                        } else if (!peerEp.publicIp.empty() && peerEp.publicPort > 0) {
+                            dst.sin_family = AF_INET;
+                            dst.sin_port = htons(peerEp.publicPort);
+                            if (inet_pton(AF_INET, peerEp.publicIp.c_str(), &dst.sin_addr) == 1)
+                                haveDst = true;
+                        }
+                    }
+                }
+            }
+            if (haveDst) {
+                sendto(udpSock, reinterpret_cast<const char*>(buf), n, 0,
+                       reinterpret_cast<const sockaddr*>(&dst), sizeof(dst));
+            }
+        }
+    }
+}
+
+BOOL WINAPI ConsoleCtrlHandler(DWORD) {
+    g_running.store(false);
+    return FALSE;
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+    std::string bindIp = "0.0.0.0";
+    for (int i = 1; i < argc; ++i) {
+        if ((std::strcmp(argv[i], "--port") == 0 || std::strcmp(argv[i], "--http-port") == 0) &&
+            i + 1 < argc) {
+            g_httpPort = static_cast<uint16_t>(std::atoi(argv[++i]));
+            g_udpPort = static_cast<uint16_t>(g_httpPort + 1);
+        } else if (std::strcmp(argv[i], "--udp-port") == 0 && i + 1 < argc) {
+            g_udpPort = static_cast<uint16_t>(std::atoi(argv[++i]));
+        } else if (std::strcmp(argv[i], "--bind") == 0 && i + 1 < argc) {
+            bindIp = argv[++i];
