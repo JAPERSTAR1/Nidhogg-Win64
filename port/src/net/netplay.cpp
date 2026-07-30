@@ -976,6 +976,54 @@ void ShutdownNetplay() {
     }
 }
 
+std::string ActiveLobbyEndpoint() {
+    std::scoped_lock lk(g_endpointMtx);
+    if (!g_resolvedEndpoint.empty()) return g_resolvedEndpoint;
+    return core::CurrentSettings().lobbyServerUrl;
+}
+
+bool EnsureLocalLobbyServerRunning(std::string& outError) {
+    int st = 0;
+    std::string resp, err;
+    for (const char* cand : {"http://127.0.0.1:27880", "http://127.0.0.1:27885"}) {
+        if (HttpRequestJsonAt(cand, "GET", "/api/health", "", 250, st, resp, err) &&
+            st == 200 && resp.find("nidhogg-lobby") != std::string::npos) {
+            std::scoped_lock lk(g_endpointMtx);
+            g_resolvedEndpoint = cand;
+            g_resolvedAtUsec = MonoUsec();
+            return true;
+        }
+    }
+
+    const std::string exeDir = core::ExeDir();
+    const std::string candidates[] = {
+        exeDir + "\\NidhoggServer.exe",
+        exeDir + "\\..\\out\\NidhoggServer.exe",
+    };
+    std::string found;
+    for (const auto& c : candidates) {
+        if (core::FileExistsUtf8(c)) { found = c; break; }
+    }
+    if (found.empty()) {
+        outError = "NidhoggServer.exe not found next to executable.";
+        return false;
+    }
+
+    for (int port : {27880, 27885}) {
+        std::wstring cmd = L"\"" + core::Utf8ToWide(found) + L"\" --port " + std::to_wstring(port);
+        STARTUPINFOW si{};
+        si.cb = sizeof(si);
+        PROCESS_INFORMATION pi{};
+        if (!CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE,
+                            CREATE_NO_WINDOW | DETACHED_PROCESS, nullptr, nullptr, &si, &pi)) {
+            continue;
+        }
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+
+        const std::string url = "http://127.0.0.1:" + std::to_string(port);
+}
+
 bool RefreshPublicRooms(const std::string& regionFilter, bool availableOnly,
                         std::vector<PublicRoomEntry>& outRooms, std::string& outError) {
     InitNetplay();
@@ -998,7 +1046,6 @@ bool RefreshPublicRooms(const std::string& regionFilter, bool availableOnly,
         return false;
     }
 
-    // Parse JSON array of room objects inside `"rooms":[ ... ]`
     size_t arrPos = resp.find("\"rooms\"");
     size_t pos = (arrPos != std::string::npos) ? resp.find('[', arrPos) : 0;
     while (pos != std::string::npos && pos < resp.size()) {
