@@ -190,3 +190,99 @@ bool JsonGetBool(const std::string& j, const char* key, bool& out) {
 }
 
 struct EndpointInfo {
+    std::string publicIp;
+    uint16_t publicPort = 0;
+    std::string lanIp;
+    uint16_t lanPort = 0;
+    sockaddr_in udpObserved{};
+    bool hasUdpObserved = false;
+};
+
+struct Room {
+    std::string roomId;
+    std::string roomCode;
+    std::string roomName;
+    std::string region;
+    bool isPublic = true;
+    int stageIndex = 0;
+    std::string status = "waiting";  // "waiting", "in_match", "closed"
+
+    uint64_t sessionId = 0;
+    std::string sessionKeyHex;       // 64 hex chars = 32 bytes
+    uint32_t matchSeed = 0;
+
+    std::string hostName;
+    std::string hostToken;
+    bool hostReady = false;
+    uint64_t hostLastSeenMs = 0;
+    EndpointInfo hostEp;
+
+    bool guestConnected = false;
+    std::string guestName;
+    std::string guestToken;
+    std::string kickedToken;
+    bool guestReady = false;
+    uint64_t guestLastSeenMs = 0;
+    EndpointInfo guestEp;
+
+    // Active WebSocket relay client sockets (INVALID_SOCKET if not connected)
+    SOCKET wsHostSock = INVALID_SOCKET;
+    SOCKET wsGuestSock = INVALID_SOCKET;
+};
+
+struct RateBucket {
+    uint64_t windowStartMs = 0;
+    int apiCount = 0;
+    uint64_t createWindowMs = 0;
+    int createCount = 0;
+};
+
+std::mutex g_mtx;
+std::mutex g_wsSendMtx;
+std::unordered_map<std::string, Room> g_rooms;
+std::unordered_map<uint64_t, std::string> g_sessionToRoom;
+std::unordered_map<std::string, RateBucket> g_rates;
+uint16_t g_httpPort = 27880;
+uint16_t g_udpPort = 27881;
+int g_maxRooms = 512;
+
+void PurgeExpiredRoomsLocked() {
+    const uint64_t now = NowMs();
+    constexpr uint64_t kTimeoutMs = 30000ULL;
+    for (auto it = g_rooms.begin(); it != g_rooms.end();) {
+        Room& rm = it->second;
+        if (rm.status == "closed" || (now - rm.hostLastSeenMs > kTimeoutMs)) {
+            g_sessionToRoom.erase(rm.sessionId);
+            it = g_rooms.erase(it);
+            continue;
+        }
+        if (rm.guestConnected && (now - rm.guestLastSeenMs > kTimeoutMs)) {
+            rm.guestConnected = false;
+            rm.guestName.clear();
+            rm.guestToken.clear();
+            rm.guestReady = false;
+            rm.guestEp = EndpointInfo{};
+            if (rm.status == "in_match") rm.status = "waiting";
+        }
+        ++it;
+    }
+}
+
+bool CheckRateLimitLocked(const std::string& ip, bool isCreate) {
+    const uint64_t now = NowMs();
+    auto& b = g_rates[ip];
+    if (now - b.windowStartMs > 10000ULL) {
+        b.windowStartMs = now;
+        b.apiCount = 0;
+    }
+    if (++b.apiCount > 180) return false;
+    if (isCreate) {
+        if (now - b.createWindowMs > 60000ULL) {
+            b.createWindowMs = now;
+            b.createCount = 0;
+        }
+        if (++b.createCount > 20) return false;
+    }
+    return true;
+}
+
