@@ -814,3 +814,99 @@ void HandleHttpClient(SOCKET s, std::string remoteIp) {
         if (it == g_rooms.end()) {
             SendHttpResponse(s, 404, "Not Found", "{\"error\":\"Room not found\"}");
         } else if (tok == it->second.hostToken) {
+            it->second.hostReady = rdy;
+            it->second.hostLastSeenMs = NowMs();
+            UpdateCallerEndpointsFromJson(it->second.hostEp, body, remoteIp);
+            SendHttpResponse(s, 200, "OK", SerializeRoomForCallerLocked(it->second, true));
+        } else if (it->second.guestConnected && tok == it->second.guestToken) {
+            it->second.guestReady = rdy;
+            it->second.guestLastSeenMs = NowMs();
+            UpdateCallerEndpointsFromJson(it->second.guestEp, body, remoteIp);
+            SendHttpResponse(s, 200, "OK", SerializeRoomForCallerLocked(it->second, false));
+        } else {
+            SendHttpResponse(s, 403, "Forbidden", "{\"error\":\"Unauthorized\"}");
+        }
+    } else if (method == "POST" && path == "/api/rooms/kick") {
+        std::string rid, tok;
+        JsonGetStr(body, "roomId", rid);
+        JsonGetStr(body, "authToken", tok);
+        auto it = g_rooms.find(rid);
+        if (it == g_rooms.end() || tok != it->second.hostToken) {
+            SendHttpResponse(s, 403, "Forbidden", "{\"error\":\"Unauthorized\"}");
+        } else {
+            Room& rm = it->second;
+            rm.kickedToken = rm.guestToken;
+            rm.guestConnected = false;
+            rm.guestName.clear();
+            rm.guestToken.clear();
+            rm.guestReady = false;
+            rm.guestEp = EndpointInfo{};
+            if (rm.wsGuestSock != INVALID_SOCKET) {
+                closesocket(rm.wsGuestSock);
+                rm.wsGuestSock = INVALID_SOCKET;
+            }
+            rm.hostLastSeenMs = NowMs();
+            SendHttpResponse(s, 200, "OK", SerializeRoomForCallerLocked(rm, true));
+        }
+    } else if (method == "POST" && path == "/api/rooms/start") {
+        std::string rid, tok;
+        JsonGetStr(body, "roomId", rid);
+        JsonGetStr(body, "authToken", tok);
+        auto it = g_rooms.find(rid);
+        if (it == g_rooms.end() || tok != it->second.hostToken) {
+            SendHttpResponse(s, 403, "Forbidden", "{\"error\":\"Unauthorized\"}");
+        } else if (!it->second.guestConnected) {
+            SendHttpResponse(s, 400, "Bad Request", "{\"error\":\"Need 2 connected players to start.\"}");
+        } else {
+            Room& rm = it->second;
+            rm.status = "in_match";
+            rm.hostLastSeenMs = NowMs();
+            rm.guestLastSeenMs = NowMs();
+            std::printf("[lobby] match started in room %s (session=%llu)\n", rm.roomId.c_str(),
+                        static_cast<unsigned long long>(rm.sessionId));
+            SendHttpResponse(s, 200, "OK", SerializeRoomForCallerLocked(rm, true));
+        }
+    } else if (method == "POST" && path == "/api/rooms/heartbeat") {
+        std::string rid, tok;
+        JsonGetStr(body, "roomId", rid);
+        JsonGetStr(body, "authToken", tok);
+        auto it = g_rooms.find(rid);
+        if (it == g_rooms.end()) {
+            SendHttpResponse(s, 404, "Not Found", "{\"status\":\"closed\"}");
+        } else if (!tok.empty() && tok == it->second.kickedToken) {
+            SendHttpResponse(s, 200, "OK", "{\"kicked\":true,\"status\":\"waiting\"}");
+        } else if (tok == it->second.hostToken) {
+            it->second.hostLastSeenMs = NowMs();
+            UpdateCallerEndpointsFromJson(it->second.hostEp, body, remoteIp);
+            SendHttpResponse(s, 200, "OK", SerializeRoomForCallerLocked(it->second, true));
+        } else if (it->second.guestConnected && tok == it->second.guestToken) {
+            it->second.guestLastSeenMs = NowMs();
+            UpdateCallerEndpointsFromJson(it->second.guestEp, body, remoteIp);
+            SendHttpResponse(s, 200, "OK", SerializeRoomForCallerLocked(it->second, false));
+        } else {
+            SendHttpResponse(s, 403, "Forbidden", "{\"error\":\"Unauthorized\"}");
+        }
+    } else if (method == "POST" && path == "/api/rooms/leave") {
+        std::string rid, tok;
+        JsonGetStr(body, "roomId", rid);
+        JsonGetStr(body, "authToken", tok);
+        auto it = g_rooms.find(rid);
+        if (it != g_rooms.end()) {
+            Room& rm = it->second;
+            if (tok == rm.hostToken) {
+                rm.status = "closed";
+                g_sessionToRoom.erase(rm.sessionId);
+                g_rooms.erase(it);
+            } else if (rm.guestConnected && tok == rm.guestToken) {
+                rm.guestConnected = false;
+                rm.guestName.clear();
+                rm.guestToken.clear();
+                rm.guestReady = false;
+                rm.guestEp = EndpointInfo{};
+                if (rm.status == "in_match") rm.status = "waiting";
+            }
+        }
+        SendHttpResponse(s, 200, "OK", "{\"ok\":true}");
+    } else {
+        SendHttpResponse(s, 404, "Not Found", "{\"error\":\"Unknown endpoint\"}");
+    }
