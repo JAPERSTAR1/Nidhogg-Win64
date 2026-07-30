@@ -1681,6 +1681,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                         }
                     } else {
                         g_netplayClockLock.store(false, std::memory_order_relaxed);
+                        g_netplaySimFrame.store(0, std::memory_order_relaxed);
                     }
                 }
                 if (g_netplaySyncedFrame == g_submits) {

@@ -96,7 +96,7 @@ struct Settings {
     // Online
     std::string playerName = "Fencer";
     std::string region = "us-east";
-    std::string lobbyServerUrl = "http://127.0.0.1:27880";
+    std::string lobbyServerUrl = "https://lobby.japer.me";
     int inputDelayFrames = 2;  // 1 .. 8
 
     // General / Diagnostics
