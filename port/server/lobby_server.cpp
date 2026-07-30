@@ -94,3 +94,99 @@ bool Sha1Hash(const uint8_t* data, size_t len, uint8_t out20[20]) {
         if (BCryptHashData(hHash, const_cast<PUCHAR>(data), static_cast<ULONG>(len), 0) == 0 &&
             BCryptFinishHash(hHash, out20, 20, 0) == 0) {
             ok = true;
+        }
+        BCryptDestroyHash(hHash);
+    }
+    BCryptCloseAlgorithmProvider(hAlg, 0);
+    return ok;
+}
+
+std::string Base64Encode(const uint8_t* data, size_t len) {
+    static const char kB64[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    out.reserve(((len + 2) / 3) * 4);
+    for (size_t i = 0; i < len; i += 3) {
+        uint32_t v = static_cast<uint32_t>(data[i]) << 16;
+        if (i + 1 < len) v |= static_cast<uint32_t>(data[i + 1]) << 8;
+        if (i + 2 < len) v |= static_cast<uint32_t>(data[i + 2]);
+        out.push_back(kB64[(v >> 18) & 63]);
+        out.push_back(kB64[(v >> 12) & 63]);
+        out.push_back((i + 1 < len) ? kB64[(v >> 6) & 63] : '=');
+        out.push_back((i + 2 < len) ? kB64[v & 63] : '=');
+    }
+    return out;
+}
+
+std::string SanitizeText(const std::string& s, size_t maxLen, const char* fallback) {
+    std::string out;
+    for (unsigned char c : s) {
+        if (c >= 32 && c < 127 && c != '"' && c != '\\' && c != '<' && c != '>') {
+            out.push_back(static_cast<char>(c));
+            if (out.size() >= maxLen) break;
+        }
+    }
+    while (!out.empty() && out.back() == ' ') out.pop_back();
+    return out.empty() ? std::string(fallback) : out;
+}
+
+std::string JsonEsc(const std::string& s) {
+    std::string o;
+    for (unsigned char c : s) {
+        if (c == '"') o += "\\\"";
+        else if (c == '\\') o += "\\\\";
+        else if (c >= 32 && c < 127) o.push_back(static_cast<char>(c));
+    }
+    return o;
+}
+
+bool JsonGetStr(const std::string& j, const char* key, std::string& out) {
+    std::string needle = std::string("\"") + key + "\"";
+    size_t p = j.find(needle);
+    if (p == std::string::npos) return false;
+    p = j.find(':', p + needle.size());
+    if (p == std::string::npos) return false;
+    ++p;
+    while (p < j.size() && std::isspace(static_cast<unsigned char>(j[p]))) ++p;
+    if (p >= j.size() || j[p] != '"') return false;
+    ++p;
+    std::string r;
+    while (p < j.size()) {
+        char c = j[p++];
+        if (c == '"') { out = r; return true; }
+        if (c == '\\' && p < j.size()) r.push_back(j[p++]);
+        else r.push_back(c);
+    }
+    return false;
+}
+
+bool JsonGetInt(const std::string& j, const char* key, int64_t& out) {
+    std::string needle = std::string("\"") + key + "\"";
+    size_t p = j.find(needle);
+    if (p == std::string::npos) return false;
+    p = j.find(':', p + needle.size());
+    if (p == std::string::npos) return false;
+    ++p;
+    while (p < j.size() && std::isspace(static_cast<unsigned char>(j[p]))) ++p;
+    if (p >= j.size()) return false;
+    char* end = nullptr;
+    long long v = std::strtoll(j.c_str() + p, &end, 10);
+    if (end == j.c_str() + p) return false;
+    out = v;
+    return true;
+}
+
+bool JsonGetBool(const std::string& j, const char* key, bool& out) {
+    std::string needle = std::string("\"") + key + "\"";
+    size_t p = j.find(needle);
+    if (p == std::string::npos) return false;
+    p = j.find(':', p + needle.size());
+    if (p == std::string::npos) return false;
+    ++p;
+    while (p < j.size() && std::isspace(static_cast<unsigned char>(j[p]))) ++p;
+    if (j.compare(p, 4, "true") == 0) { out = true; return true; }
+    if (j.compare(p, 5, "false") == 0) { out = false; return true; }
+    return false;
+}
+
+struct EndpointInfo {
