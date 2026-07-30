@@ -286,3 +286,99 @@ bool CheckRateLimitLocked(const std::string& ip, bool isCreate) {
     return true;
 }
 
+std::string SerializeRoomForCallerLocked(const Room& rm, bool callerIsHost,
+                                         const std::string& includeAuthToken = {}) {
+    const EndpointInfo& peer = callerIsHost ? rm.guestEp : rm.hostEp;
+    const int playerCount = rm.guestConnected ? 2 : 1;
+    std::ostringstream o;
+    o << "{"
+      << "\"roomId\":\"" << JsonEsc(rm.roomId) << "\","
+      << "\"roomName\":\"" << JsonEsc(rm.roomName) << "\","
+      << "\"roomCode\":\"" << JsonEsc(rm.roomCode) << "\","
+      << "\"region\":\"" << JsonEsc(rm.region) << "\","
+      << "\"isPublic\":" << (rm.isPublic ? "true" : "false") << ","
+      << "\"status\":\"" << JsonEsc(rm.status) << "\","
+      << "\"stageIndex\":" << rm.stageIndex << ","
+      << "\"playerCount\":" << playerCount << ","
+      << "\"maxPlayers\":2,"
+      << "\"hostName\":\"" << JsonEsc(rm.hostName) << "\","
+      << "\"guestName\":\"" << JsonEsc(rm.guestName) << "\","
+      << "\"guestConnected\":" << (rm.guestConnected ? "true" : "false") << ","
+      << "\"hostReady\":" << (rm.hostReady ? "true" : "false") << ","
+      << "\"guestReady\":" << (rm.guestReady ? "true" : "false") << ","
+      << "\"sessionId\":" << rm.sessionId << ","
+      << "\"sessionKey\":\"" << rm.sessionKeyHex << "\","
+      << "\"matchSeed\":" << rm.matchSeed << ","
+      << "\"relayUdpPort\":" << g_udpPort << ","
+      << "\"peerPublicIp\":\"" << JsonEsc(peer.publicIp) << "\","
+      << "\"peerPublicPort\":" << peer.publicPort << ","
+      << "\"peerLanIp\":\"" << JsonEsc(peer.lanIp) << "\","
+      << "\"peerLanPort\":" << peer.lanPort;
+    if (!includeAuthToken.empty()) {
+        o << ",\"authToken\":\"" << JsonEsc(includeAuthToken) << "\"";
+    }
+    o << "}";
+    return o.str();
+}
+
+bool SendAll(SOCKET s, const void* data, size_t len) {
+    const auto* p = static_cast<const char*>(data);
+    size_t sent = 0;
+    while (sent < len) {
+        int n = send(s, p + sent, static_cast<int>(len - sent), 0);
+        if (n <= 0) return false;
+        sent += static_cast<size_t>(n);
+    }
+    return true;
+}
+
+void SendHttpResponse(SOCKET s, int status, const char* statusText, const std::string& body,
+                      const char* contentType = "application/json") {
+    std::ostringstream hdr;
+    hdr << "HTTP/1.1 " << status << " " << statusText << "\r\n"
+        << "Content-Type: " << contentType << "\r\n"
+        << "Content-Length: " << body.size() << "\r\n"
+        << "Connection: close\r\n"
+        << "Cache-Control: no-store\r\n\r\n";
+    const std::string h = hdr.str();
+    SendAll(s, h.data(), h.size());
+    if (!body.empty()) SendAll(s, body.data(), body.size());
+}
+
+// Sends one unmasked RFC 6455 binary WebSocket frame (server -> client).
+bool SendWsFrame(SOCKET s, uint8_t opcode, const uint8_t* payload, size_t len) {
+    if (s == INVALID_SOCKET) return false;
+    uint8_t hdr[10]{};
+    size_t hdrLen = 0;
+    hdr[0] = static_cast<uint8_t>(0x80u | (opcode & 0x0fu));  // FIN + opcode
+    if (len < 126) {
+        hdr[1] = static_cast<uint8_t>(len);
+        hdrLen = 2;
+    } else if (len <= 65535) {
+        hdr[1] = 126;
+        hdr[2] = static_cast<uint8_t>((len >> 8) & 0xffu);
+        hdr[3] = static_cast<uint8_t>(len & 0xffu);
+        hdrLen = 4;
+    } else {
+        return false;
+    }
+    std::scoped_lock lk(g_wsSendMtx);
+    if (!SendAll(s, hdr, hdrLen)) return false;
+    return len == 0 || SendAll(s, payload, len);
+}
+
+bool RecvExact(SOCKET s, void* buf, size_t len) {
+    auto* p = static_cast<char*>(buf);
+    size_t got = 0;
+    while (got < len) {
+        int n = recv(s, p + got, static_cast<int>(len - got), 0);
+        if (n <= 0) return false;
+        got += static_cast<size_t>(n);
+    }
+    return true;
+}
+
+std::string QueryParam(const std::string& query, const char* key) {
+    std::string needle = std::string(key) + "=";
+    size_t pos = 0;
+    while (pos < query.size()) {
