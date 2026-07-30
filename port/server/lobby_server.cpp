@@ -622,3 +622,99 @@ void HandleHttpClient(SOCKET s, std::string remoteIp) {
 
     // Public health check (no version header required so browsers & Cloudflare checks succeed)
     if (method == "GET" && (path == "/" || path == "/api/health")) {
+        size_t activeRooms = 0;
+        {
+            std::scoped_lock lk(g_mtx);
+            PurgeExpiredRoomsLocked();
+            activeRooms = g_rooms.size();
+        }
+        const uint64_t upSec = (NowMs() / 1000ULL) - g_startSec;
+        std::ostringstream out;
+        out << "{\"ok\":true,\"service\":\"nidhogg-lobby\",\"version\":\"" << kExpectedProtocol
+            << "\",\"activeRooms\":" << activeRooms << ",\"uptimeSec\":" << upSec << "}";
+        SendHttpResponse(s, 200, "OK", out.str());
+        closesocket(s);
+        return;
+    }
+
+    // Version check on `/api/*`
+    const std::string clientVer = HeaderValueCaseInsensitive(headers, "X-Nidhogg-Version");
+    if (!clientVer.empty() && clientVer != kExpectedProtocol) {
+        SendHttpResponse(s, 426, "Upgrade Required",
+                         std::string("{\"error\":\"Protocol version mismatch (server ") +
+                             kExpectedProtocol + ", client " + JsonEsc(clientVer) + ")\"}");
+        closesocket(s);
+        return;
+    }
+
+    std::scoped_lock lk(g_mtx);
+    PurgeExpiredRoomsLocked();
+
+    const bool isCreate = (path == "/api/rooms/create");
+    if (!CheckRateLimitLocked(remoteIp, isCreate)) {
+        SendHttpResponse(s, 429, "Too Many Requests",
+                         "{\"error\":\"Rate limit exceeded. Please wait a moment.\"}");
+        closesocket(s);
+        return;
+    }
+
+    if (method == "GET" && path == "/api/rooms") {
+        const std::string regFilter = QueryParam(query, "region");
+        const bool availOnly = (QueryParam(query, "available") == "1");
+        std::ostringstream o;
+        o << "{\"rooms\":[";
+        bool first = true;
+        for (const auto& [id, rm] : g_rooms) {
+            if (!rm.isPublic || rm.status == "closed") continue;
+            const int pCount = rm.guestConnected ? 2 : 1;
+            if (availOnly && (pCount >= 2 || rm.status != "waiting")) continue;
+            if (!regFilter.empty() && regFilter != "all" && rm.region != regFilter) continue;
+            if (!first) o << ",";
+            first = false;
+            o << "{"
+              << "\"roomId\":\"" << JsonEsc(rm.roomId) << "\","
+              << "\"roomName\":\"" << JsonEsc(rm.roomName) << "\","
+              << "\"region\":\"" << JsonEsc(rm.region) << "\","
+              << "\"playerCount\":" << pCount << ","
+              << "\"maxPlayers\":2,"
+              << "\"stageIndex\":" << rm.stageIndex << ","
+              << "\"status\":\"" << JsonEsc(rm.status) << "\""
+              << "}";
+        }
+        o << "]}";
+        SendHttpResponse(s, 200, "OK", o.str());
+    } else if (method == "POST" && path == "/api/rooms/create") {
+        if (static_cast<int>(g_rooms.size()) >= g_maxRooms) {
+            SendHttpResponse(s, 503, "Service Unavailable", "{\"error\":\"Server room limit reached\"}");
+            closesocket(s);
+            return;
+        }
+        Room rm;
+        rm.roomId = RandomHex(8);
+        do {
+            rm.roomCode = GenerateRoomCode();
+        } while (std::any_of(g_rooms.begin(), g_rooms.end(),
+                             [&](const auto& kv) { return kv.second.roomCode == rm.roomCode; }));
+
+        std::string rName, hName, reg;
+        JsonGetStr(body, "roomName", rName);
+        JsonGetStr(body, "hostName", hName);
+        JsonGetStr(body, "region", reg);
+        JsonGetBool(body, "isPublic", rm.isPublic);
+        int64_t stg = 0;
+        if (JsonGetInt(body, "stageIndex", stg)) rm.stageIndex = static_cast<int>(stg & 3);
+
+        rm.roomName = SanitizeText(rName, 32, "Nidhogg Arena");
+        rm.hostName = SanitizeText(hName, 20, "Host");
+        rm.region = SanitizeText(reg, 16, "us-east");
+        rm.hostToken = RandomHex(16);
+        rm.hostLastSeenMs = NowMs();
+
+        CsPrng(&rm.sessionId, sizeof(rm.sessionId));
+        if (rm.sessionId == 0) rm.sessionId = 1;
+        rm.sessionKeyHex = RandomHex(32);
+        CsPrng(&rm.matchSeed, sizeof(rm.matchSeed));
+        if (rm.matchSeed == 0) rm.matchSeed = 0x13572468u;
+
+        UpdateCallerEndpointsFromJson(rm.hostEp, body, remoteIp);
+
