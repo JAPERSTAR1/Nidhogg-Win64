@@ -718,3 +718,99 @@ void HandleHttpClient(SOCKET s, std::string remoteIp) {
 
         UpdateCallerEndpointsFromJson(rm.hostEp, body, remoteIp);
 
+        const std::string reply = SerializeRoomForCallerLocked(rm, true, rm.hostToken);
+        g_sessionToRoom[rm.sessionId] = rm.roomId;
+        std::printf("[lobby] created %s room id=%s code=%s name=\"%s\" host=%s (%s:%u)\n",
+                    rm.isPublic ? "PUBLIC" : "PRIVATE", rm.roomId.c_str(), rm.roomCode.c_str(),
+                    rm.roomName.c_str(), rm.hostName.c_str(),
+                    rm.hostEp.publicIp.c_str(), rm.hostEp.publicPort);
+        g_rooms.emplace(rm.roomId, std::move(rm));
+        SendHttpResponse(s, 200, "OK", reply);
+    } else if (method == "POST" && (path == "/api/rooms/join" || path == "/api/rooms/join_code")) {
+        Room* targetRoom = nullptr;
+        if (path == "/api/rooms/join") {
+            std::string rid;
+            JsonGetStr(body, "roomId", rid);
+            auto it = g_rooms.find(rid);
+            if (it != g_rooms.end() && it->second.isPublic) targetRoom = &it->second;
+        } else {
+            std::string code;
+            JsonGetStr(body, "roomCode", code);
+            for (char& c : code) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            for (auto& [id, rm] : g_rooms) {
+                if (rm.roomCode == code && rm.status != "closed") {
+                    targetRoom = &rm;
+                    break;
+                }
+            }
+        }
+
+        if (!targetRoom) {
+            SendHttpResponse(s, 404, "Not Found", "{\"error\":\"Room not found or invalid code.\"}");
+        } else if (targetRoom->guestConnected || targetRoom->status != "waiting") {
+            SendHttpResponse(s, 409, "Conflict", "{\"error\":\"Room is full (2/2) or already in match.\"}");
+        } else {
+            std::string pName;
+            JsonGetStr(body, "playerName", pName);
+            targetRoom->guestConnected = true;
+            targetRoom->guestName = SanitizeText(pName, 20, "Challenger");
+            targetRoom->guestToken = RandomHex(16);
+            targetRoom->guestReady = false;
+            targetRoom->guestLastSeenMs = NowMs();
+            UpdateCallerEndpointsFromJson(targetRoom->guestEp, body, remoteIp);
+            std::printf("[lobby] %s joined room %s (%s)\n", targetRoom->guestName.c_str(),
+                        targetRoom->roomId.c_str(), targetRoom->roomCode.c_str());
+            SendHttpResponse(s, 200, "OK",
+                             SerializeRoomForCallerLocked(*targetRoom, false, targetRoom->guestToken));
+        }
+    } else if (method == "POST" && path == "/api/quickmatch") {
+        std::string wantReg, pName;
+        JsonGetStr(body, "region", wantReg);
+        JsonGetStr(body, "playerName", pName);
+
+        Room* best = nullptr;
+        for (auto& [id, rm] : g_rooms) {
+            if (!rm.isPublic || rm.guestConnected || rm.status != "waiting") continue;
+            if (!best) best = &rm;
+            else if (rm.region == wantReg && best->region != wantReg) best = &rm;
+        }
+        if (!best) {
+            SendHttpResponse(s, 404, "Not Found", "{\"error\":\"No open public rooms found.\"}");
+        } else {
+            best->guestConnected = true;
+            best->guestName = SanitizeText(pName, 20, "Challenger");
+            best->guestToken = RandomHex(16);
+            best->guestReady = false;
+            best->guestLastSeenMs = NowMs();
+            UpdateCallerEndpointsFromJson(best->guestEp, body, remoteIp);
+            std::printf("[lobby] quickmatch paired %s -> room %s\n",
+                        best->guestName.c_str(), best->roomId.c_str());
+            SendHttpResponse(s, 200, "OK",
+                             SerializeRoomForCallerLocked(*best, false, best->guestToken));
+        }
+    } else if (method == "POST" && path == "/api/rooms/visibility") {
+        std::string rid, tok;
+        bool wantPublic = true;
+        JsonGetStr(body, "roomId", rid);
+        JsonGetStr(body, "authToken", tok);
+        JsonGetBool(body, "isPublic", wantPublic);
+        auto it = g_rooms.find(rid);
+        if (it == g_rooms.end() || tok != it->second.hostToken) {
+            SendHttpResponse(s, 403, "Forbidden", "{\"error\":\"Unauthorized\"}");
+        } else {
+            it->second.isPublic = wantPublic;
+            it->second.hostLastSeenMs = NowMs();
+            std::printf("[lobby] room %s visibility -> %s\n", rid.c_str(),
+                        wantPublic ? "PUBLIC" : "PRIVATE");
+            SendHttpResponse(s, 200, "OK", SerializeRoomForCallerLocked(it->second, true));
+        }
+    } else if (method == "POST" && path == "/api/rooms/ready") {
+        std::string rid, tok;
+        bool rdy = false;
+        JsonGetStr(body, "roomId", rid);
+        JsonGetStr(body, "authToken", tok);
+        JsonGetBool(body, "ready", rdy);
+        auto it = g_rooms.find(rid);
+        if (it == g_rooms.end()) {
+            SendHttpResponse(s, 404, "Not Found", "{\"error\":\"Room not found\"}");
+        } else if (tok == it->second.hostToken) {
