@@ -526,3 +526,99 @@ void HandleWebSocketRelay(SOCKET clientSock, const std::string& query, const std
     }
 
     {
+        std::scoped_lock lk(g_mtx);
+        auto rit = g_rooms.find(roomId);
+        if (rit != g_rooms.end()) {
+            SOCKET& slot = (role == 1) ? rit->second.wsHostSock : rit->second.wsGuestSock;
+            if (slot == clientSock) slot = INVALID_SOCKET;
+        }
+    }
+    closesocket(clientSock);
+    std::printf("[ws-relay] disconnected session=%llu role=%d\n",
+                static_cast<unsigned long long>(sid), role);
+}
+
+void UpdateCallerEndpointsFromJson(EndpointInfo& ep, const std::string& body,
+                                   const std::string& fallbackIp) {
+    std::string pubIp, lanIp;
+    int64_t pubPort = 0, lanPort = 0;
+    if (JsonGetStr(body, "publicIp", pubIp) && !pubIp.empty()) ep.publicIp = pubIp;
+    else if (ep.publicIp.empty()) ep.publicIp = fallbackIp;
+    if (JsonGetInt(body, "publicPort", pubPort) && pubPort > 0 && pubPort <= 65535)
+        ep.publicPort = static_cast<uint16_t>(pubPort);
+    if (JsonGetStr(body, "lanIp", lanIp) && !lanIp.empty()) ep.lanIp = lanIp;
+    if (JsonGetInt(body, "lanPort", lanPort) && lanPort > 0 && lanPort <= 65535) {
+        ep.lanPort = static_cast<uint16_t>(lanPort);
+        if (ep.publicPort == 0) ep.publicPort = ep.lanPort;
+    }
+}
+
+void HandleHttpClient(SOCKET s, std::string remoteIp) {
+    int noDelay = 1;
+    setsockopt(s, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&noDelay), sizeof(noDelay));
+    DWORD timeoutMs = 5000;
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeoutMs), sizeof(timeoutMs));
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeoutMs), sizeof(timeoutMs));
+
+    std::string req;
+    char buf[4096];
+    size_t headerEnd = std::string::npos;
+    while (req.size() < 16384) {
+        int n = recv(s, buf, sizeof(buf), 0);
+        if (n <= 0) { closesocket(s); return; }
+        req.append(buf, static_cast<size_t>(n));
+        headerEnd = req.find("\r\n\r\n");
+        if (headerEnd != std::string::npos) break;
+    }
+    if (headerEnd == std::string::npos) { closesocket(s); return; }
+
+    const std::string headers = req.substr(0, headerEnd + 2);
+    size_t lineEnd = headers.find("\r\n");
+    const std::string reqLine = headers.substr(0, lineEnd);
+    std::istringstream rl(reqLine);
+    std::string method, target;
+    rl >> method >> target;
+
+    std::string path = target;
+    std::string query;
+    size_t qpos = target.find('?');
+    if (qpos != std::string::npos) {
+        path = target.substr(0, qpos);
+        query = target.substr(qpos + 1);
+    }
+
+    // Prefer Cloudflare Tunnel's CF-Connecting-IP header when behind cloudflared
+    const std::string cfIp = HeaderValueCaseInsensitive(headers, "CF-Connecting-IP");
+    if (!cfIp.empty()) remoteIp = cfIp;
+
+    // WebSocket Upgrade for `/ws`
+    const std::string upgradeHdr = HeaderValueCaseInsensitive(headers, "Upgrade");
+    if (path == "/ws" && _stricmp(upgradeHdr.c_str(), "websocket") == 0) {
+        const std::string wsKey = HeaderValueCaseInsensitive(headers, "Sec-WebSocket-Key");
+        if (wsKey.empty()) {
+            SendHttpResponse(s, 400, "Bad Request", "{\"error\":\"Missing Sec-WebSocket-Key\"}");
+            closesocket(s);
+            return;
+        }
+        HandleWebSocketRelay(s, query, wsKey);
+        return;
+    }
+
+    size_t contentLen = 0;
+    const std::string clStr = HeaderValueCaseInsensitive(headers, "Content-Length");
+    if (!clStr.empty()) contentLen = static_cast<size_t>(std::strtoull(clStr.c_str(), nullptr, 10));
+    if (contentLen > 8192) {
+        SendHttpResponse(s, 413, "Payload Too Large", "{\"error\":\"Request body too large\"}");
+        closesocket(s);
+        return;
+    }
+
+    std::string body = req.substr(headerEnd + 4);
+    while (body.size() < contentLen) {
+        int n = recv(s, buf, static_cast<int>(std::min<size_t>(sizeof(buf), contentLen - body.size())), 0);
+        if (n <= 0) break;
+        body.append(buf, static_cast<size_t>(n));
+    }
+
+    // Public health check (no version header required so browsers & Cloudflare checks succeed)
+    if (method == "GET" && (path == "/" || path == "/api/health")) {
