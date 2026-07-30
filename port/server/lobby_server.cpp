@@ -382,3 +382,147 @@ std::string QueryParam(const std::string& query, const char* key) {
     std::string needle = std::string(key) + "=";
     size_t pos = 0;
     while (pos < query.size()) {
+        size_t amp = query.find('&', pos);
+        std::string part = query.substr(pos, amp == std::string::npos ? std::string::npos : amp - pos);
+        if (part.rfind(needle, 0) == 0) return part.substr(needle.size());
+        if (amp == std::string::npos) break;
+        pos = amp + 1;
+    }
+    return {};
+}
+
+std::string HeaderValueCaseInsensitive(const std::string& headers, const char* name) {
+    std::string lowerH = headers;
+    std::string lowerN = name;
+    for (char& c : lowerH) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    for (char& c : lowerN) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    lowerN += ":";
+    size_t pos = lowerH.find(lowerN);
+    if (pos == std::string::npos) return {};
+    pos += lowerN.size();
+    while (pos < headers.size() && (headers[pos] == ' ' || headers[pos] == '\t')) ++pos;
+    size_t end = headers.find("\r\n", pos);
+    std::string val = headers.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+    while (!val.empty() && (val.back() == ' ' || val.back() == '\r' || val.back() == '\n'))
+        val.pop_back();
+    return val;
+}
+
+void HandleWebSocketRelay(SOCKET clientSock, const std::string& query, const std::string& wsKey) {
+    const uint64_t sid = std::strtoull(QueryParam(query, "session").c_str(), nullptr, 10);
+    const int role = std::atoi(QueryParam(query, "role").c_str());
+    const std::string token = QueryParam(query, "token");
+
+    std::string roomId;
+    {
+        std::scoped_lock lk(g_mtx);
+        auto sit = g_sessionToRoom.find(sid);
+        if (sit == g_sessionToRoom.end() || (role != 1 && role != 2)) {
+            SendHttpResponse(clientSock, 403, "Forbidden", "{\"error\":\"Invalid session\"}");
+            closesocket(clientSock);
+            return;
+        }
+        auto rit = g_rooms.find(sit->second);
+        if (rit == g_rooms.end()) {
+            SendHttpResponse(clientSock, 404, "Not Found", "{\"error\":\"Room not found\"}");
+            closesocket(clientSock);
+            return;
+        }
+        Room& rm = rit->second;
+        const std::string& expectedToken = (role == 1) ? rm.hostToken : rm.guestToken;
+        if (token.empty() || token != expectedToken) {
+            SendHttpResponse(clientSock, 403, "Forbidden", "{\"error\":\"Bad auth token\"}");
+            closesocket(clientSock);
+            return;
+        }
+        roomId = rm.roomId;
+    }
+
+    // Complete RFC 6455 handshake
+    const std::string concat = wsKey + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+    uint8_t sha1[20]{};
+    if (!Sha1Hash(reinterpret_cast<const uint8_t*>(concat.data()), concat.size(), sha1)) {
+        closesocket(clientSock);
+        return;
+    }
+    const std::string acceptKey = Base64Encode(sha1, 20);
+    std::ostringstream resp;
+    resp << "HTTP/1.1 101 Switching Protocols\r\n"
+         << "Upgrade: websocket\r\n"
+         << "Connection: Upgrade\r\n"
+         << "Sec-WebSocket-Accept: " << acceptKey << "\r\n\r\n";
+    const std::string rstr = resp.str();
+    int noDelay = 1;
+    setsockopt(clientSock, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&noDelay),
+               sizeof(noDelay));
+    DWORD rxTimeout = 45000;  // 45s idle timeout
+    setsockopt(clientSock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&rxTimeout),
+               sizeof(rxTimeout));
+    if (!SendAll(clientSock, rstr.data(), rstr.size())) {
+        closesocket(clientSock);
+        return;
+    }
+
+    {
+        std::scoped_lock lk(g_mtx);
+        auto rit = g_rooms.find(roomId);
+        if (rit != g_rooms.end()) {
+            SOCKET& slot = (role == 1) ? rit->second.wsHostSock : rit->second.wsGuestSock;
+            if (slot != INVALID_SOCKET) closesocket(slot);
+            slot = clientSock;
+        }
+    }
+    std::printf("[ws-relay] connected session=%llu role=%d room=%s\n",
+                static_cast<unsigned long long>(sid), role, roomId.c_str());
+
+    // Frame forwarding loop
+    std::vector<uint8_t> payload;
+    while (g_running.load()) {
+        uint8_t h2[2]{};
+        if (!RecvExact(clientSock, h2, 2)) break;
+        const uint8_t opcode = h2[0] & 0x0fu;
+        const bool masked = (h2[1] & 0x80u) != 0;
+        uint64_t plen = h2[1] & 0x7fu;
+        if (plen == 126) {
+            uint8_t ext[2]{};
+            if (!RecvExact(clientSock, ext, 2)) break;
+            plen = (static_cast<uint64_t>(ext[0]) << 8) | ext[1];
+        } else if (plen == 127) {
+            uint8_t ext[8]{};
+            if (!RecvExact(clientSock, ext, 8)) break;
+            plen = 0;
+            for (int i = 0; i < 8; ++i) plen = (plen << 8) | ext[i];
+        }
+        if (plen > 4096) break;  // Gameplay frames are < 256 bytes
+
+        uint8_t maskKey[4]{};
+        if (masked && !RecvExact(clientSock, maskKey, 4)) break;
+        payload.resize(static_cast<size_t>(plen));
+        if (plen > 0 && !RecvExact(clientSock, payload.data(), static_cast<size_t>(plen))) break;
+        if (masked) {
+            for (size_t i = 0; i < payload.size(); ++i) payload[i] ^= maskKey[i & 3];
+        }
+
+        if (opcode == 0x8) {  // Close
+            break;
+        } else if (opcode == 0x9) {  // Ping -> Pong
+            SendWsFrame(clientSock, 0xA, payload.data(), payload.size());
+            continue;
+        } else if (opcode == 0x2 || opcode == 0x1) {  // Binary / Text gameplay relay frame
+            SOCKET peerSock = INVALID_SOCKET;
+            {
+                std::scoped_lock lk(g_mtx);
+                auto rit = g_rooms.find(roomId);
+                if (rit != g_rooms.end()) {
+                    if (role == 1) rit->second.hostLastSeenMs = NowMs();
+                    else rit->second.guestLastSeenMs = NowMs();
+                    peerSock = (role == 1) ? rit->second.wsGuestSock : rit->second.wsHostSock;
+                }
+            }
+            if (peerSock != INVALID_SOCKET && !payload.empty()) {
+                SendWsFrame(peerSock, 0x2, payload.data(), payload.size());
+            }
+        }
+    }
+
+    {
