@@ -20,6 +20,7 @@
 #include "hle.h"
 #include "image.h"
 #include "thunks.h"
+#include "ui/overlay.h"
 
 namespace {
 
