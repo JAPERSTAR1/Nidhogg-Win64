@@ -1670,13 +1670,16 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                         ? buttons
                         : ReadLocalPlayerButtons(1, dummyLx, dummyLy, dummyRx, dummyRy);
                     uint32_t syncedP1 = 0, syncedP2 = 0;
-                    if (g_netplayStep(g_submits, localP1, syncedP1, syncedP2, g_simRandState)) {
-                        g_netplayClockLock.store(true, std::memory_order_relaxed);
-                        g_netplaySimFrame.store(g_submits, std::memory_order_relaxed);
+                    uint64_t matchFrm = 0;
+                    bool lockClk = false;
+                    if (g_netplayStep(g_submits, localP1, syncedP1, syncedP2, g_simRandState,
+                                      matchFrm, lockClk)) {
+                        g_netplayClockLock.store(lockClk, std::memory_order_relaxed);
+                        g_netplaySimFrame.store(matchFrm, std::memory_order_relaxed);
                         g_netplayP1Buttons = syncedP1;
                         g_netplayP2Buttons = syncedP2;
                         g_netplaySyncedFrame = g_submits;
-                        if (g_base && Readable(reinterpret_cast<void*>(g_base + 0x1f0068), 4)) {
+                        if (lockClk && g_base && Readable(reinterpret_cast<void*>(g_base + 0x1f0068), 4)) {
                             *reinterpret_cast<uint32_t*>(g_base + 0x1f0068) = g_simRandState;
                         }
                     } else {
