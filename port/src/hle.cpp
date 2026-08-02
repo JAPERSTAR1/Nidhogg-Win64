@@ -1082,7 +1082,7 @@ uint64_t ComputeGuestStateHash() {
                 const uint64_t vt = *reinterpret_cast<const uint64_t*>(eb);
                 const uint64_t relVt = (vt >= g_base) ? (vt - g_base) : vt;
                 mixBytes(&relVt, sizeof(relVt));
-                mixBytes(eb + 0x80, 0xA4);  // positions, velocities, alarms, sprite, angles
+                mixBytes(eb + 0x98, 0x8C);
                 ++entityCount;
             }
             ent = *reinterpret_cast<const uint64_t*>(eb + 0x08);
@@ -1095,6 +1095,7 @@ uint64_t ComputeGuestStateHash() {
 void SetNetplayStepCallback(NetplayStepFn fn) {
     g_netplayStep = fn;
     g_netplaySyncedFrame = UINT64_MAX;
+    g_netplaySimFrame.store(0, std::memory_order_relaxed);
     if (!fn) g_netplayClockLock.store(false, std::memory_order_relaxed);
 }
 
