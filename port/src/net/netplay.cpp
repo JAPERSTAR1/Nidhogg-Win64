@@ -1431,10 +1431,10 @@ void TickNetplayLobby() {
         std::string err;
         if (mode == "host_public") {
             g_net.cliAutoStart = true;
-            CreateRoom(arg.empty() ? "QA Public Room" : arg, true, 0, err);
+            CreateRoom(arg.empty() ? "QA Public Room" : arg, true, stg, err);
         } else if (mode == "host_private") {
             g_net.cliAutoStart = true;
-            CreateRoom("QA Private Room", false, 0, err);
+            CreateRoom("QA Private Room", false, stg, err);
             const std::string codeOut = getEnv("NIDHOGG_NET_CODE_OUT");
             if (!codeOut.empty()) {
                 if (std::FILE* f = core::FopenUtf8(codeOut, "wb")) {
