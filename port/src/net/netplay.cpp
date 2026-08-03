@@ -1376,6 +1376,7 @@ void LeaveRoom() {
         g_net.hasPeerLan = false;
         g_net.txQueue.clear();
     }
+    StopWebSocketRelay();
     if (!roomId.empty() && !token.empty()) {
         std::ostringstream body;
         body << "{\"roomId\":\"" << JsonEsc(roomId) << "\",\"authToken\":\"" << JsonEsc(token) << "\"}";
@@ -1409,7 +1410,6 @@ bool CopyRoomCodeToClipboard() {
 void TickNetplayLobby() {
     InitNetplay();
 
-    // Optional automated multi-instance CLI/env workflow triggers (used by Phase 11 QA)
     bool doEnvSetup = false;
     {
         std::scoped_lock lk(g_net.mtx);
