@@ -1320,7 +1320,7 @@ bool KickGuest(std::string& outError) {
         return false;
     }
     std::scoped_lock lk(g_net.mtx);
-    ApplyRoomStateFromJsonLocked(resp);
+    ApplyRoomStateFromJsonLocked(resp, needWs);
     g_net.snap.statusText = "Removed guest from room.";
     return true;
 }
@@ -1347,8 +1347,14 @@ bool StartMatch(std::string& outError) {
             outError = "Cannot start match yet (need 2 players).";
         return false;
     }
-    std::scoped_lock lk(g_net.mtx);
-    ApplyRoomStateFromJsonLocked(resp);
+    bool needWs = false;
+    uint64_t sid = 0;
+    {
+        std::scoped_lock lk(g_net.mtx);
+        ApplyRoomStateFromJsonLocked(resp, needWs);
+        sid = g_net.sessionId;
+    }
+    if (needWs) StartWebSocketRelay(sid, 1, token);
     return true;
 }
 
