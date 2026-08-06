@@ -1190,21 +1190,18 @@ bool QuickMatch(const std::string& preferredRegion, bool& outNoRoomsAvailable,
     outNoRoomsAvailable = false;
     LeaveRoom();
 
-    uint16_t udpPort = 0;
-    std::string lanIp;
+    std::string epJson;
     {
         std::scoped_lock lk(g_net.mtx);
         if (!EnsureUdpSocketLocked()) { outError = "Failed to bind UDP socket."; return false; }
-        udpPort = g_net.localUdpPort;
-        lanIp = g_net.localLanIp;
+        epJson = EndpointFieldsJsonLocked();
     }
 
     const auto& cfg = core::CurrentSettings();
     std::ostringstream body;
     body << "{\"region\":\"" << JsonEsc(preferredRegion.empty() ? cfg.region : preferredRegion) << "\","
          << "\"playerName\":\"" << JsonEsc(cfg.playerName) << "\","
-         << "\"lanIp\":\"" << JsonEsc(lanIp) << "\","
-         << "\"lanPort\":" << udpPort << "}";
+         << epJson << "}";
 
     int status = 0;
     std::string resp;
