@@ -1099,8 +1099,7 @@ bool JoinRoomById(const std::string& roomId, std::string& outError) {
     std::ostringstream body;
     body << "{\"roomId\":\"" << JsonEsc(roomId) << "\","
          << "\"playerName\":\"" << JsonEsc(cfg.playerName) << "\","
-         << "\"lanIp\":\"" << JsonEsc(lanIp) << "\","
-         << "\"lanPort\":" << udpPort << "}";
+         << epJson << "}";
 
     int status = 0;
     std::string resp;
@@ -1112,19 +1111,24 @@ bool JoinRoomById(const std::string& roomId, std::string& outError) {
         return false;
     }
 
-    std::scoped_lock lk(g_net.mtx);
-    g_net.snap = NetStatsSnapshot{};
-    g_net.snap.phase = SessionPhase::LobbyWaiting;
-    g_net.snap.isHost = false;
-    g_net.snap.localPlayerNum = 2;
-    g_net.snap.remoteConnected = true;
-    g_net.snap.statusText = "Joined room — toggle Ready when prepared.";
-    JsonGetStr(resp, "authToken", g_net.authToken);
-    ApplyRoomStateFromJsonLocked(resp);
-    SendRegisterEndpointToRelayLocked();
-    g_net.lastHeartbeatUsec = MonoUsec();
-    LOG_INFO("[netplay] joined room id=%s host=%s", g_net.snap.roomId.c_str(),
-             g_net.snap.hostName.c_str());
+    bool needWs = false;
+    uint64_t sid = 0;
+    std::string tok;
+    {
+        std::scoped_lock lk(g_net.mtx);
+        g_net.snap = NetStatsSnapshot{};
+        g_net.snap.phase = SessionPhase::LobbyWaiting;
+        g_net.snap.isHost = false;
+        g_net.snap.localPlayerNum = 2;
+        g_net.snap.remoteConnected = true;
+        g_net.snap.statusText = "Joined room — toggle Ready when prepared.";
+        JsonGetStr(resp, "authToken", g_net.authToken);
+        tok = g_net.authToken;
+        ApplyRoomStateFromJsonLocked(resp, needWs);
+        sid = g_net.sessionId;
+        SendRegisterEndpointToRelayLocked();
+    }
+    if (needWs) StartWebSocketRelay(sid, 2, tok);
     return true;
 }
 
