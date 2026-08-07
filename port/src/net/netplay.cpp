@@ -1086,13 +1086,11 @@ bool JoinRoomById(const std::string& roomId, std::string& outError) {
     InitNetplay();
     LeaveRoom();
 
-    uint16_t udpPort = 0;
-    std::string lanIp;
+    std::string epJson;
     {
         std::scoped_lock lk(g_net.mtx);
         if (!EnsureUdpSocketLocked()) { outError = "Failed to bind UDP socket."; return false; }
-        udpPort = g_net.localUdpPort;
-        lanIp = g_net.localLanIp;
+        epJson = EndpointFieldsJsonLocked();
     }
 
     const auto& cfg = core::CurrentSettings();
