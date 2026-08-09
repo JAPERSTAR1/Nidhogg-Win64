@@ -1031,16 +1031,11 @@ bool CreateRoom(const std::string& roomName, bool isPublic, int stageIndex, std:
     InitNetplay();
     LeaveRoom();
 
-    uint16_t udpPort = 0;
-    std::string lanIp;
+    std::string epJson;
     {
         std::scoped_lock lk(g_net.mtx);
-        if (!EnsureUdpSocketLocked()) {
-            outError = "Failed to bind local UDP socket.";
-            return false;
-        }
-        udpPort = g_net.localUdpPort;
-        lanIp = g_net.localLanIp;
+        if (!EnsureUdpSocketLocked()) { outError = "Failed to bind local UDP socket."; return false; }
+        epJson = EndpointFieldsJsonLocked();
     }
 
     const auto& cfg = core::CurrentSettings();
