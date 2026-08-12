@@ -722,7 +722,7 @@ bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
             ioRandState = g_net.matchSeed;
             LOG_INFO("[netplay] BARRIER SYNCED -> entering InMatch (seed=0x%08x, stage=%d, delay=%df, mode=%s)",
                      g_net.matchSeed, g_net.snap.stageIndex, delay,
-                     g_net.snap.transport == TransportMode::DirectP2P ? "DirectP2P" : "Relay");
+                     TransportLabel(g_net.snap.transport));
         } else {
             outP1Buttons = navBtn;
             outP2Buttons = 0;
@@ -730,9 +730,7 @@ bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
         }
     }
 
-    if (g_net.snap.phase != SessionPhase::InMatch) {
-        return false;
-    }
+    if (g_net.snap.phase != SessionPhase::InMatch) return false;
 
     const uint64_t f = g_net.matchFrame;
     outMatchFrame = f;
