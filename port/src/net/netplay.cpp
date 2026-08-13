@@ -666,13 +666,14 @@ bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
                              uint32_t& outP1Buttons, uint32_t& outP2Buttons,
                              uint32_t& ioRandState) {
     std::unique_lock<std::mutex> lk(g_net.mtx);
-    PumpUdpRxLocked();
+    PumpTransportsRxLocked();
 
     if (g_net.snap.phase == SessionPhase::ConnectingTransport) {
         const uint64_t now = MonoUsec();
         if (now - g_net.connectStartUsec > 1200000ULL &&
             g_net.snap.transport == TransportMode::PunchingP2P) {
-            g_net.snap.transport = TransportMode::RelayFallback;
+            g_net.snap.transport = g_net.wsConnected.load() ? TransportMode::WebSocketRelay
+                                                            : TransportMode::RelayFallback;
         }
         uint64_t ts = now;
         SendSealedPeerPacketLocked(kPktPunch, &ts, sizeof(ts));
