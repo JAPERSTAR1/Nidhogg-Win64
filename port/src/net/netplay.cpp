@@ -572,73 +572,6 @@ void PumpUdpRxLocked() {
                 SendSealedPeerPacketLocked(kPktPunchAck, ackTs, sizeof(ackTs));
                 break;
             }
-            case kPktPunchAck: {
-                if (plain.size() >= 16) {
-                    uint64_t peerTs = 0, echoed = 0;
-                    std::memcpy(&peerTs, plain.data(), 8);
-                    std::memcpy(&echoed, plain.data() + 8, 8);
-                    g_net.lastPeerTimestampUsec = peerTs;
-                    UpdateRttLocked(echoed);
-                }
-                if (g_net.snap.phase == SessionPhase::ConnectingTransport) {
-                    g_net.snap.phase = SessionPhase::SyncingMenu;
-                    g_net.snap.statusText = "Connected — synchronizing stage entry...";
-                    LOG_INFO("[netplay] transport established (%s, rtt=%.1fms)",
-                             g_net.snap.transport == TransportMode::DirectP2P ? "DirectP2P" : "Relay",
-                             g_net.snap.rttMs);
-                }
-                break;
-            }
-            case kPktSyncBarrier: {
-                if (plain.size() < sizeof(SyncBarrierPayload)) break;
-                SyncBarrierPayload sb{};
-                std::memcpy(&sb, plain.data(), sizeof(sb));
-                g_net.lastPeerTimestampUsec = sb.sendTimeUsec;
-                UpdateRttLocked(sb.echoTimeUsec);
-                if (g_net.snap.phase == SessionPhase::ConnectingTransport) {
-                    g_net.snap.phase = SessionPhase::SyncingMenu;
-                }
-                if (!g_net.snap.isHost) {
-                    g_net.snap.stageIndex = sb.stageIndex;
-                    g_net.snap.inputDelayFrames = std::clamp<int>(sb.inputDelay, 1, 8);
-                    g_net.matchSeed = sb.matchSeed;
-                }
-                if (sb.atLevelSelect) g_net.peerAtBarrier = true;
-                if (sb.ackPeerBarrier) g_net.peerAckedBarrier = true;
-                break;
-            }
-            case kPktInput: {
-                if (plain.size() < sizeof(InputPayload)) break;
-                InputPayload ip{};
-                std::memcpy(&ip, plain.data(), sizeof(ip));
-                g_net.lastPeerTimestampUsec = ip.sendTimeUsec;
-                UpdateRttLocked(ip.echoTimeUsec);
-
-                // Peer entering InMatch means peer passed the barrier too
-                g_net.peerAtBarrier = true;
-                g_net.peerAckedBarrier = true;
-
-                const uint8_t count = std::min<uint8_t>(ip.historyCount, 16);
-                for (uint8_t k = 0; k < count; ++k) {
-                    if (ip.latestFrame >= k) {
-                        g_net.remoteInputs[ip.latestFrame - k] = ip.buttonsHistory[k];
-                    }
-                }
-                if (ip.flags & 1u) {
-                    g_net.remoteStateHashes[ip.stateHashFrame] = ip.stateHash;
-                    VerifyHashesForFrameLocked(ip.stateHashFrame);
-                }
-                break;
-            }
-            case kPktDisconnect: {
-                g_net.snap.phase = SessionPhase::Disconnected;
-                g_net.snap.remoteConnected = false;
-                g_net.snap.statusText = "Opponent disconnected from match.";
-                LOG_WARN("[netplay] received peer disconnect notification");
-                break;
-            }
-            default:
-                break;
         }
     }
 }
@@ -664,7 +597,10 @@ void SendInputPacketForFrameLocked(uint64_t targetFrame, bool includeHash, uint6
 
 bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
                              uint32_t& outP1Buttons, uint32_t& outP2Buttons,
-                             uint32_t& ioRandState) {
+                             uint32_t& ioRandState, uint64_t& outMatchFrame,
+                             bool& outLockClock) {
+    outMatchFrame = 0;
+    outLockClock = false;
     std::unique_lock<std::mutex> lk(g_net.mtx);
     PumpTransportsRxLocked();
 
