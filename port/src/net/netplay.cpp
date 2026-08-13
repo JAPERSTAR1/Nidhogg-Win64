@@ -676,6 +676,7 @@ bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
         }
         uint64_t ts = now;
         SendSealedPeerPacketLocked(kPktPunch, &ts, sizeof(ts));
+        FlushTxQueueLocked();
         outP1Buttons = 0;
         outP2Buttons = 0;
         return true;
@@ -689,9 +690,11 @@ bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
         } else {
             g_net.localAtBarrier = false;
             ++g_net.menuPulseCounter;
-            // Pulse Cross for 8 frames every 50 frames to advance rLogos -> rMainMenu ->
-            // Multiplayer -> Offline Versus -> rLevelSelect cleanly.
-            if ((g_net.menuPulseCounter % 50) < 8) navBtn = 0x4000u;
+            if ((g_net.menuPulseCounter % 50) < 8) {
+                navBtn = (room == "rShowLobbies" || room == "rControlsRoom" || room == "rCredits")
+                             ? 0x2000u
+                             : 0x4000u;
+            }
         }
 
         SyncBarrierPayload sb{};
@@ -703,6 +706,7 @@ bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
         sb.sendTimeUsec = MonoUsec();
         sb.echoTimeUsec = g_net.lastPeerTimestampUsec;
         SendSealedPeerPacketLocked(kPktSyncBarrier, &sb, sizeof(sb));
+        FlushTxQueueLocked();
 
         if (g_net.localAtBarrier && g_net.peerAtBarrier && g_net.peerAckedBarrier) {
             g_net.snap.phase = SessionPhase::InMatch;
