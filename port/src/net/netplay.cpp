@@ -422,6 +422,21 @@ void QueueUdpSendLocked(const sockaddr_in& dst, const uint8_t* data, size_t len)
     }
 }
 
+void QueueWsSendLocked(const uint8_t* data, size_t len) {
+    if (!g_net.wsConnected.load() || !data || !len || ShouldSimDropLocked()) return;
+    const uint64_t delayUsec = ComputeSimDelayUsecLocked();
+    if (delayUsec == 0) {
+        SendWsBinaryNow(data, len);
+        ++g_net.snap.packetsSent;
+    } else {
+        DelayedPacket dp;
+        dp.deliverAtUsec = MonoUsec() + delayUsec;
+        dp.viaWebSocket = true;
+        dp.bytes.assign(data, data + len);
+        g_net.txQueue.push_back(std::move(dp));
+    }
+}
+
 void SendSealedPeerPacketLocked(uint8_t pktType, const void* payload, size_t payloadLen) {
     if (!g_net.hasSessionKey || g_net.sessionId == 0) return;
     WireAad aad{};
@@ -435,14 +450,17 @@ void SendSealedPeerPacketLocked(uint8_t pktType, const void* payload, size_t pay
                     sizeof(aad), static_cast<const uint8_t*>(payload), payloadLen, sealed))
         return;
 
-    auto sendViaRelay = [&]() {
-        if (!g_net.hasRelayAddr) return;
-        std::vector<uint8_t> env(1 + 8 + 1 + sealed.size());
-        env[0] = kPktRelayEnvelope;
-        std::memcpy(&env[1], &g_net.sessionId, 8);
-        env[9] = aad.senderRole;
-        std::memcpy(&env[10], sealed.data(), sealed.size());
-        QueueUdpSendLocked(g_net.relayAddr, env.data(), env.size());
+    auto sendRelays = [&]() {
+        if (g_net.wsConnected.load()) {
+            QueueWsSendLocked(sealed.data(), sealed.size());
+        } else if (g_net.hasRelayAddr) {
+            std::vector<uint8_t> env(10 + sealed.size());
+            env[0] = kPktRelayEnvelope;
+            std::memcpy(&env[1], &g_net.sessionId, 8);
+            env[9] = aad.senderRole;
+            std::memcpy(&env[10], sealed.data(), sealed.size());
+            QueueUdpSendLocked(g_net.relayAddr, env.data(), env.size());
+        }
     };
 
     if (g_net.forceRelay) {
