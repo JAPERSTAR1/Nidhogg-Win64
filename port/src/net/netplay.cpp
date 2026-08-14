@@ -744,11 +744,11 @@ bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
         effectiveLocal = 0;
         if (g_net.snap.isHost) {
             const int stg = g_net.snap.stageIndex;
-            if (stg == 3 && f >= 15 && f < 23) effectiveLocal = 0x0040u;        // Down -> Wilds
-            else if (stg == 1 && ((f >= 15 && f < 23) || (f >= 60 && f < 68)))  // Down x2 -> Mines
+            if (stg == 3 && f >= 15 && f < 23) effectiveLocal = 0x0040u;
+            else if (stg == 1 && ((f >= 15 && f < 23) || (f >= 60 && f < 68)))
                 effectiveLocal = 0x0040u;
-            else if (stg == 2 && f >= 15 && f < 23) effectiveLocal = 0x0010u;   // Up -> Clouds
-            if (f >= 115 && f < 125) effectiveLocal = 0x4000u;                  // Cross -> Start Match!
+            else if (stg == 2 && f >= 15 && f < 23) effectiveLocal = 0x0010u;
+            if (f >= 115 && f < 125) effectiveLocal = 0x4000u;
         }
     }
 
