@@ -965,6 +965,7 @@ void InitNetplay() {
 
 void ShutdownNetplay() {
     LeaveRoom();
+    if (g_net.bgHeartbeatThread.joinable()) g_net.bgHeartbeatThread.join();
     std::scoped_lock lk(g_net.mtx);
     if (g_net.udpSock != INVALID_SOCKET) {
         closesocket(g_net.udpSock);
@@ -1022,6 +1023,20 @@ bool EnsureLocalLobbyServerRunning(std::string& outError) {
         CloseHandle(pi.hProcess);
 
         const std::string url = "http://127.0.0.1:" + std::to_string(port);
+        for (int i = 0; i < 10; ++i) {
+            Sleep(100);
+            if (HttpRequestJsonAt(url, "GET", "/api/health", "", 250, st, resp, err) &&
+                st == 200 && resp.find("nidhogg-lobby") != std::string::npos) {
+                std::scoped_lock lk(g_endpointMtx);
+                g_resolvedEndpoint = url;
+                g_resolvedAtUsec = MonoUsec();
+                LOG_INFO("[netplay] spawned local NidhoggServer.exe on %s", url.c_str());
+                return true;
+            }
+        }
+    }
+    outError = "NidhoggServer.exe started but could not bind port 27880 or 27885.";
+    return false;
 }
 
 bool RefreshPublicRooms(const std::string& regionFilter, bool availableOnly,
