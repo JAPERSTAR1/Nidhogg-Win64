@@ -960,10 +960,13 @@ void InitNetplay() {
     WSADATA wsa{};
     WSAStartup(MAKEWORD(2, 2), &wsa);
     CheckEnvSimConfigLocked();
+    g_net.shuttingDown.store(false);
+    g_net.bgHeartbeatThread = std::thread(BackgroundHeartbeatLoop);
     g_net.initialized = true;
 }
 
 void ShutdownNetplay() {
+    g_net.shuttingDown.store(true);
     LeaveRoom();
     if (g_net.bgHeartbeatThread.joinable()) g_net.bgHeartbeatThread.join();
     std::scoped_lock lk(g_net.mtx);
