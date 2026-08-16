@@ -381,14 +381,18 @@ bool EnsureUdpSocketLocked() {
 }
 
 void FlushTxQueueLocked() {
-    if (g_net.udpSock == INVALID_SOCKET) return;
     const uint64_t now = MonoUsec();
     for (auto it = g_net.txQueue.begin(); it != g_net.txQueue.end();) {
         if (now >= it->deliverAtUsec) {
-            sendto(g_net.udpSock, reinterpret_cast<const char*>(it->bytes.data()),
-                   static_cast<int>(it->bytes.size()), 0,
-                   reinterpret_cast<const sockaddr*>(&it->dst), sizeof(it->dst));
-            ++g_net.snap.packetsSent;
+            if (it->viaWebSocket) {
+                SendWsBinaryNow(it->bytes.data(), it->bytes.size());
+                ++g_net.snap.packetsSent;
+            } else if (g_net.udpSock != INVALID_SOCKET) {
+                sendto(g_net.udpSock, reinterpret_cast<const char*>(it->bytes.data()),
+                       static_cast<int>(it->bytes.size()), 0,
+                       reinterpret_cast<const sockaddr*>(&it->dst), sizeof(it->dst));
+                ++g_net.snap.packetsSent;
+            }
             it = g_net.txQueue.erase(it);
         } else {
             ++it;
