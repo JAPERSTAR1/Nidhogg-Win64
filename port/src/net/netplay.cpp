@@ -325,7 +325,6 @@ struct NetState {
     std::unordered_map<uint64_t, uint64_t> localStateHashes;
     std::unordered_map<uint64_t, uint64_t> remoteStateHashes;
 
-    // CLI auto-test state
     bool cliHandled = false;
     bool cliAutoStart = false;
 };
@@ -338,7 +337,7 @@ std::string DetectLocalLanIp() {
     sockaddr_in dst{};
     dst.sin_family = AF_INET;
     dst.sin_port = htons(53);
-    inet_pton(AF_INET, "8.8.8.8", &dst.sin_addr);
+    inet_pton(AF_INET, "1.1.1.1", &dst.sin_addr);
     connect(s, reinterpret_cast<sockaddr*>(&dst), sizeof(dst));
     sockaddr_in name{};
     int namelen = sizeof(name);
