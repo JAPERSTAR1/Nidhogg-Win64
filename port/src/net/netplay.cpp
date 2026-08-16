@@ -345,7 +345,8 @@ std::string DetectLocalLanIp() {
     std::string ip = "127.0.0.1";
     if (getsockname(s, reinterpret_cast<sockaddr*>(&name), &namelen) == 0) {
         char buf[64]{};
-        if (inet_ntop(AF_INET, &name.sin_addr, buf, sizeof(buf)) && std::strcmp(buf, "0.0.0.0") != 0)
+        if (inet_ntop(AF_INET, &name.sin_addr, buf, sizeof(buf)) &&
+            std::strcmp(buf, "0.0.0.0") != 0)
             ip = buf;
     }
     closesocket(s);
@@ -398,6 +399,39 @@ void DiscoverStunEndpoint(SOCKET sock, std::string& outIp, uint16_t& outPort) {
             int n = recvfrom(sock, reinterpret_cast<char*>(resp), sizeof(resp), 0,
                              reinterpret_cast<sockaddr*>(&from), &flen);
             if (n >= 20 && resp[0] == 0x01 && resp[1] == 0x01 &&
+                std::memcmp(resp + 8, req + 8, 12) == 0) {
+                const size_t msgLen = (static_cast<size_t>(resp[2]) << 8) | resp[3];
+                size_t off = 20;
+                while (off + 4 <= static_cast<size_t>(n) && off < 20 + msgLen) {
+                    const uint16_t attrType = (static_cast<uint16_t>(resp[off]) << 8) | resp[off + 1];
+                    const uint16_t attrLen = (static_cast<uint16_t>(resp[off + 2]) << 8) | resp[off + 3];
+                    off += 4;
+                    if (off + attrLen > static_cast<size_t>(n)) break;
+                    if (attrType == 0x0020 && attrLen >= 8 && resp[off + 1] == 0x01) {
+                        // XOR-MAPPED-ADDRESS IPv4
+                        const uint16_t xport = ((static_cast<uint16_t>(resp[off + 2]) << 8) |
+                                                resp[off + 3]) ^ 0x2112u;
+                        uint32_t xip = 0;
+                        std::memcpy(&xip, resp + off + 4, 4);
+                        const uint32_t cookieNet = htonl(0x2112A442u);
+                        xip ^= cookieNet;
+                        in_addr ia{};
+                        ia.s_addr = xip;
+                        char ipStr[64]{};
+                        if (inet_ntop(AF_INET, &ia, ipStr, sizeof(ipStr))) {
+                            outIp = ipStr;
+                            outPort = xport;
+                            LOG_INFO("[stun] discovered public NAT endpoint %s:%u via %s",
+                                     outIp.c_str(), outPort, sv.host);
+                            return;
+                        }
+                    }
+                    off += (attrLen + 3u) & ~3u;
+                }
+            }
+            Sleep(5);
+        }
+    }
 }
 
 bool EnsureUdpSocketLocked() {
