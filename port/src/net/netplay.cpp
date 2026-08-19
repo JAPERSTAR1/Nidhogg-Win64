@@ -308,7 +308,6 @@ struct NetState {
     bool directEstablished = false;
 
     uint64_t connectStartUsec = 0;
-    uint64_t lastHeartbeatUsec = 0;
     uint64_t lastRxUsec = 0;
     uint64_t lastPeerTimestampUsec = 0;
     uint64_t nextNonce = 1;
@@ -319,6 +318,8 @@ struct NetState {
     bool peerAckedBarrier = false;
     uint64_t menuPulseCounter = 0;
 
+    std::string lastSyncedRoom;
+    uint32_t roomTransitionCount = 0;
     uint64_t matchFrame = 0;
     std::unordered_map<uint64_t, uint32_t> localInputs;
     std::unordered_map<uint64_t, uint32_t> remoteInputs;
