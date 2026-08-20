@@ -274,9 +274,60 @@ bool HttpRequestJson(const std::string& method, const std::string& path, const s
     return true;
 }
 
+std::mutex g_endpointMtx;
+std::string g_resolvedEndpoint;
+uint64_t g_resolvedAtUsec = 0;
+
+// Resolves configured server URL; if default `https://lobby.japer.me` is not yet
+// online in DNS while a local `NidhoggServer.exe` is running on 127.0.0.1:27880,
+// seamlessly falls back to localhost so both production and local play work out of the box.
+bool HttpRequestJson(const std::string& method, const std::string& path, const std::string& body,
+                     int& outStatus, std::string& outResponse, std::string& outErr,
+                     uint32_t* outRttMs = nullptr) {
+    const std::string configured = core::CurrentSettings().lobbyServerUrl;
+    std::string cached;
+    {
+        std::scoped_lock lk(g_endpointMtx);
+        if (!g_resolvedEndpoint.empty() && (MonoUsec() - g_resolvedAtUsec < 15000000ULL)) {
+            cached = g_resolvedEndpoint;
+        }
+    }
+
+    if (!cached.empty()) {
+        if (HttpRequestJsonAt(cached, method, path, body, 2000, outStatus, outResponse, outErr,
+                              outRttMs)) {
+            return true;
+        }
+        std::scoped_lock lk(g_endpointMtx);
+        g_resolvedEndpoint.clear();
+    }
+
+    if (HttpRequestJsonAt(configured, method, path, body, 1500, outStatus, outResponse, outErr,
+                          outRttMs)) {
+        std::scoped_lock lk(g_endpointMtx);
+        g_resolvedEndpoint = configured;
+        g_resolvedAtUsec = MonoUsec();
+        return true;
+    }
+
+    // Automatic localhost fallback when default public hostname is offline
+    if (configured.find("127.0.0.1") == std::string::npos &&
+        configured.find("localhost") == std::string::npos) {
+        for (const char* localCand : {"http://127.0.0.1:27880", "http://127.0.0.1:27885"}) {
+            int hst = 0;
+            std::string hresp, herr;
+            if (HttpRequestJsonAt(localCand, "GET", "/api/health", "", 300, hst, hresp, herr) &&
+                hst == 200 && hresp.find("nidhogg-lobby") != std::string::npos) {
+                if (HttpRequestJsonAt(localCand, method, path, body, 1000, outStatus, outResponse,
+                                      herr, outRttMs)) {
+                    std::scoped_lock lk(g_endpointMtx);
+                    g_resolvedEndpoint = localCand;
 struct NetState {
     std::mutex mtx;
     bool initialized = false;
+    std::atomic<bool> shuttingDown{false};
+    std::thread bgHeartbeatThread;
+
     SOCKET udpSock = INVALID_SOCKET;
     uint16_t localUdpPort = 0;
     std::string localLanIp = "127.0.0.1";
