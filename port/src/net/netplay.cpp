@@ -518,8 +518,102 @@ void VerifyHashesForFrameLocked(uint64_t f) {
     g_net.remoteStateHashes.erase(rit);
 }
 
-void PumpUdpRxLocked() {
-    if (g_net.udpSock == INVALID_SOCKET || !g_net.hasSessionKey) return;
+void ProcessAuthenticatedPacketLocked(const uint8_t* pkt, size_t pktLen,
+                                      const sockaddr_in* directFrom, bool fromWs, bool fromUdpRelay) {
+    if (pktLen < sizeof(WireAad) + 8 + 16) return;
+    WireAad aad{};
+    std::memcpy(&aad, pkt, sizeof(aad));
+    if (aad.magic != kWireMagic || aad.sessionId != g_net.sessionId) return;
+    const uint8_t expectedPeerRole = g_net.snap.isHost ? 2 : 1;
+    if (aad.senderRole != expectedPeerRole) return;
+
+    uint64_t nonce = 0;
+    std::vector<uint8_t> plain;
+    if (!OpenPacket(g_net.sessionKey, pkt, pktLen, sizeof(WireAad), nonce, plain)) return;
+
+    ++g_net.snap.packetsReceived;
+    g_net.lastRxUsec = MonoUsec();
+
+    if (directFrom && !fromWs && !fromUdpRelay && !g_net.forceRelay) {
+        g_net.directEstablished = true;
+        g_net.activePeerAddr = *directFrom;
+        g_net.snap.transport = TransportMode::DirectP2P;
+    } else if (!g_net.directEstablished) {
+        g_net.snap.transport = fromWs ? TransportMode::WebSocketRelay
+                                      : TransportMode::RelayFallback;
+    }
+
+    switch (aad.type) {
+        case kPktPunch: {
+            uint64_t peerTs = 0;
+            if (plain.size() >= 8) std::memcpy(&peerTs, plain.data(), 8);
+            g_net.lastPeerTimestampUsec = peerTs;
+            uint64_t ackTs[2] = {MonoUsec(), peerTs};
+            SendSealedPeerPacketLocked(kPktPunchAck, ackTs, sizeof(ackTs));
+            break;
+        }
+        case kPktPunchAck: {
+            if (plain.size() >= 16) {
+                uint64_t peerTs = 0, echoed = 0;
+                std::memcpy(&peerTs, plain.data(), 8);
+                std::memcpy(&echoed, plain.data() + 8, 8);
+                g_net.lastPeerTimestampUsec = peerTs;
+                UpdateRttLocked(echoed);
+            }
+            if (g_net.snap.phase == SessionPhase::ConnectingTransport) {
+                g_net.snap.phase = SessionPhase::SyncingMenu;
+                g_net.snap.statusText = "Connected — synchronizing stage entry...";
+                LOG_INFO("[netplay] transport established (%s, rtt=%.1fms)",
+                         TransportLabel(g_net.snap.transport), g_net.snap.rttMs);
+            }
+            break;
+        }
+        case kPktSyncBarrier: {
+            if (plain.size() < sizeof(SyncBarrierPayload)) break;
+            SyncBarrierPayload sb{};
+            std::memcpy(&sb, plain.data(), sizeof(sb));
+            g_net.lastPeerTimestampUsec = sb.sendTimeUsec;
+            UpdateRttLocked(sb.echoTimeUsec);
+            if (g_net.snap.phase == SessionPhase::ConnectingTransport) {
+                g_net.snap.phase = SessionPhase::SyncingMenu;
+            }
+            if (!g_net.snap.isHost) {
+                g_net.snap.stageIndex = sb.stageIndex;
+                g_net.snap.inputDelayFrames = std::clamp<int>(sb.inputDelay, 1, 8);
+                g_net.matchSeed = sb.matchSeed;
+            }
+            if (sb.atLevelSelect) g_net.peerAtBarrier = true;
+            if (sb.ackPeerBarrier) g_net.peerAckedBarrier = true;
+            break;
+        }
+        case kPktInput: {
+            if (plain.size() < sizeof(InputPayload)) break;
+            InputPayload ip{};
+            std::memcpy(&ip, plain.data(), sizeof(ip));
+            g_net.lastPeerTimestampUsec = ip.sendTimeUsec;
+            UpdateRttLocked(ip.echoTimeUsec);
+            g_net.peerAtBarrier = true;
+            g_net.peerAckedBarrier = true;
+
+            const uint8_t count = std::min<uint8_t>(ip.historyCount, 16);
+            for (uint8_t k = 0; k < count; ++k) {
+                if (ip.latestFrame >= k) {
+                    g_net.remoteInputs[ip.latestFrame - k] = ip.buttonsHistory[k];
+                }
+            }
+            if (ip.flags & 1u) {
+                g_net.remoteStateHashes[ip.stateHashFrame] = ip.stateHash;
+                VerifyHashesForFrameLocked(ip.stateHashFrame);
+            }
+            break;
+        }
+        case kPktDisconnect: {
+            g_net.snap.phase = SessionPhase::Disconnected;
+            g_net.snap.remoteConnected = false;
+            g_net.snap.statusText = "Opponent disconnected from match.";
+            LOG_WARN("[netplay] received peer disconnect notification");
+            break;
+        }
     FlushTxQueueLocked();
 
     // 1. Drain Binary WebSocket Relay RX frames
