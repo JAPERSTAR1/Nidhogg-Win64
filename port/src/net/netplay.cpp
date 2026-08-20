@@ -280,9 +280,22 @@ struct NetState {
     SOCKET udpSock = INVALID_SOCKET;
     uint16_t localUdpPort = 0;
     std::string localLanIp = "127.0.0.1";
+    std::string stunPublicIp;
+    uint16_t stunPublicPort = 0;
+
+    // WinHTTP WebSocket gameplay relay handles
+    std::mutex wsTxMtx;
+    HINTERNET wsSession = nullptr;
+    HINTERNET wsConnect = nullptr;
+    HINTERNET wsReq = nullptr;
+    HINTERNET wsHandle = nullptr;
+    std::atomic<bool> wsConnected{false};
+    std::atomic<bool> wsStop{false};
+    std::thread wsRxThread;
+    std::deque<std::vector<uint8_t>> wsRxQueue;
 
     // Network condition simulator (for Phase 11 testing)
-    int simOneWayLatencyMs = 0;  // half of simulated RTT
+    int simOneWayLatencyMs = 0;
     int simJitterMs = 0;
     int simLossPct = 0;
     bool forceRelay = false;
