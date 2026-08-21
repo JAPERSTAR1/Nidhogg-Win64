@@ -509,8 +509,7 @@ void VerifyHashesForFrameLocked(uint64_t f) {
                   static_cast<unsigned long long>(rit->second));
     } else if ((f % 120) == 0) {
         LOG_INFO("[netplay] frame=%llu mode=%s rtt=%.1fms jitter=%.1fms hash=%016llx sync=OK",
-                 static_cast<unsigned long long>(f),
-                 g_net.snap.transport == TransportMode::DirectP2P ? "DirectP2P" : "Relay",
+                 static_cast<unsigned long long>(f), TransportLabel(g_net.snap.transport),
                  g_net.snap.rttMs, g_net.snap.jitterMs,
                  static_cast<unsigned long long>(lit->second));
     }
@@ -614,6 +613,13 @@ void ProcessAuthenticatedPacketLocked(const uint8_t* pkt, size_t pktLen,
             LOG_WARN("[netplay] received peer disconnect notification");
             break;
         }
+        default:
+            break;
+    }
+}
+
+void PumpTransportsRxLocked() {
+    if (!g_net.hasSessionKey) return;
     FlushTxQueueLocked();
 
     // 1. Drain Binary WebSocket Relay RX frames
