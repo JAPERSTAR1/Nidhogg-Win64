@@ -446,7 +446,7 @@ void SendSealedPeerPacketLocked(uint8_t pktType, const void* payload, size_t pay
     };
 
     if (g_net.forceRelay) {
-        sendViaRelay();
+        sendRelays();
         return;
     }
 
@@ -457,7 +457,7 @@ void SendSealedPeerPacketLocked(uint8_t pktType, const void* payload, size_t pay
             QueueUdpSendLocked(g_net.peerPublicAddr, sealed.data(), sealed.size());
         if (g_net.hasPeerLan)
             QueueUdpSendLocked(g_net.peerLanAddr, sealed.data(), sealed.size());
-        sendViaRelay();
+        sendRelays();
     }
 }
 
