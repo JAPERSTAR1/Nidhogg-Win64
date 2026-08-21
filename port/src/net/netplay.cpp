@@ -492,6 +492,15 @@ void UpdateRttLocked(uint64_t echoedSendTimeUsec) {
     }
 }
 
+const char* TransportLabel(TransportMode m) {
+    switch (m) {
+        case TransportMode::DirectP2P: return "DirectP2P";
+        case TransportMode::WebSocketRelay: return "WebSocketRelay";
+        case TransportMode::RelayFallback: return "UdpRelay";
+        default: return "Punching";
+    }
+}
+
 void VerifyHashesForFrameLocked(uint64_t f) {
     auto lit = g_net.localStateHashes.find(f);
     auto rit = g_net.remoteStateHashes.find(f);
@@ -500,9 +509,11 @@ void VerifyHashesForFrameLocked(uint64_t f) {
     ++g_net.snap.stateChecks;
     g_net.snap.lastLocalHash = lit->second;
     g_net.snap.lastRemoteHash = rit->second;
-    if (lit->second != rit->second && !g_net.snap.desyncDetected) {
-        g_net.snap.desyncDetected = true;
-        g_net.snap.desyncFrame = f;
+    if (lit->second != rit->second) {
+        if (!g_net.snap.desyncDetected) {
+            g_net.snap.desyncDetected = true;
+            g_net.snap.desyncFrame = f;
+        }
         LOG_ERROR("[netplay] DESYNC DETECTED at matchFrame=%llu local=%016llx remote=%016llx",
                   static_cast<unsigned long long>(f),
                   static_cast<unsigned long long>(lit->second),
