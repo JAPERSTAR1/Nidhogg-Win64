@@ -217,7 +217,7 @@ bool HttpRequestJson(const std::string& method, const std::string& path, const s
     HINTERNET hConnect = WinHttpConnect(hSession, u.host.c_str(), u.port, 0);
     if (!hConnect) {
         WinHttpCloseHandle(hSession);
-        outErr = "Cannot connect to lobby server (" + u.hostUtf8 + ")";
+        outErr = "Cannot connect to lobby server (" + baseUrl + ")";
         return false;
     }
 
@@ -243,7 +243,7 @@ bool HttpRequestJson(const std::string& method, const std::string& path, const s
         WinHttpCloseHandle(hReq);
         WinHttpCloseHandle(hConnect);
         WinHttpCloseHandle(hSession);
-        outErr = "Lobby server unreachable (" + core::CurrentSettings().lobbyServerUrl + ")";
+        outErr = "Lobby server unreachable (" + baseUrl + ")";
         return false;
     }
 
