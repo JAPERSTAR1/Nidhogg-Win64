@@ -203,16 +203,17 @@ std::string EffectiveProtocolVersion() {
     return kProtocolVersion;
 }
 
-bool HttpRequestJson(const std::string& method, const std::string& path, const std::string& body,
-                     int& outStatus, std::string& outResponse, std::string& outErr,
-                     uint32_t* outRttMs = nullptr) {
-    const ParsedUrl u = ParseServerUrl(core::CurrentSettings().lobbyServerUrl);
+bool HttpRequestJsonAt(const std::string& baseUrl, const std::string& method,
+                       const std::string& path, const std::string& body, int timeoutMs,
+                       int& outStatus, std::string& outResponse, std::string& outErr,
+                       uint32_t* outRttMs = nullptr) {
+    const ParsedUrl u = ParseServerUrl(baseUrl);
     const uint64_t t0 = MonoUsec();
 
     HINTERNET hSession = WinHttpOpen(L"NidhoggPort/1.0", WINHTTP_ACCESS_TYPE_NO_PROXY,
                                      WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!hSession) { outErr = "WinHttpOpen failed"; return false; }
-    WinHttpSetTimeouts(hSession, 1500, 1500, 2000, 2000);
+    WinHttpSetTimeouts(hSession, timeoutMs, timeoutMs, timeoutMs, timeoutMs);
 
     HINTERNET hConnect = WinHttpConnect(hSession, u.host.c_str(), u.port, 0);
     if (!hConnect) {
