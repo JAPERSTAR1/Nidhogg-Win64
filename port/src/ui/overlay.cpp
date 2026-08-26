@@ -1432,7 +1432,7 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
                 rows.push_back({"   Host Stage Selection", StageName(g_ui.createStageIndex)});
                 rows.push_back({"6. Online Settings", cfg.playerName + " @ " + cfg.region, true, kColMuted});
                 footerNote = g_ui.onlineBanner.empty()
-                                 ? "Native P2P encrypted UDP lockstep + automatic relay fallback."
+                                 ? "Endpoint: " + net::ActiveLobbyEndpoint() + " (P2P UDP + WSS Relay)"
                                  : g_ui.onlineBanner;
             } else if (g_ui.onlinePage == OnlineSubPage::Browser) {
                 rows.push_back({"[ Refresh Public Rooms ]",
@@ -1531,7 +1531,7 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
 
         // Footer bar
         DrawRect(px + 2.0f * S, py + ph - 24.0f * S, pw - 4.0f * S, 22.0f * S, kColHeaderBg);
-        if (footerNote.size() > 54) footerNote.resize(54);
+        if (footerNote.size() > 64) footerNote.resize(64);
         const Color footCol = (g_ui.tab == 4 && g_ui.onlineBannerIsError) ? kColRed : kColMuted;
         DrawTextUi(px + 10.0f * S, py + ph - 16.0f * S, S, footCol, footerNote);
 
