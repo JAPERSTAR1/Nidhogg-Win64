@@ -730,6 +730,17 @@ void AdjustSettingRow(void* hwnd, int tab, int row, int dir, bool activated) {
                         g_ui.selectedRow = 0;
                     }
                     break;
+                case 7:  // Start Local Lobby Server (1-click host server on this PC)
+                    if (activated) {
+                        if (net::EnsureLocalLobbyServerRunning(err)) {
+                            g_ui.onlineBanner = "Local lobby server active at http://127.0.0.1:27880";
+                            g_ui.onlineBannerIsError = false;
+                        } else {
+                            g_ui.onlineBanner = err;
+                            g_ui.onlineBannerIsError = true;
+                        }
+                    }
+                    break;
             }
         } else if (g_ui.onlinePage == OnlineSubPage::Browser) {
             if (row == 0 && activated) {
@@ -983,6 +994,14 @@ bool IsOverlayOpen() {
 }
 
 bool OnWindowMessage(void* hwnd, uint32_t msg, uint64_t wp, int64_t lp) {
+    static int s_qaUnfocused = -1;
+    if (s_qaUnfocused < 0) {
+        char* v = nullptr;
+        size_t len = 0;
+        s_qaUnfocused = (_dupenv_s(&v, &len, "NIDHOGG_QA_UNFOCUSED") == 0 && v && *v == '1') ? 1 : 0;
+        if (v) std::free(v);
+    }
+    if (s_qaUnfocused == 1) return false;
     if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) {
         const int vk = static_cast<int>(wp);
 
