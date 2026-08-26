@@ -35,7 +35,7 @@ constexpr uint8_t kPktPunchAck = 3;
 constexpr uint8_t kPktSyncBarrier = 4;
 constexpr uint8_t kPktInput = 5;
 constexpr uint8_t kPktDisconnect = 6;
-constexpr uint8_t kPktRelayEnvelope = 0x52;  // 'R' envelope to/from UDP relay server
+constexpr uint8_t kPktRelayEnvelope = 0x52;
 
 #pragma pack(push, 1)
 struct WireAad {

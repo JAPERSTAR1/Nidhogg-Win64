@@ -23,6 +23,7 @@ enum class TransportMode : int {
     PunchingP2P = 1,
     DirectP2P = 2,
     RelayFallback = 3,
+    WebSocketRelay = 4,
 };
 
 struct PublicRoomEntry {
@@ -88,6 +89,8 @@ bool KickGuest(std::string& outError);
 bool StartMatch(std::string& outError);
 void LeaveRoom();
 bool CopyRoomCodeToClipboard();
+bool EnsureLocalLobbyServerRunning(std::string& outError);
+std::string ActiveLobbyEndpoint();
 
 NetStatsSnapshot GetSnapshot();
 
