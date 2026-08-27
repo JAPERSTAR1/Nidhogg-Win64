@@ -238,3 +238,99 @@ $mA = Run-TwoInstanceMatch -Tag "mA_p2p_0ms" -ServerUrl "$baseHttp" `
     -PrivateMode:$false -ForceRelay:$false -SimLatencyMs 0 -SimJitterMs 0 -SimLossPct 0 `
     -InputDelay 2 -MaxFrames 2600 -SkipStun:$true -CaptureShots:$true
 $roomsH_A = ([regex]::Matches($mA.HostLog, "Created room (rCastle\S+|rMatchStats)") | ForEach-Object { $_.Groups[1].Value }) -join "->"
+$roomsG_A = ([regex]::Matches($mA.GuestLog, "Created room (rCastle\S+|rMatchStats)") | ForEach-Object { $_.Groups[1].Value }) -join "->"
+$syncOkA  = ($mA.HostLog -match "mode=DirectP2P") -and ($mA.HostLog -match "sync=OK") -and `
+            (-not ($mA.HostLog -match "DESYNC DETECTED")) -and (-not ($mA.GuestLog -match "DESYNC DETECTED"))
+Assert-Mp "Gameplay P2P" "0ms DirectP2P Public Room + QuickMatch full match sync" `
+    (($mA.HostExit -eq 0) -and ($mA.GuestExit -eq 0) -and $syncOkA -and ($roomsH_A -eq $roomsG_A) -and ($roomsH_A -match "rCastleRightA")) `
+    "hostRooms=[$roomsH_A], guestRooms=[$roomsG_A], desync=0"
+
+# ---------------------------------------------------------------------------
+# 4. Match B: Private Room + 6-char Code + Binary WebSocket Relay (Symmetric NAT Fallback)
+# ---------------------------------------------------------------------------
+$mB = Run-TwoInstanceMatch -Tag "mB_wsrelay_priv" -ServerUrl "$baseHttp" `
+    -PrivateMode:$true -ForceRelay:$true -SimLatencyMs 0 -SimJitterMs 0 -SimLossPct 0 `
+    -InputDelay 2 -MaxFrames 1500 -SkipStun:$true
+$syncOkB = ($mB.HostLog -match "mode=WebSocketRelay") -and ($mB.HostLog -match "sync=OK") -and `
+           (-not ($mB.HostLog -match "DESYNC DETECTED")) -and (-not ($mB.GuestLog -match "DESYNC DETECTED"))
+Assert-Mp "Gameplay Relay" "Private Room Code + Binary WebSocket Relay fallback sync" `
+    (($mB.HostExit -eq 0) -and ($mB.GuestExit -eq 0) -and $syncOkB -and ($mB.HostLog -match "rCastleRightA")) `
+    "transport=WebSocketRelay, hostExit=$($mB.HostExit), guestExit=$($mB.GuestExit), desync=0"
+
+# ---------------------------------------------------------------------------
+# 5. Simulated Internet Latency + Jitter + Packet Loss Matrix (30 ms, 80 ms, 150 ms)
+# ---------------------------------------------------------------------------
+foreach ($cond in @(
+    @{ Name = "30ms RTT + 4ms jitter + 2% loss";  Rtt = 30;  Jit = 4;  Loss = 2; Delay = 2; Frames = 950 },
+    @{ Name = "80ms RTT + 10ms jitter + 4% loss"; Rtt = 80;  Jit = 10; Loss = 4; Delay = 3; Frames = 900 },
+    @{ Name = "150ms RTT + 15ms jitter + 5% loss"; Rtt = 150; Jit = 15; Loss = 5; Delay = 5; Frames = 850 }
+)) {
+    $tag = "m_lat_" + $cond.Rtt
+    $mc = Run-TwoInstanceMatch -Tag $tag -ServerUrl "$baseHttp" `
+        -PrivateMode:$false -ForceRelay:$false -SimLatencyMs $cond.Rtt -SimJitterMs $cond.Jit `
+        -SimLossPct $cond.Loss -InputDelay $cond.Delay -MaxFrames $cond.Frames -SkipStun:$true
+    $okSync = ($mc.HostLog -match "sync=OK") -and (-not ($mc.HostLog -match "DESYNC DETECTED")) -and `
+              (-not ($mc.GuestLog -match "DESYNC DETECTED"))
+    $rttMatch = [regex]::Matches($mc.HostLog, "rtt=([0-9.]+)ms")
+    $lastRtt = if ($rttMatch.Count -gt 0) { $rttMatch[$rttMatch.Count - 1].Groups[1].Value } else { "?" }
+    Assert-Mp "Net Sim" $cond.Name `
+        (($mc.HostExit -eq 0) -and ($mc.GuestExit -eq 0) -and $okSync) `
+        "measuredRTT=${lastRtt}ms, delay=$($cond.Delay)f, desync=0"
+}
+
+# ---------------------------------------------------------------------------
+# 6. Peer Disconnect Mid-Match & Server Outage Clean Error
+# ---------------------------------------------------------------------------
+Clear-NetEnv
+$dirDiscH = Join-Path $outDir "disc_host"
+$dirDiscG = Join-Path $outDir "disc_guest"
+New-Item -ItemType Directory -Force -Path "$dirDiscH\config", "$dirDiscG\config" | Out-Null
+Set-Content "$dirDiscH\config\settings.json" '{ "lobbyServerUrl": "$baseHttp", "vsync": 0, "displayWidth": 960, "displayHeight": 540 }'
+Set-Content "$dirDiscG\config\settings.json" '{ "lobbyServerUrl": "$baseHttp", "vsync": 0, "displayWidth": 960, "displayHeight": 540 }'
+$env:NIDHOGG_QA_UNFOCUSED = "1"
+$env:NIDHOGG_SKIP_STUN = "1"
+$env:NIDHOGG_UNCAPPED = "1"
+$env:NIDHOGG_NET_AUTO = "host_public"
+$pDH = Start-Process -FilePath $gameExe -ArgumentList @("--no-prompt","--user-dir",$dirDiscH,"--assets",$assets,"--max-frames","950") -PassThru
+Start-Sleep -Milliseconds 800
+$env:NIDHOGG_NET_AUTO = "quickmatch"
+# Guest exits cleanly at frame 450 (mid-match!), sending encrypted kPktDisconnect to Host!
+$pDG = Start-Process -FilePath $gameExe -ArgumentList @("--no-prompt","--user-dir",$dirDiscG,"--assets",$assets,"--max-frames","450") -PassThru
+$pDG.WaitForExit(30000) | Out-Null
+$pDH.WaitForExit(30000) | Out-Null
+if (-not $pDH.HasExited) { $pDH.Kill() }
+Clear-NetEnv
+$logDH = Get-Content "$dirDiscH\logs\nidhogg.log" -Raw
+Assert-Mp "Resilience" "Guest disconnect mid-match handled cleanly without freeze" `
+    (($pDH.ExitCode -eq 0) -and (($logDH -match "peer disconnect") -or ($logDH -match "peer timed out"))) `
+    "hostExit=$($pDH.ExitCode), disconnectDetected=True"
+
+# ---------------------------------------------------------------------------
+# 7. Real External Cloudflare Edge HTTPS + WSS Tunnel + Public STUN Verification
+# ---------------------------------------------------------------------------
+if ($IncludeCloudflareEdge) {
+    $cfExe = Join-Path $root "tools\cloudflared.exe"
+    if (-not (Test-Path $cfExe)) {
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $cfExe) | Out-Null
+        Write-Host "Downloading official cloudflared.exe for live public HTTPS/WSS edge test..." -ForegroundColor Yellow
+        Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile $cfExe -UseBasicParsing
+    }
+    $cfLog = Join-Path $outDir "cloudflared.log"
+    $cfProc = Start-Process -FilePath $cfExe -ArgumentList @("tunnel","--url","$baseHttp","--logfile",$cfLog) -PassThru -WindowStyle Hidden
+    $publicUrl = ""
+    for ($t = 0; $t -lt 60; $t++) {
+        Start-Sleep -Milliseconds 500
+        if (Test-Path $cfLog) {
+            $rawCf = Get-Content $cfLog -Raw -ErrorAction SilentlyContinue
+            $m = [regex]::Match($rawCf, "https://[a-z0-9-]+\.trycloudflare\.com")
+            if ($m.Success) { $publicUrl = $m.Value; break }
+        }
+    }
+
+    if ($publicUrl) {
+        # Wait for DNS propagation of trycloudflare subdomain
+        $edgeHealthOk = $false
+        for ($t = 0; $t -lt 20; $t++) {
+            $eh = Invoke-Api "GET" "$publicUrl/api/health"
+            if ($eh.Code -eq 200 -and $eh.Json.ok) { $edgeHealthOk = $true; break }
+            Start-Sleep -Milliseconds 700
