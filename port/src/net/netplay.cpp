@@ -264,9 +264,7 @@ bool HttpRequestJson(const std::string& method, const std::string& path, const s
         outResponse += chunk;
     }
 
-    if (outRttMs) {
-        *outRttMs = static_cast<uint32_t>((MonoUsec() - t0) / 1000ULL);
-    }
+    if (outRttMs) *outRttMs = static_cast<uint32_t>((MonoUsec() - t0) / 1000ULL);
 
     WinHttpCloseHandle(hReq);
     WinHttpCloseHandle(hConnect);
@@ -322,6 +320,17 @@ bool HttpRequestJson(const std::string& method, const std::string& path, const s
                                       herr, outRttMs)) {
                     std::scoped_lock lk(g_endpointMtx);
                     g_resolvedEndpoint = localCand;
+                    g_resolvedAtUsec = MonoUsec();
+                    LOG_INFO("[netplay] public endpoint %s offline; auto-connected to local %s",
+                             configured.c_str(), localCand);
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
 struct NetState {
     std::mutex mtx;
     bool initialized = false;
