@@ -352,6 +352,54 @@ std::string DetectLocalLanIp() {
     return ip;
 }
 
+// RFC 5389 STUN Binding Request on our gameplay UDP socket to discover external
+// NAT IP:port without needing raw UDP on the Cloudflare Tunnel server.
+void DiscoverStunEndpoint(SOCKET sock, std::string& outIp, uint16_t& outPort) {
+    char* skipEnv = nullptr;
+    size_t skipLen = 0;
+    if (_dupenv_s(&skipEnv, &skipLen, "NIDHOGG_SKIP_STUN") == 0 && skipEnv && *skipEnv == '1') {
+        std::free(skipEnv);
+        return;
+    }
+    if (skipEnv) std::free(skipEnv);
+
+    struct StunServer {
+        const char* host;
+        const char* port;
+    };
+    const StunServer servers[] = {
+        {"stun.cloudflare.com", "3478"},
+        {"stun.l.google.com", "19302"},
+    };
+
+    for (const auto& sv : servers) {
+        addrinfo hints{};
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_DGRAM;
+        hints.ai_protocol = IPPROTO_UDP;
+        addrinfo* res = nullptr;
+        if (getaddrinfo(sv.host, sv.port, &hints, &res) != 0 || !res) continue;
+
+        uint8_t req[20]{};
+        req[0] = 0x00; req[1] = 0x01;  // Binding Request
+        req[2] = 0x00; req[3] = 0x00;  // Length = 0
+        req[4] = 0x21; req[5] = 0x12; req[6] = 0xA4; req[7] = 0x42;  // Magic Cookie
+        RandomBytes(req + 8, 12);      // 96-bit Transaction ID
+
+        sendto(sock, reinterpret_cast<const char*>(req), 20, 0, res->ai_addr,
+               static_cast<int>(res->ai_addrlen));
+        freeaddrinfo(res);
+
+        const uint64_t deadline = MonoUsec() + 250000ULL;  // 250ms max STUN wait
+        while (MonoUsec() < deadline) {
+            uint8_t resp[512];
+            sockaddr_in from{};
+            int flen = sizeof(from);
+            int n = recvfrom(sock, reinterpret_cast<char*>(resp), sizeof(resp), 0,
+                             reinterpret_cast<sockaddr*>(&from), &flen);
+            if (n >= 20 && resp[0] == 0x01 && resp[1] == 0x01 &&
+}
+
 bool EnsureUdpSocketLocked() {
     if (g_net.udpSock != INVALID_SOCKET) return true;
     SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -376,7 +424,12 @@ bool EnsureUdpSocketLocked() {
     g_net.localUdpPort = ntohs(bound.sin_port);
     g_net.localLanIp = DetectLocalLanIp();
     g_net.udpSock = s;
-    LOG_INFO("[netplay] opened UDP socket on %s:%u", g_net.localLanIp.c_str(), g_net.localUdpPort);
+
+    DiscoverStunEndpoint(s, g_net.stunPublicIp, g_net.stunPublicPort);
+    LOG_INFO("[netplay] UDP bound LAN=%s:%u STUN=%s:%u", g_net.localLanIp.c_str(),
+             g_net.localUdpPort,
+             g_net.stunPublicIp.empty() ? "(none)" : g_net.stunPublicIp.c_str(),
+             g_net.stunPublicPort);
     return true;
 }
 
