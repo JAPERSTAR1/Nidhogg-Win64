@@ -58,7 +58,7 @@ struct SyncBarrierPayload {
 
 struct InputPayload {
     uint64_t latestFrame = 0;
-    uint8_t historyCount = 0;  // 1..16 frames: [latestFrame, latestFrame-1, ...]
+    uint8_t historyCount = 0;
     uint8_t flags = 0;         // bit 0: hasStateHash
     uint16_t pad = 0;
     uint32_t buttonsHistory[16]{};
@@ -71,6 +71,7 @@ struct InputPayload {
 
 struct DelayedPacket {
     uint64_t deliverAtUsec = 0;
+    bool viaWebSocket = false;
     sockaddr_in dst{};
     std::vector<uint8_t> bytes;
 };
