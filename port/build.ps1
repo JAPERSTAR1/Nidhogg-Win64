@@ -1,7 +1,6 @@
-# Locate MSVC, build the Nidhogg Windows runtime, standalone GUI executable,
-# multiplayer lobby/relay server, and launcher (when present).
-#   .\build.ps1            compile all targets
-#   .\build.ps1 run        compile and run nidhogg_host.exe
+# Locate MSVC, build the host, run it.
+#   .\build.ps1            compile
+#   .\build.ps1 run        compile and run
 #   .\build.ps1 clean
 
 param([string]$Target = "build")
