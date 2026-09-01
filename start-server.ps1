@@ -46,3 +46,38 @@ if ($existing) {
 } else {
     if ($Background -or $QuickTunnel -or $NamedTunnel) {
         $p = Start-Process -FilePath $srvExe -ArgumentList @("--port", "$Port") -PassThru -WindowStyle Minimized
+        Start-Sleep -Milliseconds 400
+        Write-Host "Started NidhoggServer.exe (PID $($p.Id)) on http://127.0.0.1:$Port" -ForegroundColor Green
+    } else {
+        Write-Host "Starting NidhoggServer.exe in foreground (Ctrl+C to stop)..." -ForegroundColor Green
+        & $srvExe --port $Port
+        return
+    }
+}
+
+if ($QuickTunnel -or $NamedTunnel) {
+    $cfCandidates = @(
+        (Get-Command cloudflared -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -ErrorAction SilentlyContinue),
+        (Join-Path $root "tools\cloudflared.exe"),
+        "$env:ProgramFiles\cloudflared\cloudflared.exe"
+    ) | Where-Object { $_ -and (Test-Path $_) }
+    $cfExe = $cfCandidates | Select-Object -First 1
+    if (-not $cfExe) {
+        $cfExe = Join-Path $root "tools\cloudflared.exe"
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $cfExe) | Out-Null
+        Write-Host "Downloading official cloudflared-windows-amd64.exe..." -ForegroundColor Yellow
+        Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile $cfExe -UseBasicParsing
+    }
+
+    if ($NamedTunnel) {
+        $cfgFile = Join-Path $root "deploy\cloudflared-config.yml"
+        if (-not (Test-Path $cfgFile)) {
+            throw "Missing $cfgFile. Run .\deploy\setup-lobby-japer-me.ps1 once after `cloudflared tunnel login`."
+        }
+        Write-Host "Starting Cloudflare Named Tunnel (https://lobby.japer.me -> http://127.0.0.1:$Port)..." -ForegroundColor Green
+        & $cfExe tunnel --config $cfgFile run
+    } else {
+        Write-Host "Starting free Cloudflare HTTPS/WSS Quick Tunnel -> http://127.0.0.1:$Port ..." -ForegroundColor Green
+        & $cfExe tunnel --url "http://127.0.0.1:$Port"
+    }
+}
