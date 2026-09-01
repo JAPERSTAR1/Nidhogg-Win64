@@ -142,3 +142,99 @@ Assert-Mp "Rooms" "Host Kick Player & Close Room" `
 
 # ---------------------------------------------------------------------------
 # Helper: Run Two Independent Nidhogg.exe Processes in a Real Synchronized Match
+# ---------------------------------------------------------------------------
+function Run-TwoInstanceMatch {
+    param(
+        [string]$Tag,
+        [string]$ServerUrl,
+        [bool]$PrivateMode,
+        [bool]$ForceRelay,
+        [int]$SimLatencyMs,
+        [int]$SimJitterMs,
+        [int]$SimLossPct,
+        [int]$InputDelay,
+        [int]$MaxFrames,
+        [bool]$SkipStun = $true,
+        [bool]$CaptureShots = $false
+    )
+    Clear-NetEnv
+    $dirH = Join-Path $outDir "${Tag}_host"
+    $dirG = Join-Path $outDir "${Tag}_guest"
+    New-Item -ItemType Directory -Force -Path "$dirH\config", "$dirG\config" | Out-Null
+
+    $cfgH = "{ `"playerName`": `"HostYellow`", `"lobbyServerUrl`": `"$ServerUrl`", `"inputDelayFrames`": $InputDelay, `"vsync`": 0, `"displayWidth`": 960, `"displayHeight`": 540, `"showFps`": true, `"showNetStats`": true }"
+    $cfgG = "{ `"playerName`": `"GuestOrange`", `"lobbyServerUrl`": `"$ServerUrl`", `"inputDelayFrames`": $InputDelay, `"vsync`": 0, `"displayWidth`": 960, `"displayHeight`": 540, `"showFps`": true, `"showNetStats`": true }"
+    Set-Content "$dirH\config\settings.json" $cfgH
+    Set-Content "$dirG\config\settings.json" $cfgG
+
+    # Match-frame indexed choreography (`matchFrame = 0` at rLevelSelect barrier;
+    # rCastleCenter starts at matchFrame ~130):
+    #   190..225: Host ducks while Guest throws sword overhead
+    #   230..250: Host aims Up and throws sword into unarmed Guest -> Yellow GO-> arrow!
+    #   265+:     Host sprints & jumps right across rCastleCenter -> rCastleRightA ->
+    #             rCastleRightB -> rCastleRightEnd -> Nidhogg victory -> rMatchStats!
+    $hostInputs = "190:0x0040:35,230:0x0010:20,240:0x8000:8,265:0x0020:1900"
+    for ($jf = 340; $jf -lt 2100; $jf += 95) { $hostInputs += ",${jf}:0x4000:12" }
+    for ($cf = 2150; $cf -lt $MaxFrames; $cf += 55) { $hostInputs += ",${cf}:0x4000:8" }
+    $guestInputs = "190:0x0010:20,200:0x8000:8,285:0x0080:1900"
+
+    $env:NIDHOGG_QA_UNFOCUSED = "1"
+    $env:NIDHOGG_SKIP_STUN = if ($SkipStun) { "1" } else { "0" }
+    $env:NIDHOGG_SERVER_URL = $ServerUrl
+    $env:NIDHOGG_FORCE_RELAY = if ($ForceRelay) { "1" } else { "0" }
+    $env:NIDHOGG_NET_SIM_LATENCY_MS = "$SimLatencyMs"
+    $env:NIDHOGG_NET_SIM_JITTER_MS  = "$SimJitterMs"
+    $env:NIDHOGG_NET_SIM_LOSS_PCT   = "$SimLossPct"
+    if ($SimLatencyMs -eq 0 -and -not $CaptureShots) { $env:NIDHOGG_UNCAPPED = "1" }
+
+    $codeFile = Join-Path $outDir "${Tag}_code.txt"
+    $env:NIDHOGG_NET_AUTO = if ($PrivateMode) { "host_private" } else { "host_public" }
+    $env:NIDHOGG_NET_CODE_OUT = $codeFile
+    $env:NIDHOGG_AUTOPRESS_MATCH = $hostInputs
+    if ($CaptureShots) {
+        $env:NIDHOGG_SCREENSHOT_DIR = "$dirH\shots"
+        $env:NIDHOGG_SCREENSHOT = "600,1100,1700"
+    }
+    $pHost = Start-Process -FilePath $gameExe -ArgumentList @("--no-prompt","--user-dir",$dirH,"--assets",$assets,"--max-frames","$MaxFrames") -PassThru
+
+    if ($PrivateMode) {
+        for ($w = 0; $w -lt 50 -and -not (Test-Path $codeFile); $w++) { Start-Sleep -Milliseconds 150 }
+        $code = if (Test-Path $codeFile) { (Get-Content $codeFile -Raw).Trim() } else { "" }
+        $env:NIDHOGG_NET_AUTO = "join_code"
+        $env:NIDHOGG_NET_ARG  = $code
+    } else {
+        Start-Sleep -Milliseconds 900
+        $env:NIDHOGG_NET_AUTO = "quickmatch"
+        $env:NIDHOGG_NET_ARG  = "us-east"
+    }
+    Remove-Item Env:\NIDHOGG_NET_CODE_OUT -ErrorAction SilentlyContinue
+    $env:NIDHOGG_AUTOPRESS_MATCH = $guestInputs
+    if ($CaptureShots) {
+        $env:NIDHOGG_SCREENSHOT_DIR = "$dirG\shots"
+        $env:NIDHOGG_SCREENSHOT = "600,1100,1700"
+    }
+    $pGuest = Start-Process -FilePath $gameExe -ArgumentList @("--no-prompt","--user-dir",$dirG,"--assets",$assets,"--max-frames","$MaxFrames") -PassThru
+
+    $okH = $pHost.WaitForExit(120000)
+    $okG = $pGuest.WaitForExit(120000)
+    if (-not $pHost.HasExited) { $pHost.Kill() }
+    if (-not $pGuest.HasExited) { $pGuest.Kill() }
+    Clear-NetEnv
+
+    $logH = if (Test-Path "$dirH\logs\nidhogg.log") { Get-Content "$dirH\logs\nidhogg.log" -Raw } else { "" }
+    $logG = if (Test-Path "$dirG\logs\nidhogg.log") { Get-Content "$dirG\logs\nidhogg.log" -Raw } else { "" }
+    return [PSCustomObject]@{
+        HostExit  = if ($okH) { $pHost.ExitCode } else { -1 }
+        GuestExit = if ($okG) { $pGuest.ExitCode } else { -1 }
+        HostLog   = $logH
+        GuestLog  = $logG
+    }
+}
+
+# ---------------------------------------------------------------------------
+# 3. Match A: Direct P2P Encrypted UDP (0 ms, Public Room + Quick Match, Full Match + Screenshots)
+# ---------------------------------------------------------------------------
+$mA = Run-TwoInstanceMatch -Tag "mA_p2p_0ms" -ServerUrl "$baseHttp" `
+    -PrivateMode:$false -ForceRelay:$false -SimLatencyMs 0 -SimJitterMs 0 -SimLossPct 0 `
+    -InputDelay 2 -MaxFrames 2600 -SkipStun:$true -CaptureShots:$true
+$roomsH_A = ([regex]::Matches($mA.HostLog, "Created room (rCastle\S+|rMatchStats)") | ForEach-Object { $_.Groups[1].Value }) -join "->"
