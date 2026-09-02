@@ -1900,16 +1900,11 @@ void TickNetplayLobby() {
     bool doEnvSetup = false;
     {
         std::scoped_lock lk(g_net.mtx);
-        FlushTxQueueLocked();
-        if (g_net.snap.phase == SessionPhase::LobbyWaiting) {
-            PumpTransportsRxLocked();
-        }
         if (!g_net.cliHandled && ps4::SubmittedFrames() >= 15) {
             g_net.cliHandled = true;
             doEnvSetup = true;
         }
     }
-
     if (doEnvSetup) {
         auto getEnv = [](const char* k) -> std::string {
             char* v = nullptr;
