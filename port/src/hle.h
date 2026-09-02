@@ -33,8 +33,7 @@ uint64_t ComputeGuestStateHash();
 // PRNG + wall clock to the synchronized match frame.
 using NetplayStepFn = bool (*)(uint64_t simFrame, uint32_t localButtons,
                                uint32_t& outP1Buttons, uint32_t& outP2Buttons,
-                               uint32_t& ioRandState, uint64_t& outMatchFrame,
-                               bool& outLockClock);
+                               uint32_t& ioRandState);
 void SetNetplayStepCallback(NetplayStepFn fn);
 
 }  // namespace ps4
