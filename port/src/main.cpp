@@ -20,7 +20,6 @@
 #include "hle.h"
 #include "image.h"
 #include "thunks.h"
-#include "ui/overlay.h"
 
 namespace {
 
@@ -197,14 +196,8 @@ int RunMain(const std::vector<std::string>& args, bool hasConsole) {
         std::snprintf(buf, sizeof(buf), "%llu", static_cast<unsigned long long>(maxFrames));
         _putenv_s("NIDHOGG_MAX_FRAMES", buf);
     }
-    if (openOnlineMenu) {
-        _putenv_s("NIDHOGG_OPEN_ONLINE", "1");
-        ps4::ui::OpenOverlayTab(4);
-    }
-    if (openSettingsMenu) {
-        _putenv_s("NIDHOGG_OPEN_SETTINGS", "1");
-        ps4::ui::OpenOverlayTab(0);
-    }
+    if (openOnlineMenu) _putenv_s("NIDHOGG_OPEN_ONLINE", "1");
+    if (openSettingsMenu) _putenv_s("NIDHOGG_OPEN_SETTINGS", "1");
 
     if (wantConsole && !hasConsole) {
         if (AttachConsole(ATTACH_PARENT_PROCESS) || AllocConsole()) {
