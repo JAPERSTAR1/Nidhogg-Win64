@@ -334,3 +334,47 @@ if ($IncludeCloudflareEdge) {
             $eh = Invoke-Api "GET" "$publicUrl/api/health"
             if ($eh.Code -eq 200 -and $eh.Json.ok) { $edgeHealthOk = $true; break }
             Start-Sleep -Milliseconds 700
+        }
+        Assert-Mp "Public Internet" "Cloudflare HTTPS Tunnel /api/health over public internet" `
+            $edgeHealthOk "publicUrl=$publicUrl"
+
+        if ($edgeHealthOk) {
+            # Run TWO real Nidhogg.exe instances over public HTTPS + WSS (`wss://*.trycloudflare.com/ws`) + real `stun.cloudflare.com:3478`!
+            $mPub = Run-TwoInstanceMatch -Tag "m_cloudflare_wss" -ServerUrl $publicUrl `
+                -PrivateMode:$true -ForceRelay:$true -SimLatencyMs 0 -SimJitterMs 0 -SimLossPct 0 `
+                -InputDelay 4 -MaxFrames 2400 -SkipStun:$false
+            $stunWorked = ($mPub.HostLog -match "discovered public NAT endpoint")
+            $wssWorked  = ($mPub.HostLog -match "Binary WebSocket relay connected") -and `
+                          ($mPub.HostLog -match "sync=OK") -and (-not ($mPub.HostLog -match "DESYNC DETECTED"))
+            Assert-Mp "Public Internet" "Live match over Cloudflare HTTPS + WSS Relay + Public STUN" `
+                (($mPub.HostExit -eq 0) -and ($mPub.GuestExit -eq 0) -and $wssWorked) `
+                "url=$publicUrl, stunDiscovered=$stunWorked, wssRelaySync=OK, desync=0"
+        }
+    } else {
+        Assert-Mp "Public Internet" "Cloudflare Quick Tunnel startup" $false "Could not obtain trycloudflare URL"
+    }
+    if ($cfProc -and -not $cfProc.HasExited) { $cfProc.Kill() }
+}
+
+# Stop server & test server-outage error path
+if ($srvProc -and -not $srvProc.HasExited) { $srvProc.Kill() }
+Start-Sleep -Milliseconds 300
+$dirOutage = Join-Path $outDir "server_outage"
+New-Item -ItemType Directory -Force -Path "$dirOutage\config" | Out-Null
+Set-Content "$dirOutage\config\settings.json" '{ "lobbyServerUrl": "http://127.0.0.1:27899", "vsync": 0, "displayWidth": 960, "displayHeight": 540 }'
+$env:NIDHOGG_QA_UNFOCUSED = "1"
+$env:NIDHOGG_UNCAPPED = "1"
+$env:NIDHOGG_NET_AUTO = "host_public"
+& $gameExe --no-prompt --user-dir $dirOutage --assets $assets --max-frames 120 | Out-Null
+$ecOutage = $LASTEXITCODE
+Clear-NetEnv
+$logOutage = Get-Content "$dirOutage\logs\nidhogg.log" -Raw
+Assert-Mp "Resilience" "Server outage handled gracefully with clear error" `
+    (($ecOutage -eq 0) -and ($logOutage -match "unreachable")) `
+    "exit=$ecOutage, logged clear unreachable error without crash"
+
+$passN = @($script:Checks | Where-Object { $_.Status -eq "PASS" }).Count
+$totN  = $script:Checks.Count
+$script:Checks | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $outDir "multiplayer_results.json")
+Write-Host "`nMultiplayer Verification Summary: $passN / $totN checks PASSED" -ForegroundColor Cyan
+if ($passN -ne $totN) { exit 1 }
