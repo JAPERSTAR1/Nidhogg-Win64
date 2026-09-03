@@ -1258,10 +1258,9 @@ void ApplyRoomStateFromJsonLocked(const std::string& resp, bool& outNeedWsStart)
         g_net.peerAckedBarrier = false;
         g_net.menuPulseCounter = 0;
         g_net.connectStartUsec = MonoUsec();
-        g_net.snap.statusText = "Starting match — connecting P2P / WebSocket relay...";
+        g_net.snap.statusText = "Starting match — negotiating encrypted P2P...";
         SendRegisterEndpointToRelayLocked();
         ps4::SetNetplayStepCallback(&NetplayStepCallbackImpl);
-        outNeedWsStart = true;
         LOG_INFO("[netplay] transitioning to ConnectingTransport (sessionId=%llu, role=%s)",
                  static_cast<unsigned long long>(g_net.sessionId),
                  g_net.snap.isHost ? "Host/P1" : "Guest/P2");
