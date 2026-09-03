@@ -1609,11 +1609,13 @@ bool JoinRoomByCode(const std::string& roomCode, std::string& outError) {
         return false;
     }
 
-    std::string epJson;
+    uint16_t udpPort = 0;
+    std::string lanIp;
     {
         std::scoped_lock lk(g_net.mtx);
         if (!EnsureUdpSocketLocked()) { outError = "Failed to bind UDP socket."; return false; }
-        epJson = EndpointFieldsJsonLocked();
+        udpPort = g_net.localUdpPort;
+        lanIp = g_net.localLanIp;
     }
 
     const auto& cfg = core::CurrentSettings();
