@@ -1670,7 +1670,8 @@ bool QuickMatch(const std::string& preferredRegion, bool& outNoRoomsAvailable,
     std::ostringstream body;
     body << "{\"region\":\"" << JsonEsc(preferredRegion.empty() ? cfg.region : preferredRegion) << "\","
          << "\"playerName\":\"" << JsonEsc(cfg.playerName) << "\","
-         << epJson << "}";
+         << "\"lanIp\":\"" << JsonEsc(lanIp) << "\","
+         << "\"lanPort\":" << udpPort << "}";
 
     int status = 0;
     std::string resp;
@@ -1687,24 +1688,18 @@ bool QuickMatch(const std::string& preferredRegion, bool& outNoRoomsAvailable,
         return false;
     }
 
-    bool needWs = false;
-    uint64_t sid = 0;
-    std::string tok;
-    {
-        std::scoped_lock lk(g_net.mtx);
-        g_net.snap = NetStatsSnapshot{};
-        g_net.snap.phase = SessionPhase::LobbyWaiting;
-        g_net.snap.isHost = false;
-        g_net.snap.localPlayerNum = 2;
-        g_net.snap.remoteConnected = true;
-        g_net.snap.statusText = "Quick Match found opponent! Toggle Ready.";
-        JsonGetStr(resp, "authToken", g_net.authToken);
-        tok = g_net.authToken;
-        ApplyRoomStateFromJsonLocked(resp, needWs);
-        sid = g_net.sessionId;
-        SendRegisterEndpointToRelayLocked();
-    }
-    if (needWs) StartWebSocketRelay(sid, 2, tok);
+    std::scoped_lock lk(g_net.mtx);
+    g_net.snap = NetStatsSnapshot{};
+    g_net.snap.phase = SessionPhase::LobbyWaiting;
+    g_net.snap.isHost = false;
+    g_net.snap.localPlayerNum = 2;
+    g_net.snap.remoteConnected = true;
+    g_net.snap.statusText = "Quick Match found opponent! Toggle Ready.";
+    JsonGetStr(resp, "authToken", g_net.authToken);
+    ApplyRoomStateFromJsonLocked(resp);
+    SendRegisterEndpointToRelayLocked();
+    g_net.lastHeartbeatUsec = MonoUsec();
+    LOG_INFO("[netplay] quickmatch joined room id=%s", g_net.snap.roomId.c_str());
     return true;
 }
 
