@@ -1730,11 +1730,11 @@ bool SetRoomVisibility(bool isPublic, std::string& outError) {
     if (!HttpRequestJson("POST", "/api/rooms/visibility", body.str(), status, resp, outError))
         return false;
     if (status != 200) {
-        JsonGetStr(resp, "error", outError);
+        if (!JsonGetStr(resp, "error", outError) || outError.empty())
+            outError = "Visibility update failed.";
         return false;
     }
 
-    bool needWs = false;
     std::scoped_lock lk(g_net.mtx);
     ApplyRoomStateFromJsonLocked(resp);
     g_net.snap.statusText = isPublic ? "Room switched to PUBLIC (listed in browser)."
