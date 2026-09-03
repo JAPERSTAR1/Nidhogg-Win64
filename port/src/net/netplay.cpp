@@ -1202,6 +1202,7 @@ void ApplyRoomStateFromJsonLocked(const std::string& resp, bool& outNeedWsStart)
         g_net.hasRelayAddr = false;
     }
 
+    // Peer endpoints for UDP hole punching
     std::string peerPubIp, peerLanIp;
     int64_t peerPubPort = 0, peerLanPort = 0;
     if (JsonGetStr(resp, "peerPublicIp", peerPubIp) && JsonGetInt(resp, "peerPublicPort", peerPubPort) &&
@@ -1247,7 +1248,7 @@ void ApplyRoomStateFromJsonLocked(const std::string& resp, bool& outNeedWsStart)
     if (roomStatus == "in_match" && g_net.snap.phase == SessionPhase::LobbyWaiting &&
         g_net.hasSessionKey) {
         g_net.snap.phase = SessionPhase::ConnectingTransport;
-        g_net.snap.transport = g_net.forceRelay ? TransportMode::WebSocketRelay
+        g_net.snap.transport = g_net.forceRelay ? TransportMode::RelayFallback
                                                 : TransportMode::PunchingP2P;
         g_net.snap.inputDelayFrames = std::clamp(core::CurrentSettings().inputDelayFrames, 1, 8);
         g_net.snap.desyncDetected = false;
