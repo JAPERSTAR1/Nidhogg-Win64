@@ -1515,7 +1515,8 @@ bool CreateRoom(const std::string& roomName, bool isPublic, int stageIndex, std:
          << "\"region\":\"" << JsonEsc(cfg.region) << "\","
          << "\"isPublic\":" << (isPublic ? "true" : "false") << ","
          << "\"stageIndex\":" << stageIndex << ","
-         << epJson << "}";
+         << "\"lanIp\":\"" << JsonEsc(lanIp) << "\","
+         << "\"lanPort\":" << udpPort << "}";
 
     int status = 0;
     std::string resp;
@@ -1527,23 +1528,21 @@ bool CreateRoom(const std::string& roomName, bool isPublic, int stageIndex, std:
         return false;
     }
 
-    bool needWs = false;
-    {
-        std::scoped_lock lk(g_net.mtx);
-        g_net.snap = NetStatsSnapshot{};
-        g_net.snap.phase = SessionPhase::LobbyWaiting;
-        g_net.snap.isHost = true;
-        g_net.snap.localPlayerNum = 1;
-        g_net.snap.playerCount = 1;
-        g_net.snap.statusText = isPublic ? "Hosting Public Room (" + ActiveLobbyEndpoint() + ")"
-                                         : "Hosting Private Room — share 6-char Room Code.";
-        JsonGetStr(resp, "authToken", g_net.authToken);
-        ApplyRoomStateFromJsonLocked(resp, needWs);
-        SendRegisterEndpointToRelayLocked();
-        LOG_INFO("[netplay] created %s room id=%s code=%s",
-                 isPublic ? "PUBLIC" : "PRIVATE", g_net.snap.roomId.c_str(),
-                 g_net.snap.roomCode.c_str());
-    }
+    std::scoped_lock lk(g_net.mtx);
+    g_net.snap = NetStatsSnapshot{};
+    g_net.snap.phase = SessionPhase::LobbyWaiting;
+    g_net.snap.isHost = true;
+    g_net.snap.localPlayerNum = 1;
+    g_net.snap.playerCount = 1;
+    g_net.snap.statusText = isPublic ? "Hosting Public Room — waiting for challenger..."
+                                     : "Hosting Private Room — share Room Code with friend.";
+    JsonGetStr(resp, "authToken", g_net.authToken);
+    ApplyRoomStateFromJsonLocked(resp);
+    SendRegisterEndpointToRelayLocked();
+    g_net.lastHeartbeatUsec = MonoUsec();
+    LOG_INFO("[netplay] created %s room id=%s code=%s",
+             isPublic ? "PUBLIC" : "PRIVATE", g_net.snap.roomId.c_str(),
+             g_net.snap.roomCode.c_str());
     return true;
 }
 
