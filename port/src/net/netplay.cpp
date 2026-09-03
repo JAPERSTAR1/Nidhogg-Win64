@@ -1484,11 +1484,14 @@ bool RefreshPublicRooms(const std::string& regionFilter, bool availableOnly,
             JsonGetStr(item, "roomName", e.roomName);
             JsonGetStr(item, "region", e.region);
             JsonGetStr(item, "status", e.status);
-            int64_t pc = 1, mp = 2, stg = 0;
+            int64_t pc = 1, mp = 2, stg = 0, ping = 0;
             if (JsonGetInt(item, "playerCount", pc)) e.playerCount = static_cast<int>(pc);
             if (JsonGetInt(item, "maxPlayers", mp)) e.maxPlayers = static_cast<int>(mp);
             if (JsonGetInt(item, "stageIndex", stg)) e.stageIndex = static_cast<int>(stg);
-            e.estimatedPingMs = static_cast<int>(rttMs);
+            if (JsonGetInt(item, "pingMs", ping) && ping > 0)
+                e.estimatedPingMs = static_cast<int>(ping) + static_cast<int>(rttMs);
+            else
+                e.estimatedPingMs = static_cast<int>(rttMs);
             outRooms.push_back(std::move(e));
         }
         pos = objEnd + 1;
