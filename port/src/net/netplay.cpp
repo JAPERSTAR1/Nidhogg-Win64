@@ -1153,8 +1153,7 @@ bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
     return true;
 }
 
-void ApplyRoomStateFromJsonLocked(const std::string& resp, bool& outNeedWsStart) {
-    outNeedWsStart = false;
+void ApplyRoomStateFromJsonLocked(const std::string& resp) {
     JsonGetStr(resp, "roomId", g_net.snap.roomId);
     JsonGetStr(resp, "roomName", g_net.snap.roomName);
     JsonGetStr(resp, "roomCode", g_net.snap.roomCode);
@@ -1191,7 +1190,8 @@ void ApplyRoomStateFromJsonLocked(const std::string& resp, bool& outNeedWsStart)
         if (HexToBytes(keyHex, g_net.sessionKey, 32)) g_net.hasSessionKey = true;
     }
 
-    const ParsedUrl u = ParseServerUrl(ActiveLobbyEndpoint());
+    // Configure relay UDP sockaddr
+    const ParsedUrl u = ParseServerUrl(core::CurrentSettings().lobbyServerUrl);
     sockaddr_in raddr{};
     raddr.sin_family = AF_INET;
     raddr.sin_port = htons(g_net.relayUdpPort);
