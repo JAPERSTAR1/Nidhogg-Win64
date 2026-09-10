@@ -58,5 +58,5 @@ Write-Host "built $out\nidhogg_host.exe, Nidhogg.exe, NidhoggServer.exe" -Foregr
 
 if ($Target -eq "run") {
     Push-Location (Split-Path -Parent $root)
-    try { & (Join-Path $out "nidhogg_host.exe") } finally { Pop-Location }
+    try { & $exe (Join-Path $root "..\work\nidhogg.elf") } finally { Pop-Location }
 }
