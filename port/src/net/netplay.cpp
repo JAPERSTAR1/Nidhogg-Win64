@@ -1062,19 +1062,10 @@ bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
     if (g_net.snap.phase != SessionPhase::InMatch) return false;
 
     const uint64_t f = g_net.matchFrame;
-    outMatchFrame = f;
-    outLockClock = true;
-
-    // Deterministically re-anchor PRNG on every synchronized room entry so any
-    // pre-match menu/ambient RNG calls in rLevelSelect cannot drift combat RNG.
-    const std::string curRoom = ps4::CurrentRoom();
-    if (curRoom != g_net.lastSyncedRoom) {
-        g_net.lastSyncedRoom = curRoom;
-        ++g_net.roomTransitionCount;
-        ioRandState = g_net.matchSeed ^ (g_net.roomTransitionCount * 0x9E3779B9u);
-    }
     const uint32_t delay = static_cast<uint32_t>(std::clamp(g_net.snap.inputDelayFrames, 1, 8));
 
+    // Deterministic stage-selection macro on frames 0..150 inside rLevelSelect so
+    // both peers enter the exact chosen stage on the exact same simulation frame.
     uint32_t effectiveLocal = localButtons;
     if (f < 160) {
         effectiveLocal = 0;
