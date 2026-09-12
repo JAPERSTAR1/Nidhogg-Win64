@@ -814,18 +814,17 @@ void VerifyHashesForFrameLocked(uint64_t f) {
     ++g_net.snap.stateChecks;
     g_net.snap.lastLocalHash = lit->second;
     g_net.snap.lastRemoteHash = rit->second;
-    if (lit->second != rit->second) {
-        if (!g_net.snap.desyncDetected) {
-            g_net.snap.desyncDetected = true;
-            g_net.snap.desyncFrame = f;
-        }
+    if (lit->second != rit->second && !g_net.snap.desyncDetected) {
+        g_net.snap.desyncDetected = true;
+        g_net.snap.desyncFrame = f;
         LOG_ERROR("[netplay] DESYNC DETECTED at matchFrame=%llu local=%016llx remote=%016llx",
                   static_cast<unsigned long long>(f),
                   static_cast<unsigned long long>(lit->second),
                   static_cast<unsigned long long>(rit->second));
     } else if ((f % 120) == 0) {
         LOG_INFO("[netplay] frame=%llu mode=%s rtt=%.1fms jitter=%.1fms hash=%016llx sync=OK",
-                 static_cast<unsigned long long>(f), TransportLabel(g_net.snap.transport),
+                 static_cast<unsigned long long>(f),
+                 g_net.snap.transport == TransportMode::DirectP2P ? "DirectP2P" : "Relay",
                  g_net.snap.rttMs, g_net.snap.jitterMs,
                  static_cast<unsigned long long>(lit->second));
     }
