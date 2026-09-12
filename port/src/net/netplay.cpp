@@ -762,7 +762,7 @@ void SendSealedPeerPacketLocked(uint8_t pktType, const void* payload, size_t pay
             QueueUdpSendLocked(g_net.peerPublicAddr, sealed.data(), sealed.size());
         if (g_net.hasPeerLan)
             QueueUdpSendLocked(g_net.peerLanAddr, sealed.data(), sealed.size());
-        sendRelays();
+        sendViaRelay();
     }
 }
 
@@ -794,15 +794,6 @@ void UpdateRttLocked(uint64_t echoedSendTimeUsec) {
         const double delta = std::fabs(sampleMs - g_net.snap.rttMs);
         g_net.snap.jitterMs = g_net.snap.jitterMs * 0.85 + delta * 0.15;
         g_net.snap.rttMs = g_net.snap.rttMs * 0.85 + sampleMs * 0.15;
-    }
-}
-
-const char* TransportLabel(TransportMode m) {
-    switch (m) {
-        case TransportMode::DirectP2P: return "DirectP2P";
-        case TransportMode::WebSocketRelay: return "WebSocketRelay";
-        case TransportMode::RelayFallback: return "UdpRelay";
-        default: return "Punching";
     }
 }
 
