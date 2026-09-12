@@ -661,15 +661,10 @@ void FlushTxQueueLocked() {
     const uint64_t now = MonoUsec();
     for (auto it = g_net.txQueue.begin(); it != g_net.txQueue.end();) {
         if (now >= it->deliverAtUsec) {
-            if (it->viaWebSocket) {
-                SendWsBinaryNow(it->bytes.data(), it->bytes.size());
-                ++g_net.snap.packetsSent;
-            } else if (g_net.udpSock != INVALID_SOCKET) {
-                sendto(g_net.udpSock, reinterpret_cast<const char*>(it->bytes.data()),
-                       static_cast<int>(it->bytes.size()), 0,
-                       reinterpret_cast<const sockaddr*>(&it->dst), sizeof(it->dst));
-                ++g_net.snap.packetsSent;
-            }
+            sendto(g_net.udpSock, reinterpret_cast<const char*>(it->bytes.data()),
+                   static_cast<int>(it->bytes.size()), 0,
+                   reinterpret_cast<const sockaddr*>(&it->dst), sizeof(it->dst));
+            ++g_net.snap.packetsSent;
             it = g_net.txQueue.erase(it);
         } else {
             ++it;
@@ -677,14 +672,14 @@ void FlushTxQueueLocked() {
     }
 }
 
-bool ShouldSimDropLocked() {
-    if (g_net.simLossPct <= 0) return false;
-    g_net.simRng = g_net.simRng * 1664525u + 1013904223u;
-    return static_cast<int>((g_net.simRng >> 16) % 100u) < g_net.simLossPct;
-}
-
-uint64_t ComputeSimDelayUsecLocked() {
-    uint64_t d = static_cast<uint64_t>(std::max(0, g_net.simOneWayLatencyMs)) * 1000ULL;
+void QueueUdpSendLocked(const sockaddr_in& dst, const uint8_t* data, size_t len) {
+    if (g_net.udpSock == INVALID_SOCKET || !data || !len) return;
+    if (g_net.simLossPct > 0) {
+        g_net.simRng = g_net.simRng * 1664525u + 1013904223u;
+        const int roll = static_cast<int>((g_net.simRng >> 16) % 100u);
+        if (roll < g_net.simLossPct) return;  // Simulated packet drop
+    }
+    uint64_t delayUsec = static_cast<uint64_t>(std::max(0, g_net.simOneWayLatencyMs)) * 1000ULL;
     if (g_net.simJitterMs > 0) {
         g_net.simRng = g_net.simRng * 1664525u + 1013904223u;
         const uint32_t j = (g_net.simRng >> 16) % static_cast<uint32_t>(g_net.simJitterMs * 1000 + 1);
