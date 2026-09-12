@@ -395,14 +395,13 @@ struct NetState {
     bool peerAckedBarrier = false;
     uint64_t menuPulseCounter = 0;
 
-    std::string lastSyncedRoom;
-    uint32_t roomTransitionCount = 0;
     uint64_t matchFrame = 0;
     std::unordered_map<uint64_t, uint32_t> localInputs;
     std::unordered_map<uint64_t, uint32_t> remoteInputs;
     std::unordered_map<uint64_t, uint64_t> localStateHashes;
     std::unordered_map<uint64_t, uint64_t> remoteStateHashes;
 
+    // CLI auto-test state
     bool cliHandled = false;
     bool cliAutoStart = false;
 };
