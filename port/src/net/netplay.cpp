@@ -702,23 +702,7 @@ void QueueUdpSendLocked(const sockaddr_in& dst, const uint8_t* data, size_t len)
     } else {
         DelayedPacket dp;
         dp.deliverAtUsec = MonoUsec() + delayUsec;
-        dp.viaWebSocket = false;
         dp.dst = dst;
-        dp.bytes.assign(data, data + len);
-        g_net.txQueue.push_back(std::move(dp));
-    }
-}
-
-void QueueWsSendLocked(const uint8_t* data, size_t len) {
-    if (!g_net.wsConnected.load() || !data || !len || ShouldSimDropLocked()) return;
-    const uint64_t delayUsec = ComputeSimDelayUsecLocked();
-    if (delayUsec == 0) {
-        SendWsBinaryNow(data, len);
-        ++g_net.snap.packetsSent;
-    } else {
-        DelayedPacket dp;
-        dp.deliverAtUsec = MonoUsec() + delayUsec;
-        dp.viaWebSocket = true;
         dp.bytes.assign(data, data + len);
         g_net.txQueue.push_back(std::move(dp));
     }
