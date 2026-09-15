@@ -1918,16 +1918,8 @@ void TickNetplayLobby() {
             if (_dupenv_s(&v, &len, k) == 0 && v) { s = v; std::free(v); }
             return s;
         };
-        const std::string srvUrl = getEnv("NIDHOGG_SERVER_URL");
-        if (!srvUrl.empty()) {
-            core::CurrentSettings().lobbyServerUrl = srvUrl;
-            std::scoped_lock lk(g_endpointMtx);
-            g_resolvedEndpoint.clear();
-        }
         const std::string mode = getEnv("NIDHOGG_NET_AUTO");
         const std::string arg = getEnv("NIDHOGG_NET_ARG");
-        const std::string stgEnv = getEnv("NIDHOGG_NET_STAGE");
-        const int stg = stgEnv.empty() ? 0 : (std::atoi(stgEnv.c_str()) & 3);
         std::string err;
         if (mode == "host_public") {
             g_net.cliAutoStart = true;
