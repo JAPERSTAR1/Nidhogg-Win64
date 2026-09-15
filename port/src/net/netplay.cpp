@@ -359,7 +359,7 @@ struct NetState {
     std::deque<std::vector<uint8_t>> wsRxQueue;
 
     // Network condition simulator (for Phase 11 testing)
-    int simOneWayLatencyMs = 0;
+    int simOneWayLatencyMs = 0;  // half of simulated RTT
     int simJitterMs = 0;
     int simLossPct = 0;
     bool forceRelay = false;
@@ -385,6 +385,7 @@ struct NetState {
     bool directEstablished = false;
 
     uint64_t connectStartUsec = 0;
+    uint64_t lastHeartbeatUsec = 0;
     uint64_t lastRxUsec = 0;
     uint64_t lastPeerTimestampUsec = 0;
     uint64_t nextNonce = 1;
