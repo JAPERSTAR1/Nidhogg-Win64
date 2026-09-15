@@ -1951,6 +1951,59 @@ void TickNetplayLobby() {
         }
         if (!err.empty()) LOG_WARN("[netplay-auto] mode=%s err=%s", mode.c_str(), err.c_str());
     }
+
+    std::string roomId, token;
+    bool shouldPoll = false;
+    bool autoStartReady = false;
+    {
+        std::scoped_lock lk(g_net.mtx);
+        FlushTxQueueLocked();
+        if (g_net.snap.phase == SessionPhase::LobbyWaiting) {
+            PumpUdpRxLocked();
+        }
+        const uint64_t now = MonoUsec();
+        if (!g_net.snap.roomId.empty() && !g_net.authToken.empty() &&
+            now - g_net.lastHeartbeatUsec >= 400000ULL) {  // 400ms lobby poll / heartbeat
+            g_net.lastHeartbeatUsec = now;
+            roomId = g_net.snap.roomId;
+            token = g_net.authToken;
+            shouldPoll = true;
+        }
+    }
+
+    if (shouldPoll) {
+        std::ostringstream body;
+        body << "{\"roomId\":\"" << JsonEsc(roomId) << "\",\"authToken\":\"" << JsonEsc(token) << "\"}";
+        int status = 0;
+        std::string resp, err;
+        if (HttpRequestJson("POST", "/api/rooms/heartbeat", body.str(), status, resp, err) &&
+            status == 200) {
+            std::scoped_lock lk(g_net.mtx);
+            if (g_net.snap.roomId == roomId) {
+                ApplyRoomStateFromJsonLocked(resp);
+                if (g_net.snap.phase == SessionPhase::LobbyWaiting) {
+                    SendRegisterEndpointToRelayLocked();
+                    if (g_net.cliAutoStart && g_net.snap.isHost && g_net.snap.remoteConnected &&
+                        g_net.snap.remoteReady) {
+                        autoStartReady = true;
+                    }
+                }
+            }
+        } else if (status == 404 || status == 403) {
+            std::scoped_lock lk(g_net.mtx);
+            if (g_net.snap.phase == SessionPhase::LobbyWaiting) {
+                g_net.snap.phase = SessionPhase::Disconnected;
+                g_net.snap.statusText = "Room expired or closed.";
+                g_net.authToken.clear();
+            }
+        }
+    }
+
+    if (autoStartReady) {
+        std::string err;
+        SetReady(true, err);
+        StartMatch(err);
+    }
 }
 
 NetStatsSnapshot GetSnapshot() {
