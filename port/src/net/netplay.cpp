@@ -1743,20 +1743,18 @@ bool SetRoomVisibility(bool isPublic, std::string& outError) {
 }
 
 bool SetReady(bool ready, std::string& outError) {
-    std::string roomId, token, epJson;
+    std::string roomId, token;
     {
         std::scoped_lock lk(g_net.mtx);
         roomId = g_net.snap.roomId;
         token = g_net.authToken;
-        epJson = EndpointFieldsJsonLocked();
     }
     if (roomId.empty()) { outError = "Not in a room."; return false; }
 
     std::ostringstream body;
     body << "{\"roomId\":\"" << JsonEsc(roomId) << "\","
          << "\"authToken\":\"" << JsonEsc(token) << "\","
-         << "\"ready\":" << (ready ? "true" : "false") << ","
-         << epJson << "}";
+         << "\"ready\":" << (ready ? "true" : "false") << "}";
     int status = 0;
     std::string resp;
     if (!HttpRequestJson("POST", "/api/rooms/ready", body.str(), status, resp, outError))
