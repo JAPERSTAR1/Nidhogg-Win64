@@ -1248,9 +1248,8 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
     if (cfg.showNetStats && netSnap.phase != net::SessionPhase::Offline) {
         char netBuf[192];
         const char* tmode =
-            (netSnap.transport == net::TransportMode::DirectP2P) ? "P2P-UDP-AES" :
-            (netSnap.transport == net::TransportMode::WebSocketRelay) ? "WSS-RELAY-AES" :
-            (netSnap.transport == net::TransportMode::RelayFallback) ? "UDP-RELAY-AES" : "NEGOTIATING";
+            (netSnap.transport == net::TransportMode::DirectP2P) ? "P2P-AES" :
+            (netSnap.transport == net::TransportMode::RelayFallback) ? "RELAY-AES" : "NEGOTIATING";
         const char* syncTxt = netSnap.desyncDetected ? "DESYNC!" : "SYNC OK";
         std::snprintf(netBuf, sizeof(netBuf), "ONLINE [%s] P%d | RTT %.1fms | D:%df | %s #%llu",
                       tmode, netSnap.localPlayerNum, netSnap.rttMs, netSnap.inputDelayFrames,
@@ -1267,8 +1266,8 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
     if (g_ui.open) {
         DrawRect(0, 0, W, H, Rgba(6, 8, 14, 175));
 
-        const float pw = std::min(W - 32.0f * S, 540.0f * S);
-        const float ph = std::min(H - 32.0f * S, 368.0f * S);
+        const float pw = std::min(W - 40.0f * S, 460.0f * S);
+        const float ph = std::min(H - 36.0f * S, 360.0f * S);
         const float px = std::floor((W - pw) * 0.5f);
         const float py = std::floor((H - ph) * 0.5f);
 
