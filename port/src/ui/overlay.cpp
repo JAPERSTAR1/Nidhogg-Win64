@@ -1278,7 +1278,7 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
         // Title header
         DrawRect(px + 2.0f * S, py + 2.0f * S, pw - 4.0f * S, 24.0f * S, kColHeaderBg);
         DrawTextUi(px + 12.0f * S, py + 9.0f * S, S, kColGold,
-                   "NIDHOGG  //  PC SETTINGS & ONLINE");
+                   "NIDHOGG  //  PC SETTINGS & ONLINE MULTIPLAYER");
         const std::string closeHint = "[F1 / ESC]";
         DrawTextUi(px + pw - MeasureTextWidth(S, closeHint) - 12.0f * S, py + 9.0f * S,
                    S, kColMuted, closeHint);
@@ -1451,7 +1451,6 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
                 rows.push_back({"5. Join Private Room", "Enter Room Code", true, kColGold});
                 rows.push_back({"   Host Stage Selection", StageName(g_ui.createStageIndex)});
                 rows.push_back({"6. Online Settings", cfg.playerName + " @ " + cfg.region, true, kColMuted});
-                rows.push_back({"7. [ Start Local Lobby Server ]", net::ActiveLobbyEndpoint(), true, kColMuted});
                 footerNote = g_ui.onlineBanner.empty()
                                  ? "Native P2P encrypted UDP lockstep + automatic relay fallback."
                                  : g_ui.onlineBanner;
