@@ -1,0 +1,8 @@
+# Copy to %LOCALAPPDATA%/NidhoggServer/config.yml; credentials stay outside Git.
+# Replace UUID and user path after cloudflared tunnel create nidhogg-lobby.
+tunnel: REPLACE_WITH_TUNNEL_UUID
+credentials-file: C:/Users/REPLACE_USER/.cloudflared/REPLACE_WITH_TUNNEL_UUID.json
+ingress:
+  - hostname: lobby.japer.me
+    service: http://127.0.0.1:27880
+  - service: http_status:404
