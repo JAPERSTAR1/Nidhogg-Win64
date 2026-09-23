@@ -1373,9 +1373,7 @@ void InitNetplay() {
 }
 
 void ShutdownNetplay() {
-    g_net.shuttingDown.store(true);
     LeaveRoom();
-    if (g_net.bgHeartbeatThread.joinable()) g_net.bgHeartbeatThread.join();
     std::scoped_lock lk(g_net.mtx);
     if (g_net.udpSock != INVALID_SOCKET) {
         closesocket(g_net.udpSock);
