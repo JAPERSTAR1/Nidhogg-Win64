@@ -1034,11 +1034,11 @@ bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
         FlushTxQueueLocked();
 
         if (g_net.localAtBarrier && g_net.peerAtBarrier && g_net.peerAckedBarrier) {
+            // Both instances are parked at rLevelSelect and have ACKed the barrier!
+            // Lock RNG + clock and transition synchronously into InMatch frame 0.
             g_net.snap.phase = SessionPhase::InMatch;
             g_net.snap.statusText = "In Match — Synchronized";
             g_net.matchFrame = 0;
-            g_net.lastSyncedRoom = room;
-            g_net.roomTransitionCount = 0;
             g_net.localInputs.clear();
             g_net.remoteInputs.clear();
             g_net.localStateHashes.clear();
