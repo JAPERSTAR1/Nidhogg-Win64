@@ -1268,17 +1268,6 @@ void ApplyRoomStateFromJsonLocked(const std::string& resp, bool& outNeedWsStart)
     }
 }
 
-std::string EndpointFieldsJsonLocked() {
-    std::ostringstream o;
-    o << "\"lanIp\":\"" << JsonEsc(g_net.localLanIp) << "\","
-      << "\"lanPort\":" << g_net.localUdpPort;
-    if (!g_net.stunPublicIp.empty() && g_net.stunPublicPort > 0) {
-        o << ",\"publicIp\":\"" << JsonEsc(g_net.stunPublicIp) << "\","
-          << "\"publicPort\":" << g_net.stunPublicPort;
-    }
-    return o.str();
-}
-
 void CheckEnvSimConfigLocked() {
     auto envInt = [](const char* k, int defVal) {
         char* v = nullptr;
@@ -1298,67 +1287,6 @@ void CheckEnvSimConfigLocked() {
     g_net.forceRelay = envInt("NIDHOGG_FORCE_RELAY", 0) != 0;
 }
 
-// Background thread so lobby heartbeats NEVER stall the 60 Hz D3D11 render thread.
-void BackgroundHeartbeatLoop() {
-    while (!g_net.shuttingDown.load()) {
-        Sleep(350);
-        if (g_net.shuttingDown.load()) break;
-
-        std::string roomId, token, epJson;
-        {
-            std::scoped_lock lk(g_net.mtx);
-            if (!g_net.snap.roomId.empty() && !g_net.authToken.empty()) {
-                roomId = g_net.snap.roomId;
-                token = g_net.authToken;
-                epJson = EndpointFieldsJsonLocked();
-            }
-        }
-        if (roomId.empty()) continue;
-
-        std::ostringstream body;
-        body << "{\"roomId\":\"" << JsonEsc(roomId) << "\","
-             << "\"authToken\":\"" << JsonEsc(token) << "\","
-             << epJson << "}";
-        int status = 0;
-        std::string resp, err;
-        bool needWs = false;
-        bool autoStartReady = false;
-        uint64_t wsSid = 0;
-        int wsRole = 1;
-        if (HttpRequestJson("POST", "/api/rooms/heartbeat", body.str(), status, resp, err) &&
-            status == 200) {
-            {
-                std::scoped_lock lk(g_net.mtx);
-                if (g_net.snap.roomId == roomId) {
-                    ApplyRoomStateFromJsonLocked(resp, needWs);
-                    wsSid = g_net.sessionId;
-                    wsRole = g_net.snap.isHost ? 1 : 2;
-                    if (g_net.snap.phase == SessionPhase::LobbyWaiting) {
-                        SendRegisterEndpointToRelayLocked();
-                        if (g_net.cliAutoStart && g_net.snap.isHost && g_net.snap.remoteConnected &&
-                            g_net.snap.remoteReady) {
-                            autoStartReady = true;
-                        }
-                    }
-                }
-            }
-            if (needWs) StartWebSocketRelay(wsSid, wsRole, token);
-            if (autoStartReady) {
-                std::string sErr;
-                SetReady(true, sErr);
-                StartMatch(sErr);
-            }
-        } else if (status == 404 || status == 403) {
-            std::scoped_lock lk(g_net.mtx);
-            if (g_net.snap.roomId == roomId && g_net.snap.phase == SessionPhase::LobbyWaiting) {
-                g_net.snap.phase = SessionPhase::Disconnected;
-                g_net.snap.statusText = "Room expired or closed.";
-                g_net.authToken.clear();
-            }
-        }
-    }
-}
-
 }  // namespace
 
 void InitNetplay() {
@@ -1367,8 +1295,6 @@ void InitNetplay() {
     WSADATA wsa{};
     WSAStartup(MAKEWORD(2, 2), &wsa);
     CheckEnvSimConfigLocked();
-    g_net.shuttingDown.store(false);
-    g_net.bgHeartbeatThread = std::thread(BackgroundHeartbeatLoop);
     g_net.initialized = true;
 }
 
