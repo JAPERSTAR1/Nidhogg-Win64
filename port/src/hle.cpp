@@ -1098,6 +1098,14 @@ void SetNetplayStepCallback(NetplayStepFn fn) {
     if (!fn) g_netplayClockLock.store(false, std::memory_order_relaxed);
 }
 
+void BeginDeterministicSession(uint32_t seed) {
+    g_onlineMatchSeed = seed;
+    g_simRandState = seed;
+    g_netplayClockLock.store(true);
+    g_netplaySimFrame.store(0);
+    if (g_base) *reinterpret_cast<uint32_t*>(g_base + 0x1f0068) = seed;
+}
+
 // ------------------------------------------------------------------ names --
 
 const char* SlotName(uint32_t s) {
@@ -1400,6 +1408,11 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                        static_cast<size_t>(r.gpr[2]), r.gpr[3]);
             return 0;
         case 153: {
+            // Native match-start code obtains a seed here, stores it at +0x3e3160,
+            // then calls its own srand at +0x70e6e. Preserve that path with the
+            // lobby's agreed seed, independent of cosmetic CRT rand() calls.
+            if (g_netplayClockLock.load() && (ret - g_base == 0x70c09 || ret - g_base == 0x70d9c))
+                return g_onlineMatchSeed;
             if (GetCurrentThreadId() == g_simThreadId) {
                 g_simRandState = g_simRandState * 214013u + 2531011u;
                 return static_cast<uint64_t>((g_simRandState >> 16) & 0x7fffu);
