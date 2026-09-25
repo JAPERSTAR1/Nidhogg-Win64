@@ -1106,9 +1106,11 @@ bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
     const uint64_t waitStart = MonoUsec();
     uint64_t lastRetx = waitStart;
     while (g_net.remoteInputs.find(f) == g_net.remoteInputs.end()) {
-        PumpTransportsRxLocked();
+        PumpUdpRxLocked();
         if (g_net.remoteInputs.find(f) != g_net.remoteInputs.end()) break;
-        if (g_net.snap.phase != SessionPhase::InMatch || ps4::IsQuitRequested()) return false;
+        if (g_net.snap.phase != SessionPhase::InMatch || ps4::IsQuitRequested()) {
+            return false;
+        }
         const uint64_t now = MonoUsec();
         if (now - waitStart > 5000000ULL) {  // 5.0s peer timeout
             g_net.snap.phase = SessionPhase::Disconnected;
