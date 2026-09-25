@@ -142,3 +142,74 @@ Re-check HTTPS health, room operations and a full game before distributing.
 Optional automatic startup (operator account, after the named tunnel works):
 
 ```powershell
+.\install-server-startup.ps1 -TunnelConfig "$env:LOCALAPPDATA\NidhoggServer\config.yml"
+.\stop-server.ps1
+# Remove startup later:
+.\install-server-startup.ps1 -TunnelConfig "$env:LOCALAPPDATA\NidhoggServer\config.yml" -Remove
+```
+
+Startup uses a per-user sign-in shortcut and hidden operator processes. It has
+not been installed during development. Process identity/start time are recorded
+to avoid stopping an unrelated reused PID. The operator logs are under `.tools`.
+
+## Validation
+
+```powershell
+.\port\build.ps1
+.\start-server.ps1
+.\test-multiplayer.ps1 -Combat
+python tests/multiplayer_pair.py --direct --frames 1000 --label direct-check
+python tests/multiplayer_pair.py --disconnect-frame 900 --frames 1200 --label disconnect-check
+python tests/multiplayer_pair.py --endpoint 'https://YOUR-ENDPOINT' --delay 8 --combat --frames 2800 --label public-duel
+```
+
+The Python harness launches independent guest processes and isolated user/save
+directories below `tests/results/`. It returns failure for crashes, divergence,
+missing comparable state checks, or a requested combat run without matching
+winner results. `NIDHOGG_NET_AUTO_EXIT=1` is test-only: it exits when a peer
+disconnects; ordinary clients display the responsive error UI. Tests never write
+to the original asset folder. `--latency` exercises the UDP simulator only;
+it is not a simulated WebSocket RTT measurement.
+
+**Two local processes through an internet HTTPS tunnel are still two local
+processes.** A separate PC on another internet connection must repeat: host,
+join by code/public list, ready, fight, throw, die/respawn, progress, complete,
+compare winner/results, leave and close. That physical-network test remains
+required, including NAT/firewall and practical latency assessment.
+
+## Source evidence / architecture alternatives
+
+* Original `Data/network/config.csv`: ranking/trophy labels, caching counts,
+  session status and matchmaking/search timeouts; no lobby URL or gameplay port.
+* Existing HLE refuses NpToolkit sample user requests with `0x80552c00`; known
+  user/pad/time/CRT APIs are implemented, many remaining imports still return
+  stub zero. Runtime reports Matching initialization and unavailable TUS/PSN.
+  This work does not claim recovered SCE networking semantics or PSN access.
+* Guest random helpers (`+0x22460`, `+0x21e10`) choose native LCG at `+0x1f0068`
+  versus CRT rand for drawing. Original match-seed sites `+0x70c04/+0x70d97`
+  store to `+0x3e3160` and `+0x70e6e` calls native srand. Offline Versus uses a
+  different entry path, so the original `match start` event now applies the
+  agreed seed before new match actors initialize. Offline behavior is untouched.
+* Base object constructor `+0x234f0` and destructor `+0x236b0` prove pointer
+  fields `+0x88/+0x90`, flags and initialized ranges. Old bulk hashing included
+  heap addresses/padding and falsely printed later mismatches as `sync=OK`.
+* Original sync cleanup (`+0x3a860/+0x3aa40`) names Doorways, Dropped/Flying
+  Weapons, Frame, Man, Match, PickupContainers, RecentInputs, Room and Clouds.
+  This is evidence of native synchronization structures, not sufficient proof
+  to claim the original replication/rollback protocol has been recovered.
+* [Cloudflare Tunnel protocol limits](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/routing-to-tunnel/protocols/)
+  and [WebSocket support](https://developers.cloudflare.com/cloudflare-one/faq/cloudflare-tunnels-faq/).
+* [Cloudflare DNS setup modes](https://developers.cloudflare.com/dns/zone-setups/):
+  free full-zone setup versus paid partial/CNAME and enterprise subdomain setup.
+* [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/):
+  Workers Free supports SQLite-backed Objects with daily compute/request/storage
+  quotas: 100,000 requests/day, 13,000 GB-s/day; incoming WebSocket messages
+  count at 20:1 for compute billing. SQLite storage allows 5 million rows read
+  and 100,000 rows written/day, 5 GB total storage (verified 2026-11-12).
+  A persistent high-rate game relay consumes those limits; a Workers/DO
+  backend was evaluated but not implemented. Self-hosting avoids a metered relay
+  bill and another backend rewrite, at the cost of operator-PC uptime.
+* [ICE RFC 8445](https://www.rfc-editor.org/rfc/rfc8445.html) and
+  [STUN RFC 8489](https://www.rfc-editor.org/rfc/rfc8489.html): STUN alone cannot
+  guarantee reachability. WSS is this implementation's non-UDP fallback; there
+  is no hidden paid TURN/VPS dependency.
