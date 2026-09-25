@@ -1110,7 +1110,7 @@ bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
         if (g_net.remoteInputs.find(f) != g_net.remoteInputs.end()) break;
         if (g_net.snap.phase != SessionPhase::InMatch || ps4::IsQuitRequested()) return false;
         const uint64_t now = MonoUsec();
-        if (now - waitStart > 5000000ULL) {
+        if (now - waitStart > 5000000ULL) {  // 5.0s peer timeout
             g_net.snap.phase = SessionPhase::Disconnected;
             g_net.snap.remoteConnected = false;
             g_net.snap.statusText = "Connection lost (peer timed out).";
@@ -1118,7 +1118,7 @@ bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
                      static_cast<unsigned long long>(f));
             return false;
         }
-        if (now - lastRetx >= 6000ULL) {
+        if (now - lastRetx >= 4000ULL) {
             SendInputPacketForFrameLocked(futureFrame, sendHash, f, curHash);
             FlushTxQueueLocked();
             lastRetx = now;
