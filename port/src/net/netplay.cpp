@@ -1195,11 +1195,9 @@ void ApplyRoomStateFromJsonLocked(const std::string& resp, bool& outNeedWsStart)
     sockaddr_in raddr{};
     raddr.sin_family = AF_INET;
     raddr.sin_port = htons(g_net.relayUdpPort);
-    if (!u.https && inet_pton(AF_INET, u.hostUtf8.c_str(), &raddr.sin_addr) == 1) {
+    if (inet_pton(AF_INET, u.hostUtf8.c_str(), &raddr.sin_addr) == 1) {
         g_net.relayAddr = raddr;
         g_net.hasRelayAddr = true;
-    } else {
-        g_net.hasRelayAddr = false;
     }
 
     // Peer endpoints for UDP hole punching
