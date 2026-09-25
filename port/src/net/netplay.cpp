@@ -996,12 +996,10 @@ bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
         const uint64_t now = MonoUsec();
         if (now - g_net.connectStartUsec > 1200000ULL &&
             g_net.snap.transport == TransportMode::PunchingP2P) {
-            g_net.snap.transport = g_net.wsConnected.load() ? TransportMode::WebSocketRelay
-                                                            : TransportMode::RelayFallback;
+            g_net.snap.transport = TransportMode::RelayFallback;
         }
         uint64_t ts = now;
         SendSealedPeerPacketLocked(kPktPunch, &ts, sizeof(ts));
-        FlushTxQueueLocked();
         outP1Buttons = 0;
         outP2Buttons = 0;
         return true;
