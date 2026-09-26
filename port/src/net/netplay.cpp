@@ -415,15 +415,14 @@ std::string DetectLocalLanIp() {
     sockaddr_in dst{};
     dst.sin_family = AF_INET;
     dst.sin_port = htons(53);
-    inet_pton(AF_INET, "1.1.1.1", &dst.sin_addr);
+    inet_pton(AF_INET, "8.8.8.8", &dst.sin_addr);
     connect(s, reinterpret_cast<sockaddr*>(&dst), sizeof(dst));
     sockaddr_in name{};
     int namelen = sizeof(name);
     std::string ip = "127.0.0.1";
     if (getsockname(s, reinterpret_cast<sockaddr*>(&name), &namelen) == 0) {
         char buf[64]{};
-        if (inet_ntop(AF_INET, &name.sin_addr, buf, sizeof(buf)) &&
-            std::strcmp(buf, "0.0.0.0") != 0)
+        if (inet_ntop(AF_INET, &name.sin_addr, buf, sizeof(buf)) && std::strcmp(buf, "0.0.0.0") != 0)
             ip = buf;
     }
     closesocket(s);
