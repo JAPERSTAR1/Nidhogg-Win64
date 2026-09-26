@@ -737,21 +737,18 @@ void SendSealedPeerPacketLocked(uint8_t pktType, const void* payload, size_t pay
                     sizeof(aad), static_cast<const uint8_t*>(payload), payloadLen, sealed))
         return;
 
-    auto sendRelays = [&]() {
-        if (g_net.wsConnected.load()) {
-            QueueWsSendLocked(sealed.data(), sealed.size());
-        } else if (g_net.hasRelayAddr) {
-            std::vector<uint8_t> env(10 + sealed.size());
-            env[0] = kPktRelayEnvelope;
-            std::memcpy(&env[1], &g_net.sessionId, 8);
-            env[9] = aad.senderRole;
-            std::memcpy(&env[10], sealed.data(), sealed.size());
-            QueueUdpSendLocked(g_net.relayAddr, env.data(), env.size());
-        }
+    auto sendViaRelay = [&]() {
+        if (!g_net.hasRelayAddr) return;
+        std::vector<uint8_t> env(1 + 8 + 1 + sealed.size());
+        env[0] = kPktRelayEnvelope;
+        std::memcpy(&env[1], &g_net.sessionId, 8);
+        env[9] = aad.senderRole;
+        std::memcpy(&env[10], sealed.data(), sealed.size());
+        QueueUdpSendLocked(g_net.relayAddr, env.data(), env.size());
     };
 
     if (g_net.forceRelay) {
-        sendRelays();
+        sendViaRelay();
         return;
     }
 
