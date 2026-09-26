@@ -687,14 +687,9 @@ uint64_t ComputeSimDelayUsecLocked() {
     uint64_t d = static_cast<uint64_t>(std::max(0, g_net.simOneWayLatencyMs)) * 1000ULL;
     if (g_net.simJitterMs > 0) {
         g_net.simRng = g_net.simRng * 1664525u + 1013904223u;
-        d += (g_net.simRng >> 16) % static_cast<uint32_t>(g_net.simJitterMs * 1000 + 1);
+        const uint32_t j = (g_net.simRng >> 16) % static_cast<uint32_t>(g_net.simJitterMs * 1000 + 1);
+        delayUsec += j;
     }
-    return d;
-}
-
-void QueueUdpSendLocked(const sockaddr_in& dst, const uint8_t* data, size_t len) {
-    if (g_net.udpSock == INVALID_SOCKET || !data || !len || ShouldSimDropLocked()) return;
-    const uint64_t delayUsec = ComputeSimDelayUsecLocked();
     if (delayUsec == 0) {
         sendto(g_net.udpSock, reinterpret_cast<const char*>(data), static_cast<int>(len), 0,
                reinterpret_cast<const sockaddr*>(&dst), sizeof(dst));
