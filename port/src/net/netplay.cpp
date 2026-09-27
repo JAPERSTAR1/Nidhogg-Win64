@@ -247,7 +247,7 @@ bool HttpRequestJsonAt(const std::string& baseUrl, const std::string& method,
         WinHttpCloseHandle(hReq);
         WinHttpCloseHandle(hConnect);
         WinHttpCloseHandle(hSession);
-        outErr = "Lobby server unreachable (" + baseUrl + ")";
+        outErr = "Lobby server unreachable (" + core::CurrentSettings().lobbyServerUrl + ")";
         return false;
     }
 
@@ -268,7 +268,9 @@ bool HttpRequestJsonAt(const std::string& baseUrl, const std::string& method,
         outResponse += chunk;
     }
 
-    if (outRttMs) *outRttMs = static_cast<uint32_t>((MonoUsec() - t0) / 1000ULL);
+    if (outRttMs) {
+        *outRttMs = static_cast<uint32_t>((MonoUsec() - t0) / 1000ULL);
+    }
 
     WinHttpCloseHandle(hReq);
     WinHttpCloseHandle(hConnect);
