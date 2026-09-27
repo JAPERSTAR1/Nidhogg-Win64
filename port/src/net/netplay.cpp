@@ -71,7 +71,6 @@ struct InputPayload {
 
 struct DelayedPacket {
     uint64_t deliverAtUsec = 0;
-    bool viaWebSocket = false;
     sockaddr_in dst{};
     std::vector<uint8_t> bytes;
 };
@@ -176,7 +175,6 @@ ParsedUrl ParseServerUrl(const std::string& url) {
     ParsedUrl u;
     std::string s = url;
     if (s.rfind("https://", 0) == 0) { u.https = true; u.port = 443; s.erase(0, 8); }
-    else if (s.rfind("wss://", 0) == 0) { u.https = true; u.port = 443; s.erase(0, 6); }
     else if (s.rfind("http://", 0) == 0) { u.https = false; u.port = 80; s.erase(0, 7); }
     size_t slash = s.find('/');
     if (slash != std::string::npos) s.resize(slash);
