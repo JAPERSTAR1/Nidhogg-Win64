@@ -35,7 +35,7 @@ constexpr uint8_t kPktPunchAck = 3;
 constexpr uint8_t kPktSyncBarrier = 4;
 constexpr uint8_t kPktInput = 5;
 constexpr uint8_t kPktDisconnect = 6;
-constexpr uint8_t kPktRelayEnvelope = 0x52;
+constexpr uint8_t kPktRelayEnvelope = 0x52;  // 'R' envelope to/from UDP relay server
 
 #pragma pack(push, 1)
 struct WireAad {
@@ -58,7 +58,7 @@ struct SyncBarrierPayload {
 
 struct InputPayload {
     uint64_t latestFrame = 0;
-    uint8_t historyCount = 0;
+    uint8_t historyCount = 0;  // 1..16 frames: [latestFrame, latestFrame-1, ...]
     uint8_t flags = 0;         // bit 0: hasStateHash
     uint16_t pad = 0;
     uint32_t buttonsHistory[16]{};
