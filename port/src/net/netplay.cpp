@@ -216,12 +216,12 @@ bool HttpRequestJsonAt(const std::string& baseUrl, const std::string& method,
     HINTERNET hSession = WinHttpOpen(L"NidhoggPort/1.0", WINHTTP_ACCESS_TYPE_NO_PROXY,
                                      WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!hSession) { outErr = "WinHttpOpen failed"; return false; }
-    WinHttpSetTimeouts(hSession, timeoutMs, timeoutMs, timeoutMs, timeoutMs);
+    WinHttpSetTimeouts(hSession, 1500, 1500, 2000, 2000);
 
     HINTERNET hConnect = WinHttpConnect(hSession, u.host.c_str(), u.port, 0);
     if (!hConnect) {
         WinHttpCloseHandle(hSession);
-        outErr = "Cannot connect to lobby server (" + baseUrl + ")";
+        outErr = "Cannot connect to lobby server (" + u.hostUtf8 + ")";
         return false;
     }
 
