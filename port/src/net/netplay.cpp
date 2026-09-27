@@ -178,7 +178,6 @@ ParsedUrl ParseServerUrl(const std::string& url) {
     if (s.rfind("https://", 0) == 0) { u.https = true; u.port = 443; s.erase(0, 8); }
     else if (s.rfind("wss://", 0) == 0) { u.https = true; u.port = 443; s.erase(0, 6); }
     else if (s.rfind("http://", 0) == 0) { u.https = false; u.port = 80; s.erase(0, 7); }
-    else if (s.rfind("ws://", 0) == 0) { u.https = false; u.port = 80; s.erase(0, 5); }
     size_t slash = s.find('/');
     if (slash != std::string::npos) s.resize(slash);
     size_t colon = s.find(':');
@@ -206,11 +205,10 @@ std::string EffectiveProtocolVersion() {
     return kProtocolVersion;
 }
 
-bool HttpRequestJsonAt(const std::string& baseUrl, const std::string& method,
-                       const std::string& path, const std::string& body, int timeoutMs,
-                       int& outStatus, std::string& outResponse, std::string& outErr,
-                       uint32_t* outRttMs = nullptr) {
-    const ParsedUrl u = ParseServerUrl(baseUrl);
+bool HttpRequestJson(const std::string& method, const std::string& path, const std::string& body,
+                     int& outStatus, std::string& outResponse, std::string& outErr,
+                     uint32_t* outRttMs = nullptr) {
+    const ParsedUrl u = ParseServerUrl(core::CurrentSettings().lobbyServerUrl);
     const uint64_t t0 = MonoUsec();
 
     HINTERNET hSession = WinHttpOpen(L"NidhoggPort/1.0", WINHTTP_ACCESS_TYPE_NO_PROXY,
