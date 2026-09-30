@@ -1074,6 +1074,15 @@ uint64_t ComputeGuestStateHash() {
     // Walk active FOCAL/GameMaker entity list (+0x3e2230): hash relative vtable
     // and deterministic non-pointer simulation fields [+0x80..+0x124].
     uint32_t entityCount = 0;
+    std::FILE* dump = nullptr;
+    char* trace = nullptr; size_t traceLen = 0;
+    if (_dupenv_s(&trace, &traceLen, "NIDHOGG_NET_DUMP") == 0 && trace && *trace == '1' &&
+        (matchFrame == 30 || (matchFrame % 300) == 0)) {
+        dump = core::FopenUtf8(core::LogsDirPath() + "\\state-" + std::to_string(matchFrame) + ".txt", "wb");
+        if (dump) std::fprintf(dump, "room=%s rand=%08x native=%08x start=%08x\n", CurrentRoom().c_str(), g_simRandState,
+            *reinterpret_cast<uint32_t*>(g_base + 0x1f0068), *reinterpret_cast<uint32_t*>(g_base + 0x3e3160));
+    }
+    if (trace) std::free(trace);
     if (Readable(reinterpret_cast<void*>(g_base + 0x3e2230), 8)) {
         uint64_t ent = *reinterpret_cast<const uint64_t*>(g_base + 0x3e2230);
         while (ent && entityCount < 2048 && Readable(reinterpret_cast<void*>(ent), 0x128)) {
@@ -1081,6 +1090,12 @@ uint64_t ComputeGuestStateHash() {
             if (eb[0x9b] == 0) {  // not marked destroyed
                 const uint64_t vt = *reinterpret_cast<const uint64_t*>(eb);
                 const uint64_t relVt = (vt >= g_base) ? (vt - g_base) : vt;
+                if (dump) {
+                    std::fprintf(dump, "%u vt=%llx", entityCount, static_cast<unsigned long long>(relVt));
+                    for (size_t offset = 0x10; offset < 0x128; offset += 4)
+                        std::fprintf(dump, " %03zx:%08x", offset, *reinterpret_cast<const uint32_t*>(eb + offset));
+                    std::fputc('\n', dump);
+                }
                 mixBytes(&relVt, sizeof(relVt));
                 // The old bulk hash included pointers (+0x88), padding (+0x84,
                 // +0x9e, +0xdc, +0x124) and uninitialized allocator bytes.
