@@ -871,7 +871,7 @@ void ApplyRoomStateFromJsonLocked(const std::string& resp) {
     std::string peerPubIp, peerLanIp;
     int64_t peerPubPort = 0, peerLanPort = 0;
     if (JsonGetStr(resp, "peerPublicIp", peerPubIp) && JsonGetInt(resp, "peerPublicPort", peerPubPort) &&
-        !peerPubIp.empty() && peerPubPort > 0) {
+        !peerPubIp.empty() && peerPubPort > 0 && peerPubPort <= 65535) {
         sockaddr_in pa{};
         pa.sin_family = AF_INET;
         pa.sin_port = htons(static_cast<uint16_t>(peerPubPort));
@@ -881,7 +881,7 @@ void ApplyRoomStateFromJsonLocked(const std::string& resp) {
         }
     }
     if (JsonGetStr(resp, "peerLanIp", peerLanIp) && JsonGetInt(resp, "peerLanPort", peerLanPort) &&
-        !peerLanIp.empty() && peerLanPort > 0) {
+        !peerLanIp.empty() && peerLanPort > 0 && peerLanPort <= 65535) {
         sockaddr_in la{};
         la.sin_family = AF_INET;
         la.sin_port = htons(static_cast<uint16_t>(peerLanPort));
