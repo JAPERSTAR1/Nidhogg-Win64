@@ -799,6 +799,7 @@ bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
         Sleep(1);
         lk.lock();
     }
+    g_net.stalled = false;
 
     const uint32_t myInput = g_net.localInputs[f];
     const uint32_t peerInput = g_net.remoteInputs[f];
@@ -842,6 +843,8 @@ void ApplyRoomStateFromJsonLocked(const std::string& resp) {
     }
 
     int64_t pCount = 1, stageIdx = 0, relayPort = 27881;
+    int64_t agreedDelay = 3;
+    if (JsonGetInt(resp, "inputDelayFrames", agreedDelay)) g_net.snap.inputDelayFrames = std::clamp<int>(static_cast<int>(agreedDelay), 1, 8);
     if (JsonGetInt(resp, "playerCount", pCount)) g_net.snap.playerCount = static_cast<int>(pCount);
     if (JsonGetInt(resp, "stageIndex", stageIdx)) g_net.snap.stageIndex = static_cast<int>(stageIdx);
     if (JsonGetInt(resp, "relayUdpPort", relayPort) && relayPort > 0 && relayPort <= 65535)
@@ -855,6 +858,13 @@ void ApplyRoomStateFromJsonLocked(const std::string& resp) {
     std::string keyHex;
     if (JsonGetStr(resp, "sessionKey", keyHex) && keyHex.size() == 64) {
         if (HexToBytes(keyHex, g_net.sessionKey, 32)) g_net.hasSessionKey = true;
+    }
+    std::string relayTransport;
+    if (JsonGetStr(resp, "relayTransport", relayTransport) && relayTransport == "websocket") {
+        if (!g_net.websocketRelay) {
+            g_net.websocketRelay = true;
+            g_net.websocket.Start(core::CurrentSettings().lobbyServerUrl, g_net.snap.roomId, g_net.authToken);
+        }
     }
 
     // Configure relay UDP sockaddr
