@@ -1471,16 +1471,21 @@ void TickNetplayLobby() {
         }
     }
 
-    if (shouldPoll) {
-        std::ostringstream body;
-        body << "{\"roomId\":\"" << JsonEsc(roomId) << "\",\"authToken\":\"" << JsonEsc(token) << "\"}";
-        int status = 0;
-        std::string resp, err;
-        if (HttpRequestJson("POST", "/api/rooms/heartbeat", body.str(), status, resp, err) &&
-            status == 200) {
+    if (shouldPoll && !g_heartbeat.valid()) {
+        g_heartbeat = std::async(std::launch::async, [roomId, heartbeatBody] {
+            HeartbeatResult result; result.roomId = roomId;
+            result.ok = HttpRequestJson("POST", "/api/rooms/heartbeat", heartbeatBody,
+                result.status, result.response, result.error);
+            return result;
+        });
+    }
+    if (g_heartbeat.valid() && g_heartbeat.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+        const auto result = g_heartbeat.get();
+        roomId = result.roomId;
+        if (result.ok && result.status == 200) {
             std::scoped_lock lk(g_net.mtx);
             if (g_net.snap.roomId == roomId) {
-                ApplyRoomStateFromJsonLocked(resp);
+                ApplyRoomStateFromJsonLocked(result.response);
                 if (g_net.snap.phase == SessionPhase::LobbyWaiting) {
                     SendRegisterEndpointToRelayLocked();
                     if (g_net.cliAutoStart && g_net.snap.isHost && g_net.snap.remoteConnected &&
