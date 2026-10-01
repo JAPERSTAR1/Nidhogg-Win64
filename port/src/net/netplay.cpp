@@ -786,11 +786,15 @@ bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
             return false;
         }
         if (now - lastRetx >= 4000ULL) {
+            g_net.stalled = now - waitStart > 80000ULL;
             SendInputPacketForFrameLocked(futureFrame, sendHash, f, curHash);
             FlushTxQueueLocked();
             lastRetx = now;
         }
         lk.unlock();
+        if (now - lastWaitingPresent >= 16000ULL) {
+            gnm::PresentCachedFrame(ps4::GameWindow()); lastWaitingPresent = now;
+        }
         MSG msg;
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
             TranslateMessage(&msg);
