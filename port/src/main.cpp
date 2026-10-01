@@ -19,6 +19,7 @@
 #include "core/settings.h"
 #include "hle.h"
 #include "image.h"
+#include "net/netplay.h"
 #include "thunks.h"
 
 namespace {

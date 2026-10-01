@@ -1504,6 +1504,7 @@ void TickNetplayLobby() {
         SetReady(true, err);
         StartMatch(err);
     }
+    RestartAtDeterministicBoot();
 }
 
 NetStatsSnapshot GetSnapshot() {
