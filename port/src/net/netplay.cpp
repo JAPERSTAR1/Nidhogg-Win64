@@ -963,8 +963,57 @@ void InitNetplay() {
     g_net.initialized = true;
 }
 
+bool ResumeOnlineSession() {
+    char* value = nullptr; size_t size = 0;
+    if (_dupenv_s(&value, &size, "NIDHOGG_NET_RESUME") != 0 || !value) return true;
+    std::string metadata(value); std::free(value); _putenv_s("NIDHOGG_NET_RESUME", "");
+    _putenv_s("NIDHOGG_OPEN_ONLINE", ""); _putenv_s("NIDHOGG_OPEN_SETTINGS", "");
+    std::string room, token; bool host = false;
+    if (!JsonGetStr(metadata, "roomId", room) || !JsonGetStr(metadata, "authToken", token) ||
+        !JsonGetBool(metadata, "isHost", host)) return false;
+    InitNetplay();
+    int status = 0; std::string response, error;
+    if (!HttpRequestJson("POST", "/api/rooms/heartbeat", "{\"roomId\":\"" + JsonEsc(room) +
+        "\",\"authToken\":\"" + JsonEsc(token) + "\"}", status, response, error) || status != 200) {
+        LOG_ERROR("[netplay] cannot resume room (HTTP %d): %s", status, error.c_str()); return false;
+    }
+    std::unique_lock lk(g_net.mtx);
+    int64_t originalPort = 0;
+    if (JsonGetInt(metadata, "udpPort", originalPort) && originalPort > 0 && originalPort <= 65535)
+        g_net.localUdpPort = static_cast<uint16_t>(originalPort);
+    if (!EnsureUdpSocketLocked()) return false;
+    lk.unlock(); DiscoverPublicEndpoint(); lk.lock();
+    g_net.resumed = true; g_net.cliHandled = true;
+    g_net.authToken = token;
+    g_net.snap.isHost = host; g_net.snap.localPlayerNum = host ? 1 : 2;
+    g_net.snap.phase = SessionPhase::InMatch;
+    g_net.snap.transport = TransportMode::RelayFallback;
+    g_net.snap.inputDelayFrames = 3; // Identical negotiated value for both peers.
+    g_net.snap.statusText = "Starting synchronized game...";
+    ApplyRoomStateFromJsonLocked(response);
+    if (!g_net.hasSessionKey) return false;
+    g_net.bootNavigating = true;
+    for (int f = 0; f < g_net.snap.inputDelayFrames; ++f) {
+        g_net.localInputs[f] = 0; g_net.remoteInputs[f] = 0;
+    }
+    ps4::BeginDeterministicSession(g_net.matchSeed);
+    ps4::SetNetplayStepCallback(&NetplayStepCallbackImpl);
+    LOG_INFO("[netplay] BARRIER SYNCED -> deterministic boot (seed=0x%08x, role=%s)",
+        g_net.matchSeed, host ? "host" : "guest");
+    return true;
+}
+
+void NotifyOriginalMatchStart(uint64_t submittedFrame) {
+    std::scoped_lock lk(g_net.mtx);
+    if (g_net.resumed) g_net.gameStartSubmit = submittedFrame;
+}
+
 void ShutdownNetplay() {
-    LeaveRoom();
+    if (g_heartbeat.valid()) g_heartbeat.wait();
+    LOG_INFO("[netplay] summary frames=%llu checks=%llu desync=%d",
+        g_net.snap.matchFrame, g_net.snap.stateChecks, g_net.snap.desyncDetected ? 1 : 0);
+    if (!g_net.handingOff) LeaveRoom();
+    else g_net.websocket.Stop();
     std::scoped_lock lk(g_net.mtx);
     if (g_net.udpSock != INVALID_SOCKET) {
         closesocket(g_net.udpSock);
