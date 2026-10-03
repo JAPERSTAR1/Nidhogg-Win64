@@ -667,6 +667,27 @@ bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
                              uint32_t& ioRandState) {
     std::unique_lock<std::mutex> lk(g_net.mtx);
     PumpUdpRxLocked();
+    if (g_net.snap.phase == SessionPhase::InMatch && g_net.websocketRelay &&
+        !g_net.websocket.Connected() && !g_net.websocket.Error().empty() && !g_net.directEstablished) {
+        g_net.snap.phase = SessionPhase::Disconnected;
+        g_net.snap.statusText = g_net.websocket.Error();
+    }
+    bool shownDisconnect = false;
+    while ((g_net.snap.phase == SessionPhase::Error || g_net.snap.phase == SessionPhase::Disconnected) &&
+           !ps4::IsQuitRequested()) {
+        if (g_net.autoExitOnDisconnect) {
+            LOG_INFO("[netplay] match stopped: %s", g_net.snap.statusText.c_str());
+            ps4::RequestQuit(); break;
+        }
+        if (!shownDisconnect) { ps4::ui::OpenOverlayTab(4); shownDisconnect = true; }
+        lk.unlock();
+        gnm::PresentCachedFrame(ps4::GameWindow());
+        MSG message;
+        while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&message); DispatchMessageW(&message);
+        }
+        Sleep(10); lk.lock();
+    }
 
     if (g_net.snap.phase == SessionPhase::ConnectingTransport) {
         const uint64_t now = MonoUsec();
@@ -730,7 +751,7 @@ bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
         }
     }
 
-    if (g_net.snap.phase != SessionPhase::InMatch) {
+    if (g_net.snap.phase != SessionPhase::InMatch || ps4::IsQuitRequested()) {
         return false;
     }
 
