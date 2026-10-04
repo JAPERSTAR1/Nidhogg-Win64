@@ -1055,7 +1055,7 @@ std::string CurrentRoom() {
     return g_currentRoom;
 }
 
-uint64_t ComputeGuestStateHash() {
+uint64_t ComputeGuestStateHash(uint64_t matchFrame) {
     if (!g_base) return 0;
     uint64_t h = 1469598103934665603ULL;
     auto mixBytes = [&](const void* data, size_t len) {
@@ -1069,7 +1069,7 @@ uint64_t ComputeGuestStateHash() {
     // Room index (+0x3e22b0) and guest LCG state (+0x1f0068)
     if (Readable(reinterpret_cast<void*>(g_base + 0x3e22b0), 4))
         mixBytes(reinterpret_cast<const void*>(g_base + 0x3e22b0), 4);
-    mixBytes(&g_simRandState, sizeof(g_simRandState));
+    mixBytes(reinterpret_cast<const void*>(g_base + 0x1f0068), 4);
 
     // Walk active FOCAL/GameMaker entity list (+0x3e2230): hash relative vtable
     // and deterministic non-pointer simulation fields [+0x80..+0x124].
