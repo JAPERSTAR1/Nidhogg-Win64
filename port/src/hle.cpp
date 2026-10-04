@@ -1082,13 +1082,24 @@ uint64_t ComputeGuestStateHash() {
                 const uint64_t vt = *reinterpret_cast<const uint64_t*>(eb);
                 const uint64_t relVt = (vt >= g_base) ? (vt - g_base) : vt;
                 mixBytes(&relVt, sizeof(relVt));
-                mixBytes(eb + 0x80, 0xA4);  // positions, velocities, alarms, sprite, angles
+                // The old bulk hash included pointers (+0x88), padding (+0x84,
+                // +0x9e, +0xdc, +0x124) and uninitialized allocator bytes.
+                mixBytes(eb + 0x80, 1);
+                mixBytes(eb + 0x98, 6); // colour and flags; +0x90 is another owned pointer
+                for (size_t offset = 0xa0; offset < 0xd0; offset += 4) {
+                    const int32_t value = *reinterpret_cast<const int32_t*>(eb + offset);
+                    const int32_t alarm = value < 0 ? -1 : value;
+                    mixBytes(&alarm, sizeof(alarm));
+                }
+                mixBytes(eb + 0xd0, 0x0c); // depth and x/y
+                mixBytes(eb + 0xe0, 0x44); // previous x/y, motion and sprite state
                 ++entityCount;
             }
             ent = *reinterpret_cast<const uint64_t*>(eb + 0x08);
         }
     }
     mixBytes(&entityCount, sizeof(entityCount));
+    if (dump) std::fclose(dump);
     return h;
 }
 
