@@ -1676,9 +1676,9 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                         g_netplayP1Buttons = syncedP1;
                         g_netplayP2Buttons = syncedP2;
                         g_netplaySyncedFrame = g_submits;
-                        if (g_base && Readable(reinterpret_cast<void*>(g_base + 0x1f0068), 4)) {
-                            *reinterpret_cast<uint32_t*>(g_base + 0x1f0068) = g_simRandState;
-                        }
+                        // The game has a separate simulation PRNG at +0x1f0068.
+                        // Never overwrite it with CRT rand(): draw events use that
+                        // stream for cosmetics (+0x3e226c in guest random helpers).
                     } else {
                         g_netplayClockLock.store(false, std::memory_order_relaxed);
                     }
