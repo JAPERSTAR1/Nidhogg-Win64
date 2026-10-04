@@ -365,7 +365,7 @@ bool EnsureUdpSocketLocked() {
     sockaddr_in bindAddr{};
     bindAddr.sin_family = AF_INET;
     bindAddr.sin_addr.s_addr = htonl(INADDR_ANY);
-    bindAddr.sin_port = 0;
+    bindAddr.sin_port = htons(g_net.localUdpPort);
     if (bind(s, reinterpret_cast<sockaddr*>(&bindAddr), sizeof(bindAddr)) != 0) {
         closesocket(s);
         return false;
@@ -378,6 +378,20 @@ bool EnsureUdpSocketLocked() {
     g_net.udpSock = s;
     LOG_INFO("[netplay] opened UDP socket on %s:%u", g_net.localLanIp.c_str(), g_net.localUdpPort);
     return true;
+}
+
+void DiscoverPublicEndpoint() {
+    SOCKET socket;
+    { std::scoped_lock lk(g_net.mtx);
+      if (g_net.forceRelay || !g_net.publicIp.empty()) return;
+      socket = g_net.udpSock; }
+    std::string ip; uint16_t port = 0;
+    if (!DiscoverStunEndpoint(socket, ip, port)) return;
+    std::scoped_lock lk(g_net.mtx);
+    if (g_net.udpSock == socket) {
+        g_net.publicIp = ip; g_net.publicPort = port;
+        LOG_INFO("[netplay] STUN discovered a public UDP candidate");
+    }
 }
 
 void FlushTxQueueLocked() {
