@@ -1663,14 +1663,14 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             uint8_t lx = 0x80, ly = 0x80, rx = 0x80, ry = 0x80;
             uint32_t buttons = ReadLocalPlayerButtons(handle, lx, ly, rx, ry);
 
-            if (g_netplayStep) {
+            if (const auto netplayStep = g_netplayStep.load()) {
                 if (g_netplaySyncedFrame != g_submits) {
                     uint8_t dummyLx, dummyLy, dummyRx, dummyRy;
                     const uint32_t localP1 = (handle == 1)
                         ? buttons
                         : ReadLocalPlayerButtons(1, dummyLx, dummyLy, dummyRx, dummyRy);
                     uint32_t syncedP1 = 0, syncedP2 = 0;
-                    if (g_netplayStep(g_submits, localP1, syncedP1, syncedP2, g_simRandState)) {
+                    if (netplayStep(g_submits, localP1, syncedP1, syncedP2, g_simRandState)) {
                         g_netplayClockLock.store(true, std::memory_order_relaxed);
                         g_netplaySimFrame.store(g_submits, std::memory_order_relaxed);
                         g_netplayP1Buttons = syncedP1;
