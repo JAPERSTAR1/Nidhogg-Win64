@@ -26,7 +26,7 @@ void HleShutdown();
 void* GameWindow();
 uint64_t SubmittedFrames();
 std::string CurrentRoom();
-uint64_t ComputeGuestStateHash();
+uint64_t ComputeGuestStateHash(uint64_t matchFrame = 0);
 
 // Netplay frame-synchronized input & determinism hook.
 // When active and returning true, overrides P1/P2 pad state and locks guest
@@ -35,5 +35,6 @@ using NetplayStepFn = bool (*)(uint64_t simFrame, uint32_t localButtons,
                                uint32_t& outP1Buttons, uint32_t& outP2Buttons,
                                uint32_t& ioRandState);
 void SetNetplayStepCallback(NetplayStepFn fn);
+void BeginDeterministicSession(uint32_t seed);
 
 }  // namespace ps4
