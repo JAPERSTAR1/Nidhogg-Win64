@@ -508,6 +508,12 @@ void Emit(const char* text, size_t len) {
     const char* tag = "Created room ";
     const size_t tagLen = 13;
     std::string sv(text, len);
+    if (g_netplayClockLock.load() && sv.find("match start") != std::string::npos) {
+        *reinterpret_cast<uint32_t*>(g_base + 0x1f0068) = g_onlineMatchSeed;
+        g_simRandState = g_onlineMatchSeed;
+        net::NotifyOriginalMatchStart(SubmittedFrames());
+        LOG_INFO("[netplay] original match-start event: synchronized native PRNG seed=%08x", g_onlineMatchSeed);
+    }
     size_t pos = sv.find(tag);
     if (pos != std::string::npos) {
         pos += tagLen;
@@ -1035,6 +1041,7 @@ void HleShutdown() {
             }
         }
     }
+    ui::FinishOnlineActions();
     net::ShutdownNetplay();
     audio::ShutdownAudio();
     gnm::ShutdownRenderer();
