@@ -222,6 +222,7 @@ int RunMain(const std::vector<std::string>& args, bool hasConsole) {
     if (!ps4::core::LoadSettings(settings)) {
         ps4::core::SaveSettings(settings);
     }
+    if (!cliLobbyUrl.empty()) settings.lobbyServerUrl = cliLobbyUrl;
 
     const char* assetHint = !cliAssets.empty()
                                 ? cliAssets.c_str()
@@ -351,6 +352,7 @@ int RunMain(const std::vector<std::string>& args, bool hasConsole) {
     }
 
     LOG_INFO("entering guest 0x%llx", static_cast<unsigned long long>(image.entry()));
+    if (!ps4::net::ResumeOnlineSession()) return 1;
     auto call = MakeSysvCall();
     call(reinterpret_cast<uint64_t>(image.at(image.entry())),
          reinterpret_cast<uint64_t>(block), 0);
