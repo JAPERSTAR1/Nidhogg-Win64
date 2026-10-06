@@ -1452,7 +1452,7 @@ void TickNetplayLobby() {
         if (!err.empty()) LOG_WARN("[netplay-auto] mode=%s err=%s", mode.c_str(), err.c_str());
     }
 
-    std::string roomId, token;
+    std::string roomId, token, heartbeatBody;
     bool shouldPoll = false;
     bool autoStartReady = false;
     {
@@ -1467,6 +1467,9 @@ void TickNetplayLobby() {
             g_net.lastHeartbeatUsec = now;
             roomId = g_net.snap.roomId;
             token = g_net.authToken;
+            heartbeatBody = "{\"roomId\":\"" + JsonEsc(roomId) + "\",\"authToken\":\"" + JsonEsc(token) +
+                "\",\"lanIp\":\"" + g_net.localLanIp + "\",\"lanPort\":" + std::to_string(g_net.localUdpPort) +
+                ",\"publicIp\":\"" + g_net.publicIp + "\",\"publicPort\":" + std::to_string(g_net.publicPort) + "}";
             shouldPoll = true;
         }
     }
