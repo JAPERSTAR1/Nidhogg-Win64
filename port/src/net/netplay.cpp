@@ -1489,9 +1489,9 @@ void TickNetplayLobby() {
                     }
                 }
             }
-        } else if (status == 404 || status == 403) {
+        } else if (result.status == 404 || result.status == 403) {
             std::scoped_lock lk(g_net.mtx);
-            if (g_net.snap.phase == SessionPhase::LobbyWaiting) {
+            if (g_net.snap.roomId == roomId && g_net.snap.phase == SessionPhase::LobbyWaiting) {
                 g_net.snap.phase = SessionPhase::Disconnected;
                 g_net.snap.statusText = "Room expired or closed.";
                 g_net.authToken.clear();
