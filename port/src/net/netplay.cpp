@@ -173,21 +173,15 @@ struct ParsedUrl {
 
 ParsedUrl ParseServerUrl(const std::string& url) {
     ParsedUrl u;
-    std::string s = url;
-    if (s.rfind("https://", 0) == 0) { u.https = true; u.port = 443; s.erase(0, 8); }
-    else if (s.rfind("http://", 0) == 0) { u.https = false; u.port = 80; s.erase(0, 7); }
-    size_t slash = s.find('/');
-    if (slash != std::string::npos) s.resize(slash);
-    size_t colon = s.find(':');
-    if (colon != std::string::npos) {
-        u.hostUtf8 = s.substr(0, colon);
-        int p = std::atoi(s.substr(colon + 1).c_str());
-        if (p > 0 && p <= 65535) u.port = static_cast<uint16_t>(p);
-    } else if (!s.empty()) {
-        u.hostUtf8 = s;
-    }
-    if (u.hostUtf8.empty()) u.hostUtf8 = "127.0.0.1";
-    u.host = core::Utf8ToWide(u.hostUtf8);
+    const auto wide = core::Utf8ToWide(url);
+    URL_COMPONENTS p{}; p.dwStructSize = sizeof(p);
+    p.dwHostNameLength = p.dwUrlPathLength = p.dwExtraInfoLength = p.dwUserNameLength = p.dwPasswordLength = static_cast<DWORD>(-1);
+    if (!WinHttpCrackUrl(wide.c_str(), 0, 0, &p) || !p.dwHostNameLength || p.dwUserNameLength || p.dwPasswordLength ||
+        p.dwExtraInfoLength || (p.dwUrlPathLength && std::wstring(p.lpszUrlPath, p.dwUrlPathLength) != L"/") ||
+        (p.nScheme != INTERNET_SCHEME_HTTP && p.nScheme != INTERNET_SCHEME_HTTPS)) return u;
+    u.host.assign(p.lpszHostName, p.dwHostNameLength);
+    u.hostUtf8 = core::WideToUtf8(u.host); u.https = p.nScheme == INTERNET_SCHEME_HTTPS;
+    u.port = p.nPort; u.valid = true;
     return u;
 }
 
@@ -207,6 +201,7 @@ bool HttpRequestJson(const std::string& method, const std::string& path, const s
                      int& outStatus, std::string& outResponse, std::string& outErr,
                      uint32_t* outRttMs = nullptr) {
     const ParsedUrl u = ParseServerUrl(core::CurrentSettings().lobbyServerUrl);
+    if (!u.valid) { outErr = "Server URL must be http://host:port or https://host (without a path)."; return false; }
     const uint64_t t0 = MonoUsec();
 
     HINTERNET hSession = WinHttpOpen(L"NidhoggPort/1.0", WINHTTP_ACCESS_TYPE_NO_PROXY,
