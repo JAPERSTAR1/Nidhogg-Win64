@@ -1199,6 +1199,7 @@ bool QuickMatch(const std::string& preferredRegion, bool& outNoRoomsAvailable,
         lanIp = g_net.localLanIp;
     }
 
+    DiscoverPublicEndpoint();
     const auto& cfg = core::CurrentSettings();
     std::ostringstream body;
     body << "{\"region\":\"" << JsonEsc(preferredRegion.empty() ? cfg.region : preferredRegion) << "\","
@@ -1371,6 +1372,9 @@ void LeaveRoom() {
         g_net.authToken.clear();
         g_net.sessionId = 0;
         g_net.hasSessionKey = false;
+        g_net.peerNonceHigh = 0; g_net.peerNonceMask = 0;
+        g_net.websocket.Stop();
+        g_net.websocketRelay = false;
         g_net.directEstablished = false;
         g_net.hasPeerPublic = false;
         g_net.hasPeerLan = false;
