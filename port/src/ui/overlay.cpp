@@ -957,6 +957,7 @@ void InitOverlay(ID3D11Device* device) {
 }
 
 void ShutdownOverlay() {
+    FinishOnlineActions();
     g_ui.vb.Reset();
     g_ui.cb.Reset();
     g_ui.vs.Reset();
@@ -969,6 +970,10 @@ void ShutdownOverlay() {
     g_ui.depthOff.Reset();
     g_ui.vbCap = 0;
     g_ui.gpuReady = false;
+}
+
+void FinishOnlineActions() {
+    if (g_onlineTask.valid()) g_onlineTask.wait();
 }
 
 void OpenOverlayTab(int tabIndex) {
