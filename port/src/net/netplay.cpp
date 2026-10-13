@@ -1095,6 +1095,7 @@ bool JoinRoomById(const std::string& roomId, std::string& outError) {
         lanIp = g_net.localLanIp;
     }
 
+    DiscoverPublicEndpoint();
     const auto& cfg = core::CurrentSettings();
     std::ostringstream body;
     body << "{\"roomId\":\"" << JsonEsc(roomId) << "\","
@@ -1151,6 +1152,7 @@ bool JoinRoomByCode(const std::string& roomCode, std::string& outError) {
         lanIp = g_net.localLanIp;
     }
 
+    DiscoverPublicEndpoint();
     const auto& cfg = core::CurrentSettings();
     std::ostringstream body;
     body << "{\"roomCode\":\"" << JsonEsc(cleanCode) << "\","
