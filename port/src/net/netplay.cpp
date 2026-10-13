@@ -1043,6 +1043,7 @@ bool CreateRoom(const std::string& roomName, bool isPublic, int stageIndex, std:
         lanIp = g_net.localLanIp;
     }
 
+    DiscoverPublicEndpoint();
     const auto& cfg = core::CurrentSettings();
     const std::string rName = roomName.empty() ? (cfg.playerName + "'s Arena") : roomName;
     std::ostringstream body;
@@ -1051,6 +1052,7 @@ bool CreateRoom(const std::string& roomName, bool isPublic, int stageIndex, std:
          << "\"region\":\"" << JsonEsc(cfg.region) << "\","
          << "\"isPublic\":" << (isPublic ? "true" : "false") << ","
          << "\"stageIndex\":" << stageIndex << ","
+         << "\"inputDelayFrames\":" << cfg.inputDelayFrames << ","
          << "\"lanIp\":\"" << JsonEsc(lanIp) << "\","
          << "\"lanPort\":" << udpPort << "}";
 
