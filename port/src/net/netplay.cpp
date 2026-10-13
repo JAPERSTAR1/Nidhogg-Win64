@@ -912,6 +912,11 @@ void ApplyRoomStateFromJsonLocked(const std::string& resp) {
 
     if (roomStatus == "in_match" && g_net.snap.phase == SessionPhase::LobbyWaiting &&
         g_net.hasSessionKey) {
+        if (!g_net.resumed) {
+            g_net.restartPending = true;
+            g_net.snap.statusText = "Starting a clean synchronized game...";
+            return;
+        }
         g_net.snap.phase = SessionPhase::ConnectingTransport;
         g_net.snap.transport = g_net.forceRelay ? TransportMode::RelayFallback
                                                 : TransportMode::PunchingP2P;
@@ -950,6 +955,8 @@ void CheckEnvSimConfigLocked() {
     g_net.simJitterMs = std::max(0, envInt("NIDHOGG_NET_SIM_JITTER_MS", 0));
     g_net.simLossPct = std::clamp(envInt("NIDHOGG_NET_SIM_LOSS_PCT", 0), 0, 90);
     g_net.forceRelay = envInt("NIDHOGG_FORCE_RELAY", 0) != 0;
+    g_net.autoExitOnDisconnect = envInt("NIDHOGG_NET_AUTO_EXIT", 0) != 0;
+    g_net.qaCombat = envInt("NIDHOGG_NET_QA_COMBAT", 0) != 0;
 }
 
 }  // namespace
