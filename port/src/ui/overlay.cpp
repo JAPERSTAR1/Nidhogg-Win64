@@ -1152,6 +1152,7 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
         if (v) std::free(v);
     }
 
+    PollOnlineAction();
     net::TickNetplayLobby();
     PollControllerForOverlay(hwnd);
 
@@ -1390,7 +1391,8 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
             if (netSnap.phase == net::SessionPhase::LobbyWaiting ||
                 netSnap.phase == net::SessionPhase::ConnectingTransport ||
                 netSnap.phase == net::SessionPhase::SyncingMenu ||
-                netSnap.phase == net::SessionPhase::InMatch) {
+                netSnap.phase == net::SessionPhase::InMatch ||
+                ((netSnap.phase == net::SessionPhase::Error || netSnap.phase == net::SessionPhase::Disconnected) && !netSnap.roomId.empty())) {
                 const std::string visStr = netSnap.isPublic ? "PUBLIC ROOM" : "PRIVATE ROOM";
                 const std::string p1Line = netSnap.hostName + (netSnap.isHost
                     ? (netSnap.localReady ? " [READY]" : " [NOT READY]")
