@@ -450,8 +450,14 @@ void SendSealedPeerPacketLocked(uint8_t pktType, const void* payload, size_t pay
         return;
     }
 
+    if (g_net.directEstablished && MonoUsec() - g_net.lastDirectRxUsec > 500000ULL) {
+        g_net.directEstablished = false;
+        g_net.snap.transport = TransportMode::RelayFallback;
+    }
+
     if (g_net.directEstablished) {
         QueueUdpSendLocked(g_net.activePeerAddr, sealed.data(), sealed.size());
+        if (g_net.stalled) sendViaRelay();
     } else {
         if (g_net.hasPeerPublic)
             QueueUdpSendLocked(g_net.peerPublicAddr, sealed.data(), sealed.size());
