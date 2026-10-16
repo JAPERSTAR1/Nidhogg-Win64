@@ -259,7 +259,7 @@ bool HttpRequestJson(const std::string& method, const std::string& path, const s
         if (!WinHttpQueryDataAvailable(hReq, &avail) || avail == 0) break;
         std::string chunk(avail, '\0');
         DWORD got = 0;
-        if (!WinHttpReadData(hReq, chunk.data(), avail, &got) || got == 0) break;
+        if (!WinHttpReadData(hReq, chunk.data(), avail, &got) || got == 0) { readOk = false; break; }
         chunk.resize(got);
         outResponse += chunk;
     }
@@ -271,7 +271,8 @@ bool HttpRequestJson(const std::string& method, const std::string& path, const s
     WinHttpCloseHandle(hReq);
     WinHttpCloseHandle(hConnect);
     WinHttpCloseHandle(hSession);
-    return true;
+    if (!readOk) outErr = "Incomplete or oversized response from lobby server.";
+    return readOk;
 }
 
 struct NetState {
