@@ -462,6 +462,7 @@ void SendSealedPeerPacketLocked(uint8_t pktType, const void* payload, size_t pay
 }
 
 void SendRegisterEndpointToRelayLocked() {
+    if (g_net.websocketRelay) return;
     if (!g_net.hasRelayAddr || !g_net.hasSessionKey || g_net.sessionId == 0) return;
     WireAad aad{};
     aad.magic = kWireMagic;
@@ -500,9 +501,10 @@ void VerifyHashesForFrameLocked(uint64_t f) {
     ++g_net.snap.stateChecks;
     g_net.snap.lastLocalHash = lit->second;
     g_net.snap.lastRemoteHash = rit->second;
-    if (lit->second != rit->second && !g_net.snap.desyncDetected) {
-        g_net.snap.desyncDetected = true;
-        g_net.snap.desyncFrame = f;
+    if (lit->second != rit->second) {
+        if (!g_net.snap.desyncDetected || (f % 120) == 0) {
+          g_net.snap.desyncDetected = true;
+          g_net.snap.desyncFrame = f;
         LOG_ERROR("[netplay] DESYNC DETECTED at matchFrame=%llu local=%016llx remote=%016llx",
                   static_cast<unsigned long long>(f),
                   static_cast<unsigned long long>(lit->second),
