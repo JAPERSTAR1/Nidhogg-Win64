@@ -556,6 +556,7 @@ void PumpUdpRxLocked() {
         g_net.lastRxUsec = MonoUsec();
 
         if (!cameFromRelay && !g_net.forceRelay) {
+            g_net.lastDirectRxUsec = MonoUsec();
             g_net.directEstablished = true;
             g_net.activePeerAddr = from;
             g_net.snap.transport = TransportMode::DirectP2P;
@@ -619,6 +620,7 @@ void PumpUdpRxLocked() {
                 g_net.peerAckedBarrier = true;
 
                 const uint8_t count = std::min<uint8_t>(ip.historyCount, 16);
+                if (!count || ip.latestFrame > g_net.matchFrame + 64) break;
                 for (uint8_t k = 0; k < count; ++k) {
                     if (ip.latestFrame >= k && ip.latestFrame - k + 64 >= g_net.matchFrame) {
                         g_net.remoteInputs[ip.latestFrame - k] = ip.buttonsHistory[k];
