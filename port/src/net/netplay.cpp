@@ -431,11 +431,16 @@ void SendSealedPeerPacketLocked(uint8_t pktType, const void* payload, size_t pay
     aad.sessionId = g_net.sessionId;
 
     std::vector<uint8_t> sealed;
-    if (!SealPacket(g_net.sessionKey, g_net.nextNonce++, reinterpret_cast<const uint8_t*>(&aad),
+    const uint64_t nonce = (g_net.nextNonce++) | (g_net.snap.isHost ? 0ULL : (1ULL << 63));
+    if (!SealPacket(g_net.sessionKey, nonce, reinterpret_cast<const uint8_t*>(&aad),
                     sizeof(aad), static_cast<const uint8_t*>(payload), payloadLen, sealed))
         return;
 
     auto sendViaRelay = [&]() {
+        if (g_net.websocketRelay) {
+            if (g_net.websocket.Send(sealed)) ++g_net.snap.packetsSent;
+            return;
+        }
         if (!g_net.hasRelayAddr) return;
         std::vector<uint8_t> env(1 + 8 + 1 + sealed.size());
         env[0] = kPktRelayEnvelope;
