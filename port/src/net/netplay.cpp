@@ -254,9 +254,12 @@ bool HttpRequestJson(const std::string& method, const std::string& path, const s
     outStatus = static_cast<int>(statusCode);
 
     outResponse.clear();
+    bool readOk = true;
     for (;;) {
         DWORD avail = 0;
-        if (!WinHttpQueryDataAvailable(hReq, &avail) || avail == 0) break;
+        if (!WinHttpQueryDataAvailable(hReq, &avail)) { readOk = false; break; }
+        if (avail == 0) break;
+        if (avail > 1024 * 1024 || outResponse.size() + avail > 1024 * 1024) { readOk = false; break; }
         std::string chunk(avail, '\0');
         DWORD got = 0;
         if (!WinHttpReadData(hReq, chunk.data(), avail, &got) || got == 0) { readOk = false; break; }
