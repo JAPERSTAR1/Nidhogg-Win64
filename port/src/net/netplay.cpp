@@ -757,8 +757,8 @@ bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
 
     bool sendHash = false;
     uint64_t curHash = 0;
-    if (f > 0 && (f % 30) == 0) {
-        curHash = ps4::ComputeGuestStateHash();
+    if (f > 0 && (f % 30) == 0 && !g_net.bootNavigating && stageFrame >= 160) {
+        curHash = ps4::ComputeGuestStateHash(f);
         g_net.localStateHashes[f] = curHash;
         VerifyHashesForFrameLocked(f);
         sendHash = true;
@@ -770,6 +770,7 @@ bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
     // Wait for remote input for frame `f`, pumping UDP RX & retransmitting every 4 ms.
     const uint64_t waitStart = MonoUsec();
     uint64_t lastRetx = waitStart;
+    uint64_t lastWaitingPresent = waitStart;
     while (g_net.remoteInputs.find(f) == g_net.remoteInputs.end()) {
         PumpUdpRxLocked();
         if (g_net.remoteInputs.find(f) != g_net.remoteInputs.end()) break;
