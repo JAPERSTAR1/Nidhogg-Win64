@@ -240,10 +240,12 @@ bool HttpRequestJson(const std::string& method, const std::string& path, const s
         body.empty() ? WINHTTP_NO_REQUEST_DATA : const_cast<char*>(body.data()),
         static_cast<DWORD>(body.size()), static_cast<DWORD>(body.size()), 0);
     if (!sent || !WinHttpReceiveResponse(hReq, nullptr)) {
+        const DWORD error = GetLastError();
         WinHttpCloseHandle(hReq);
         WinHttpCloseHandle(hConnect);
         WinHttpCloseHandle(hSession);
-        outErr = "Lobby server unreachable (" + core::CurrentSettings().lobbyServerUrl + ")";
+        outErr = "Lobby server unreachable (" + core::CurrentSettings().lobbyServerUrl +
+            "; WinHTTP " + std::to_string(error) + ")";
         return false;
     }
 
