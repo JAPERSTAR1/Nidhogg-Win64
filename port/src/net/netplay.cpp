@@ -735,12 +735,24 @@ bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
     }
 
     const uint64_t f = g_net.matchFrame;
+    ioRandState = g_net.matchSeed ^ static_cast<uint32_t>(f * 0x9e3779b9ULL);
+    if (f == 0 || f == 30 || (f % 300) == 0)
+        LOG_INFO("[netplay] input frame=%llu submit=%llu room=%s", f, simFrame, ps4::CurrentRoom().c_str());
     const uint32_t delay = static_cast<uint32_t>(std::clamp(g_net.snap.inputDelayFrames, 1, 8));
 
     // Deterministic stage-selection macro on frames 0..150 inside rLevelSelect so
     // both peers enter the exact chosen stage on the exact same simulation frame.
     uint32_t effectiveLocal = localButtons;
-    if (f < 160) {
+    if (g_net.bootNavigating) {
+        effectiveLocal = 0;
+        if (ps4::CurrentRoom() == "rLevelSelect") {
+            g_net.bootNavigating = false;
+            g_net.stageSelectionStart = f;
+            LOG_INFO("[netplay] deterministic boot reached stage selection at frame=%llu", f);
+        } else if (g_net.snap.isHost && (f % 50) < 8) effectiveLocal = 0x4000u;
+    }
+    const uint64_t stageFrame = f - g_net.stageSelectionStart;
+    if (!g_net.bootNavigating && stageFrame < 130) {
         effectiveLocal = 0;
         if (g_net.snap.isHost) {
             const int stg = g_net.snap.stageIndex;
