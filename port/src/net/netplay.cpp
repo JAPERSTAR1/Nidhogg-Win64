@@ -328,9 +328,72 @@ struct NetState {
     // CLI auto-test state
     bool cliHandled = false;
     bool cliAutoStart = false;
+    bool autoExitOnDisconnect = false;
+    bool qaCombat = false;
+    uint64_t gameStartSubmit = UINT64_MAX;
+    bool resumed = false;
+    bool restartPending = false;
+    bool handingOff = false;
+    bool bootNavigating = false;
+    uint64_t stageSelectionStart = UINT64_MAX;
 };
 
 NetState g_net;
+
+struct HeartbeatResult {
+    std::string roomId, response, error;
+    int status = 0;
+    bool ok = false;
+};
+std::future<HeartbeatResult> g_heartbeat;
+
+void RestartAtDeterministicBoot() {
+    // The menu has persistent actors, alarms and frame-dependent animation state.
+    // A fresh process starts the *original* guest from identical initial conditions.
+    // Credentials travel only in the child's private environment, never argv/files.
+    std::string resume;
+    {
+        std::scoped_lock lk(g_net.mtx);
+        if (!g_net.restartPending || g_net.resumed) return;
+        g_net.restartPending = false;
+        resume = "{\"roomId\":\"" + JsonEsc(g_net.snap.roomId) + "\",\"authToken\":\"" +
+            JsonEsc(g_net.authToken) + "\",\"udpPort\":" + std::to_string(g_net.localUdpPort) +
+            ",\"isHost\":" + (g_net.snap.isHost ? "true" : "false") + "}";
+    }
+    std::vector<wchar_t> environment;
+    LPWCH source = GetEnvironmentStringsW();
+    if (!source) return;
+    for (const wchar_t* p = source; *p; p += wcslen(p) + 1) {
+        std::wstring entry(p);
+        if (entry.rfind(L"NIDHOGG_NET_RESUME=", 0) == 0 || entry.rfind(L"NIDHOGG_NET_AUTO=", 0) == 0 ||
+            entry.rfind(L"NIDHOGG_OPEN_ONLINE=", 0) == 0 || entry.rfind(L"NIDHOGG_OPEN_SETTINGS=", 0) == 0) continue;
+        environment.insert(environment.end(), entry.begin(), entry.end()); environment.push_back(0);
+    }
+    FreeEnvironmentStringsW(source);
+    const auto credential = core::Utf8ToWide("NIDHOGG_NET_RESUME=" + resume);
+    environment.insert(environment.end(), credential.begin(), credential.end());
+    environment.push_back(0); environment.push_back(0);
+    std::wstring command = GetCommandLineW();
+    STARTUPINFOW startup{}; startup.cb = sizeof(startup);
+    // This is the player's new interactive game window, not an operator helper.
+    startup.dwFlags = STARTF_USESHOWWINDOW; startup.wShowWindow = SW_SHOWNORMAL;
+    PROCESS_INFORMATION process{};
+    if (!CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE,
+        CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED | CREATE_NO_WINDOW,
+        environment.data(), nullptr, &startup, &process)) {
+        std::scoped_lock lk(g_net.mtx);
+        g_net.snap.phase = SessionPhase::Error;
+        g_net.snap.errorText = "Cannot launch synchronized game (Windows " + std::to_string(GetLastError()) + ")";
+        return;
+    }
+    LOG_INFO("[netplay] handing room membership to clean synchronized guest process");
+    g_net.handingOff = true;
+    ps4::HleShutdown();
+    ResumeThread(process.hThread); CloseHandle(process.hThread);
+    WaitForSingleObject(process.hProcess, INFINITE);
+    DWORD code = 1; GetExitCodeProcess(process.hProcess, &code); CloseHandle(process.hProcess);
+    ExitProcess(code);
+}
 
 std::string DetectLocalLanIp() {
     SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
