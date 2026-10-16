@@ -280,6 +280,8 @@ struct NetState {
     SOCKET udpSock = INVALID_SOCKET;
     uint16_t localUdpPort = 0;
     std::string localLanIp = "127.0.0.1";
+    std::string publicIp;
+    uint16_t publicPort = 0;
 
     // Network condition simulator (for Phase 11 testing)
     int simOneWayLatencyMs = 0;  // half of simulated RTT
@@ -295,6 +297,8 @@ struct NetState {
     uint64_t sessionId = 0;
     uint8_t sessionKey[32]{};
     bool hasSessionKey = false;
+    uint64_t peerNonceHigh = 0;
+    uint64_t peerNonceMask = 0;
     uint32_t matchSeed = 0xCAFE1234u;
     uint16_t relayUdpPort = 27881;
     sockaddr_in relayAddr{};
