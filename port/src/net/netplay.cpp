@@ -507,6 +507,10 @@ void VerifyHashesForFrameLocked(uint64_t f) {
                   static_cast<unsigned long long>(f),
                   static_cast<unsigned long long>(lit->second),
                   static_cast<unsigned long long>(rit->second));
+          g_net.snap.phase = SessionPhase::Error;
+          g_net.snap.errorText = "Simulation mismatch. Leave the room and start a new match.";
+          g_net.snap.statusText = g_net.snap.errorText;
+        }
     } else if ((f % 120) == 0) {
         LOG_INFO("[netplay] frame=%llu mode=%s rtt=%.1fms jitter=%.1fms hash=%016llx sync=OK",
                  static_cast<unsigned long long>(f),
@@ -526,7 +530,14 @@ void PumpUdpRxLocked() {
     for (int iter = 0; iter < 64; ++iter) {
         sockaddr_in from{};
         int fromLen = sizeof(from);
-        int n = recvfrom(g_net.udpSock, reinterpret_cast<char*>(buf), sizeof(buf), 0,
+        std::vector<uint8_t> wsPacket;
+        const bool viaWebSocket = g_net.websocketRelay && g_net.websocket.Receive(wsPacket);
+        int n;
+        if (viaWebSocket) {
+            n = static_cast<int>(wsPacket.size());
+            if (n > sizeof(buf)) continue;
+            std::memcpy(buf, wsPacket.data(), n);
+        } else n = recvfrom(g_net.udpSock, reinterpret_cast<char*>(buf), sizeof(buf), 0,
                          reinterpret_cast<sockaddr*>(&from), &fromLen);
         if (n <= 0) break;
 
