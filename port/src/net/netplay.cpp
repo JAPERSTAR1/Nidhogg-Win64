@@ -20,6 +20,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <future>
 #include <mutex>
 #include <sstream>
 #include <thread>
@@ -165,6 +166,7 @@ bool JsonGetBool(const std::string& j, const char* key, bool& out) {
 }
 
 struct ParsedUrl {
+    bool valid = false;
     bool https = false;
     std::wstring host = L"127.0.0.1";
     std::string hostUtf8 = "127.0.0.1";
