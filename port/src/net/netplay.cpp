@@ -744,11 +744,29 @@ bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
         effectiveLocal = 0;
         if (g_net.snap.isHost) {
             const int stg = g_net.snap.stageIndex;
-            if (stg == 3 && f >= 15 && f < 23) effectiveLocal = 0x0040u;        // Down -> Wilds
-            else if (stg == 1 && ((f >= 15 && f < 23) || (f >= 60 && f < 68)))  // Down x2 -> Mines
+            if (stg == 3 && stageFrame >= 15 && stageFrame < 23) effectiveLocal = 0x0040u;
+            else if (stg == 1 && ((stageFrame >= 15 && stageFrame < 23) || (stageFrame >= 60 && stageFrame < 68)))
                 effectiveLocal = 0x0040u;
-            else if (stg == 2 && f >= 15 && f < 23) effectiveLocal = 0x0010u;   // Up -> Clouds
-            if (f >= 115 && f < 125) effectiveLocal = 0x4000u;                  // Cross -> Start Match!
+            else if (stg == 2 && stageFrame >= 15 && stageFrame < 23) effectiveLocal = 0x0010u;
+            if (stageFrame >= 115 && stageFrame < 125) effectiveLocal = 0x4000u;
+        }
+    }
+    // Test-only controls expressed relative to the original match-start event,
+    // including negotiated delay. They exercise real input, never mutate actors.
+    if (g_net.qaCombat && g_net.gameStartSubmit != UINT64_MAX) {
+        const uint64_t c = simFrame + delay - g_net.gameStartSubmit;
+        effectiveLocal = 0;
+        auto held = [c](uint64_t start, uint64_t length) { return c >= start && c < start + length; };
+        if (g_net.snap.isHost) {
+            if (held(40, 35)) effectiveLocal |= 0x0040;
+            if (held(80, 20)) effectiveLocal |= 0x0010;
+            if (held(90, 8)) effectiveLocal |= 0x8000;
+            if (held(115, 2200)) effectiveLocal |= 0x0020;
+            if (c >= 200 && c < 2200 && (c - 200) % 95 < 12) effectiveLocal |= 0x4000;
+        } else {
+            if (held(40, 20)) effectiveLocal |= 0x0010;
+            if (held(50, 8)) effectiveLocal |= 0x8000;
+            if (held(135, 2200)) effectiveLocal |= 0x0080;
         }
     }
 
