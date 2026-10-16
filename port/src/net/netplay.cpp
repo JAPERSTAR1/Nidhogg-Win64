@@ -620,7 +620,7 @@ void PumpUdpRxLocked() {
 
                 const uint8_t count = std::min<uint8_t>(ip.historyCount, 16);
                 for (uint8_t k = 0; k < count; ++k) {
-                    if (ip.latestFrame >= k) {
+                    if (ip.latestFrame >= k && ip.latestFrame - k + 64 >= g_net.matchFrame) {
                         g_net.remoteInputs[ip.latestFrame - k] = ip.buttonsHistory[k];
                     }
                 }
@@ -662,7 +662,7 @@ void SendInputPacketForFrameLocked(uint64_t targetFrame, bool includeHash, uint6
     SendSealedPeerPacketLocked(kPktInput, &ip, sizeof(ip));
 }
 
-bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
+bool NetplayStepCallbackImpl(uint64_t simFrame, uint32_t localButtons,
                              uint32_t& outP1Buttons, uint32_t& outP2Buttons,
                              uint32_t& ioRandState) {
     std::unique_lock<std::mutex> lk(g_net.mtx);
