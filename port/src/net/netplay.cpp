@@ -530,7 +530,7 @@ void PumpUdpRxLocked() {
                          reinterpret_cast<sockaddr*>(&from), &fromLen);
         if (n <= 0) break;
 
-        bool cameFromRelay = false;
+        bool cameFromRelay = viaWebSocket;
         const uint8_t* pkt = buf;
         size_t pktLen = static_cast<size_t>(n);
         if (pktLen > 10 && pkt[0] == kPktRelayEnvelope) {
@@ -550,6 +550,15 @@ void PumpUdpRxLocked() {
         std::vector<uint8_t> plain;
         if (!OpenPacket(g_net.sessionKey, pkt, pktLen, sizeof(WireAad), nonce, plain)) {
             continue;  // Failed HMAC authentication
+        }
+        if (nonce > g_net.peerNonceHigh) {
+            const uint64_t shift = nonce - g_net.peerNonceHigh;
+            g_net.peerNonceMask = shift >= 64 ? 1 : ((g_net.peerNonceMask << shift) | 1);
+            g_net.peerNonceHigh = nonce;
+        } else {
+            const uint64_t age = g_net.peerNonceHigh - nonce;
+            if (age >= 64 || (g_net.peerNonceMask & (1ULL << age))) continue;
+            g_net.peerNonceMask |= 1ULL << age;
         }
 
         ++g_net.snap.packetsReceived;
