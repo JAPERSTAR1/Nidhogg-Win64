@@ -299,6 +299,8 @@ struct NetState {
     uint16_t relayUdpPort = 27881;
     sockaddr_in relayAddr{};
     bool hasRelayAddr = false;
+    bool websocketRelay = false;
+    WebSocketRelay websocket;
 
     sockaddr_in peerPublicAddr{};
     bool hasPeerPublic = false;
@@ -306,6 +308,8 @@ struct NetState {
     bool hasPeerLan = false;
     sockaddr_in activePeerAddr{};
     bool directEstablished = false;
+    uint64_t lastDirectRxUsec = 0;
+    bool stalled = false;
 
     uint64_t connectStartUsec = 0;
     uint64_t lastHeartbeatUsec = 0;
