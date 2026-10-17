@@ -6,7 +6,7 @@
 
 namespace ps4::net {
 
-inline constexpr const char* kProtocolVersion = "nidhogg-win64-1.0";
+inline constexpr const char* kProtocolVersion = "nidhogg-win64-2.0";
 
 enum class SessionPhase : int {
     Offline = 0,
@@ -71,6 +71,8 @@ struct NetStatsSnapshot {
 };
 
 void InitNetplay();
+bool ResumeOnlineSession(); // Called before the first guest instruction on match handoff.
+void NotifyOriginalMatchStart(uint64_t submittedFrame);
 void ShutdownNetplay();
 void TickNetplayLobby();  // Called once per frame from UI/renderer
 
