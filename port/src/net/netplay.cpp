@@ -2,10 +2,14 @@
 #define WIN32_LEAN_AND_MEAN
 #include "netplay.h"
 #include "crypto.h"
+#include "websocket.h"
+#include "stun.h"
 
 #include "../core/logger.h"
 #include "../core/settings.h"
 #include "../hle.h"
+#include "../gnm/d3d11.h"
+#include "../ui/overlay.h"
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
