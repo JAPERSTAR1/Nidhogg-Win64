@@ -142,3 +142,65 @@ export function createLobby({ ttlMs = 20000, maxRooms = 128, now = Date.now } = 
   const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://localhost');
+      if (url.pathname !== '/health') requireThat(req.headers['x-nidhogg-version'] === VERSION, 426, 'Client/server protocol mismatch; update the Windows client');
+      let size = 0, chunks = [];
+      for await (const chunk of req) { size += chunk.length; requireThat(size <= 4096, 413, 'Request too large'); chunks.push(chunk); }
+      let b = {};
+      try { b = size ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}; } catch { throw new ApiError(400, 'Invalid JSON'); }
+      requireThat(b && typeof b === 'object' && !Array.isArray(b), 400, 'Expected object');
+      // Only trust Cloudflare's overwritten client-IP header from the local tunnel.
+      const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+      const ip = local && isIP(req.headers['cf-connecting-ip']) ? req.headers['cf-connecting-ip'] : req.socket.remoteAddress;
+      const result = route(req.method, url, b, ip);
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(result));
+    } catch (e) {
+      res.writeHead(e.status ?? 500, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ error: e.status ? e.message : 'Internal server error' }));
+    }
+  });
+  server.requestTimeout = 5000; server.headersTimeout = 5000; server.maxConnections = 512;
+  server.on('upgrade', (req, socket, head) => {
+    try {
+      sweep(); rate(req.socket.remoteAddress, 5);
+      requireThat(req.headers['x-nidhogg-version'] === VERSION, 426, 'Protocol mismatch');
+      const url = new URL(req.url, 'http://localhost');
+      requireThat(url.pathname === '/relay', 404, 'Unknown endpoint');
+      const r = rooms.get(url.searchParams.get('roomId')); requireThat(r, 404, 'Room closed');
+      const [p, role] = member(r, req.headers['x-nidhogg-token']);
+      wss.handleUpgrade(req, socket, head, ws => {
+        p.ws?.close(1000, 'Replaced'); p.ws = ws; ws.isAlive = true;
+        let count = 0, window = now(), lastNonce = -1n;
+        ws.on('pong', () => { ws.isAlive = true; });
+        ws.on('error', () => {});
+        ws.on('close', () => { if (p.ws === ws) p.ws = null; });
+        ws.on('message', (data, binary) => {
+          if (now() - window >= 1000) { count = 0; window = now(); }
+          if (!binary || ++count > 600 || data.length < 40 || data.length > 2048 || !rooms.has(r.id)) { ws.close(1008, 'Invalid packet'); return; }
+          if (data.readUInt32LE(0) !== 0x504e484e || data[5] !== role || data.readBigUInt64LE(8).toString() !== r.session) return;
+          const mac = createHmac('sha256', Buffer.from(r.key, 'hex').subarray(16)).update(data.subarray(0, -16)).digest().subarray(0, 16);
+          if (!timingSafeEqual(mac, data.subarray(-16))) { ws.close(1008, 'Authentication failed'); return; }
+          const nonce = data.readBigUInt64LE(16);
+          if (nonce <= lastNonce) return; lastNonce = nonce; p.seen = now();
+          const peer = role === 1 ? r.guest?.ws : r.host.ws;
+          if (peer?.readyState === WebSocket.OPEN) {
+            if (peer.bufferedAmount > 64 * 1024) { peer.close(1013, 'Slow receiver'); return; }
+            peer.send(data, { binary: true });
+          }
+        });
+      });
+    } catch (e) { socket.end(`HTTP/1.1 ${e.status ?? 400} Rejected\r\nConnection: close\r\n\r\n`); }
+  });
+  const timer = setInterval(() => {
+    sweep();
+    for (const ws of wss.clients) { if (!ws.isAlive) ws.terminate(); else { ws.isAlive = false; ws.ping(); } }
+  }, 5000); timer.unref();
+  return { server, rooms, sweep, close: async () => {
+    clearInterval(timer); for (const ws of wss.clients) ws.terminate();
+    server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
+  } };
+}
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const lobby = createLobby();
+  lobby.server.listen(Number(process.env.PORT ?? 27880), process.env.BIND ?? '127.0.0.1', () => console.log(`Nidhogg lobby listening on ${JSON.stringify(lobby.server.address())}`));
+  for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, async () => { await lobby.close(); process.exit(0); });
+}
