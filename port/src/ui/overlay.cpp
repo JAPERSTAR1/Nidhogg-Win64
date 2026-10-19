@@ -23,6 +23,8 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include <future>
+#include <functional>
 
 using Microsoft::WRL::ComPtr;
 
@@ -451,6 +453,8 @@ const char* StageName(int idx) {
         default: return "Castle";
     }
 }
+
+#include "online_actions.inc"
 
 void AdjustSettingRow(void* hwnd, int tab, int row, int dir, bool activated) {
     auto& cfg = core::CurrentSettings();
