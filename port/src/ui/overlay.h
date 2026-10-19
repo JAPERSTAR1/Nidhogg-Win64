@@ -9,6 +9,7 @@ namespace ps4::ui {
 
 void InitOverlay(ID3D11Device* device);
 void ShutdownOverlay();
+void FinishOnlineActions();
 
 void OpenOverlayTab(int tabIndex);  // 0=Graphics,1=Display,2=Audio,3=Controls,4=Online,5=General
 bool IsOverlayOpen();
