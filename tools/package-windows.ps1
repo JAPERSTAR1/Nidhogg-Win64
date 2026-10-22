@@ -13,7 +13,8 @@ Run Nidhogg.exe for the game, or Play Online.cmd for the online menu.
 Select your CUSA00920 game folder when prompted. Original assets are not included.
 F1 opens settings. Each player uses their local Player 1 controls online.
 The endpoint in Play Online.cmd must be an actually deployed lobby.
-lobby.japer.me has NOT been activated during development; see MULTIPLAYER.md.
+lobby.japer.me is deployed; recent DNS migration may take time at some providers.
+The operator PC must remain on for the lobby and relay to be available.
 No VPN, Node.js, cloudflared or PowerShell is required on player PCs.
 '@ | Set-Content -LiteralPath (Join-Path $destination 'READ-ME.txt') -Encoding UTF8
 $archive = Join-Path $repo 'dist/Nidhogg-Windows.zip'
