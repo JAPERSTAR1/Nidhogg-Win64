@@ -22,9 +22,12 @@ Set Online Settings > Lobby Server to the deployed HTTPS origin. Alternatively:
 .\start-game.ps1 -Endpoint 'http://127.0.0.1:27880'
 ```
 
-`start-game.cmd` targets **https://lobby.japer.me**, which is NOT deployed yet.
-Do not mistake that shortcut/configuration for an available production service.
-The default client setting retains localhost for development. `--lobby-url`
+`start-game.cmd` and new client settings target **https://lobby.japer.me**.
+The permanent named tunnel was deployed on 2026-11-12 after user authorization.
+Some ISP DNS resolvers can retain the prior NXDOMAIN/delegation temporarily;
+public Google DNS and Cloudflare authoritative servers already return the new
+address. Localhost development remains available through Online Settings or
+`--lobby-url`. `--lobby-url`
 overrides the saved endpoint without overwriting it. Endpoint URLs accept an
 HTTP/HTTPS origin, no path, query or credentials. Localhost HTTP is for testing;
 use HTTPS over the internet. No VPN, networking tools, Node or PowerShell are
@@ -96,7 +99,7 @@ Use the printed `https://...trycloudflare.com` origin in both clients. This
 address changes when the tunnel restarts and has no availability guarantee.
 It does not configure `lobby.japer.me` or alter the website.
 
-### Stable lobby.japer.me — requires user account/DNS action
+### Stable lobby.japer.me — deployed configuration and setup reference
 
 Initial DNS on 2026-11-12 used registrar-servers.com and had no lobby record.
 The user moved the domain to Cloudflare and authorized tunnel preparation.
