@@ -4,7 +4,8 @@ Current Windows multiplayer work (2026-11-12): see
 [deployment and operation](docs/MULTIPLAYER.md) and
 [verification status](docs/NETWORK-VERIFICATION.md). Both original guests have
 completed matching local and public-tunnel matches; separate physical networks
-and the permanent `lobby.japer.me` deployment remain unverified/blocked.
+remain unverified. The permanent `lobby.japer.me` tunnel is deployed; its normal
+resolver test on this PC awaits upstream ISP DNS propagation.
 Build `port/build.ps1`; player GUI `port/out/Nidhogg.exe`.
 
 The initial extraction notes below are historical; their "State" table does not
