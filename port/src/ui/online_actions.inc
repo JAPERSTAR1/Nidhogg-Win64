@@ -94,3 +94,19 @@ void HandleOnlineAction(int row, int dir, bool activated, bool& save) {
                 g_ui.joinCodeInput.push_back(static_cast<char>(std::toupper(c)));
         } else if (row == 2) {
             g_ui.editingText = EditTarget::None;
+            QueueSimple([code = g_ui.joinCodeInput](std::string& e) { return net::JoinRoomByCode(code, e); }, true);
+        } else if (row == 3) { g_ui.editingText = EditTarget::None; g_ui.onlinePage = OnlineSubPage::Home; g_ui.selectedRow = 4; }
+    } else if (g_ui.onlinePage == OnlineSubPage::OnlineSettings) {
+        switch (row) {
+            case 0: if (activated) g_ui.editingText = g_ui.editingText == EditTarget::PlayerName ? EditTarget::None : EditTarget::PlayerName; break;
+            case 1: {
+                const char* regions[] = {"us-east", "us-west", "eu-west", "ap-east"}; int index = 0;
+                for (int i = 0; i < 4; ++i) if (cfg.region == regions[i]) index = i;
+                cfg.region = regions[(index + (dir ? dir : 1) + 4) % 4]; save = true; break;
+            }
+            case 2: cfg.inputDelayFrames = std::clamp(cfg.inputDelayFrames + (dir ? dir : 1), 1, 8); save = true; break;
+            case 3: if (activated) g_ui.editingText = g_ui.editingText == EditTarget::ServerUrl ? EditTarget::None : EditTarget::ServerUrl; break;
+            case 4: if (activated) { g_ui.editingText = EditTarget::None; g_ui.onlinePage = OnlineSubPage::Home; g_ui.selectedRow = 6; } break;
+        }
+    }
+}
