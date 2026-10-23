@@ -94,3 +94,30 @@ void WebSocketRelay::Run(std::string url, std::string room, std::string token) {
         while (!stop_ && connected_) {
             uint8_t buffer[2048]; DWORD read = 0;
             WINHTTP_WEB_SOCKET_BUFFER_TYPE type{};
+            error = WinHttpWebSocketReceive(ws, buffer, sizeof(buffer), &read, &type);
+            if (error || type == WINHTTP_WEB_SOCKET_CLOSE_BUFFER_TYPE) break;
+            if ((type != WINHTTP_WEB_SOCKET_BINARY_FRAGMENT_BUFFER_TYPE &&
+                 type != WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE) || packet.size() + read > 2048) {
+                error = ERROR_INVALID_DATA; break;
+            }
+            packet.insert(packet.end(), buffer, buffer + read);
+            if (type == WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE) {
+                std::lock_guard lock(mutex_);
+                if (rx_.size() >= 256) { error = ERROR_BUFFER_OVERFLOW; break; }
+                rx_.push_back(std::move(packet)); packet.clear();
+            }
+        }
+        connected_ = false; cv_.notify_all();
+        { std::lock_guard lock(mutex_);
+          if (socket_) { WinHttpCloseHandle(socket_); socket_ = nullptr; } }
+        sender.join(); ws = nullptr;
+    } while (false);
+    connected_ = false;
+    if (request) WinHttpCloseHandle(request);
+    if (connection) WinHttpCloseHandle(connection);
+    if (session) WinHttpCloseHandle(session);
+    if (!stop_) { std::lock_guard lock(mutex_);
+      error_ = "WebSocket relay disconnected (WinHTTP " + std::to_string(error) + ")";
+      LOG_WARN("[netplay] %s", error_.c_str()); }
+}
+}
