@@ -46,3 +46,6 @@ try {
     finally {
         if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id }
         if ($tunnel -and -not $tunnel.HasExited) { Stop-Process -Id $tunnel.Id }
+        Remove-Item -LiteralPath $statePath -ErrorAction SilentlyContinue
+    }
+} finally { Pop-Location }
