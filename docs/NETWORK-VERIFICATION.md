@@ -16,7 +16,7 @@ checkpoint: `993f8ba`. No original game data or other checkout was edited.
 | Host/Join UI changes | PARTIALLY WORKING | Built native overlay and original-menu hook; network actions now run off the rendering thread. Windows UI capture failed twice (`FrameArrived timed out`, `window capture timed out`), so the actual button flow was not certified by clicking. CLI integration exercises the same networking APIs. No security/firewall dialogs were automated. |
 | Operator scripts | VERIFIED WORKING | Managed server launched successfully on isolated port 27882 and `stop-server.ps1` stopped its owned process. Startup shortcut script parses but has not been installed. |
 | Automatic named-tunnel startup | IMPLEMENTED BUT NOT EXTERNALLY VERIFIED | `install-server-startup.ps1` and `deploy/cloudflared.example.yml`; requires an authorized, working named tunnel and actual logon test. |
-| lobby.japer.me production deployment | BLOCKED | DNS lookup shows NXDOMAIN for `lobby.japer.me`; zone uses registrar-servers.com nameservers. No account login, DNS changes, nameserver changes or persistent tunnel credentials were created. User authorization/account access is required. |
+| lobby.japer.me production deployment | BLOCKED | DNS lookup shows NXDOMAIN for `lobby.japer.me`; zone uses registrar-servers.com nameservers. User authorized Cloudflare preparation while preserving the website. `cloudflared tunnel login` was started and is waiting for manual authentication/zone authorization. No DNS/nameserver changes or persistent tunnel credentials have been created. Complete registrar zone export/review is still required before migration. |
 | Separate PCs / separate internet links | BLOCKED | A second physical Windows PC and independent internet connection were unavailable. Public-tunnel testing does not replace this test. |
 | Original PSN protocol / rollback / reconnect | NOT IMPLEMENTED | Existing incomplete SCE networking emulation remains. This implementation uses original local game logic with synchronized input, not an invented PSN implementation. It has no reconnect/resume or rollback. |
 
@@ -45,3 +45,11 @@ For startup/deployment, limitations and public documentation sources see
 [MULTIPLAYER.md](MULTIPLAYER.md). Local logs/results are ignored by Git but
 remain in this checkout. Release packaging excludes all original game assets,
 operator credentials, Node/cloudflared and development logs.
+
+Public DNS/website baselines for the authorized Cloudflare preparation are saved
+under `.tools/*before-cloudflare*.json`, with a draft observed-record review in
+`.tools/cloudflare-dns-review.json`. Both website URLs returned HTTP 200 and the
+same body digest. Public queries also found MX/TXT email records: preserve those
+and any unenumerated DKIM/other records from the complete registrar export.
+These snapshots are read-only evidence, not a complete zone backup or permission
+to apply the draft.
