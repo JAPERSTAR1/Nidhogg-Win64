@@ -487,6 +487,4 @@ FodyWeavers.xsd
 node_modules/
 tests/results/
 server/operator/
-*credentials*.json
 room-code.txt
-dist/
