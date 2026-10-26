@@ -148,8 +148,9 @@ Optional automatic startup (operator account, after the named tunnel works):
 .\install-server-startup.ps1 -TunnelConfig "$env:LOCALAPPDATA\NidhoggServer\config.yml" -Remove
 ```
 
-Startup uses a per-user sign-in shortcut and hidden operator processes. It has
-not been installed during development. Process identity/start time are recorded
+Startup uses a per-user sign-in shortcut and hidden operator processes. It was
+installed after authorization on 2026-11-12; a complete logoff/logon test is still
+pending. Process identity/start time are recorded
 to avoid stopping an unrelated reused PID. The operator logs are under `.tools`.
 
 ## Validation
