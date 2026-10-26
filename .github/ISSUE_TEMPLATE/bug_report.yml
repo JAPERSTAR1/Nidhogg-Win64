@@ -1,0 +1,21 @@
+name: Bug report
+description: Report a reproducible runtime or lobby problem
+body:
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and observed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Include revision, Windows version and local / relay / direct transport.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Redacted diagnostics
+      description: Do not attach game assets, save data, tokens or account credentials.
