@@ -98,9 +98,14 @@ It does not configure `lobby.japer.me` or alter the website.
 
 ### Stable lobby.japer.me — requires user account/DNS action
 
-Observed DNS on 2026-11-12: `japer.me` uses
-`dns1.registrar-servers.com` / `dns2.registrar-servers.com`; `lobby.japer.me`
-does not exist. **No DNS or external account changes have been made.**
+Initial DNS on 2026-11-12 used registrar-servers.com and had no lobby record.
+The user moved the domain to Cloudflare and authorized tunnel preparation.
+Current public nameservers are `clarissa.ns.cloudflare.com` and
+`javon.ns.cloudflare.com`. A named `nidhogg-lobby` tunnel and proxied CNAME for
+`lobby.japer.me` have been created. API snapshots prove all other 12 imported
+records were retained unchanged. Apex and www both returned HTTP 200 with the
+same content digest as before migration, including an explicit request through
+the Cloudflare edge. Mail MX/TXT records match the observed baseline.
 
 The ordinary free Cloudflare custom-hostname Tunnel setup requires the domain
 to be an active Cloudflare DNS zone. A CNAME-only/partial setup is not a free
@@ -111,8 +116,10 @@ Do not perform it merely to follow this guide.
 After authorization, export the complete current zone first. Import and verify
 all existing website, mail, verification and other records in Cloudflare before
 changing nameservers at the registrar. Keep the GitHub Pages apex and `www`
-records/targets and website contents unchanged; retain DNS-only routing for the
-website during migration. The multiplayer service uses only `lobby` after that.
+records/targets and website contents unchanged. Preserve a working website's
+proxy settings unless a separate, deliberate change is needed. During this
+deployment the existing imported proxy settings were kept and the website was
+verified through Cloudflare. The multiplayer service uses only `lobby`.
 Save the old zone/nameservers for recovery. DNS migration still needs user review.
 
 After the zone is authorized and active:
