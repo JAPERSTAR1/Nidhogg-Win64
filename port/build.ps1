@@ -30,7 +30,10 @@ $csrc = Get-ChildItem (Join-Path $root "src") -Recurse -Filter *.c | ForEach-Obj
 $cStep = if ($csrc) { "cl /nologo /c /TC /O2 /MT /W0 /Fo:`"$out\c\\`" $($csrc -join ' ') && " } else { "" }
 $objs = if ($csrc) { "`"$out\c\*.obj`"" } else { "" }
 $libs = "user32.lib gdi32.lib shell32.lib ole32.lib advapi32.lib windowscodecs.lib xinput.lib winmm.lib d3d11.lib d3dcompiler.lib dxgi.lib ws2_32.lib bcrypt.lib winhttp.lib"
-$cmd = "call `"$vcvars`" >nul && ${cStep}cl /nologo /std:c++20 /EHsc /O2 /MT /W4 /WX- /Fe:`"$out\nidhogg_host.exe`" /Fo:`"$out\\`" $($cpp -join ' ') $objs /link /SUBSYSTEM:CONSOLE $libs && link /nologo /OUT:`"$out\Nidhogg.exe`" /SUBSYSTEM:WINDOWS /ENTRY:wWinMainCRTStartup `"$out\*.obj`" $objs $libs"
+$resourceDir = Join-Path $root "resources"
+$resourceObject = "`"$out\nidhogg.res`""
+$resourceStep = "rc /nologo /I `"$resourceDir`" /fo $resourceObject `"$resourceDir\nidhogg.rc`" && "
+$cmd = "call `"$vcvars`" >nul && ${resourceStep}${cStep}cl /nologo /std:c++20 /EHsc /O2 /MT /W4 /WX- /Fe:`"$out\nidhogg_host.exe`" /Fo:`"$out\\`" $($cpp -join ' ') $objs $resourceObject /link /SUBSYSTEM:CONSOLE $libs && link /nologo /OUT:`"$out\Nidhogg.exe`" /SUBSYSTEM:WINDOWS /ENTRY:wWinMainCRTStartup `"$out\*.obj`" $objs $resourceObject $libs"
 Write-Host "building..." -ForegroundColor DarkGray
 cmd /c $cmd
 if ($LASTEXITCODE -ne 0) { throw "build failed ($LASTEXITCODE)" }

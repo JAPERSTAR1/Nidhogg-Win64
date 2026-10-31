@@ -8,6 +8,14 @@ remain unverified. The permanent `lobby.japer.me` tunnel is deployed; its normal
 resolver test on this PC awaits upstream ISP DNS propagation.
 Build `port/build.ps1`; player GUI `port/out/Nidhogg.exe`.
 
+The Windows EXEs embed the supplied artwork as a multi-size icon and the original
+PNG resource from `port/resources/`. `python tools/package-desktop.py --assets
+"PATH\TO\CUSA00920"` creates separate ready-to-play Windows and exact original
+PS4 folders/ZIPs on the Windows Desktop, verifies copied file hashes, and leaves
+the asset source unchanged. Existing desktop packages are kept. Use
+`python tools/verify-icon.py` and `python tests/verify-desktop-package.py` to
+check embedded resources and portable asset discovery/startup.
+
 The initial extraction notes below are historical; their "State" table does not
 describe the current rendering/audio/runtime implementation.
 
