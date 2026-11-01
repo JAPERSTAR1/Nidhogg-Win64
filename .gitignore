@@ -35,10 +35,11 @@ eboot.bin
 
 # Runtime / extracted data
 work/
+savedata/
+*.dmp
 *.log
 *.err
 shot_*.png
-*.dmp
 
 # Generated diagnostics, packages and dependency trees
 .tools/
