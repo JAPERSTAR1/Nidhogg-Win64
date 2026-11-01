@@ -24,16 +24,11 @@ CUSA00920/
 *.sprx
 *.prx
 *.pkg
-eboot.bin
-
-# Game assets and audio
 *.at9
 *.bnk
 *.vag
 *.wem
 *.dds
-
-# Runtime / extracted data
 work/
 savedata/
 *.dmp
