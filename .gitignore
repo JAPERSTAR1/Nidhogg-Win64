@@ -17,8 +17,9 @@ x64/
 *.tlog
 *.lastbuildstate
 
-# Original PS4 executables and libraries
+# Original game files, decoded executables and runtime data
 CUSA00920/
+eboot.bin
 *.elf
 *.self
 *.sprx
