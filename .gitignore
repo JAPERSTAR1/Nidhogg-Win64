@@ -8,6 +8,7 @@ x64/
 *.exe
 *.dll
 *.obj
+*.res
 *.pdb
 *.ilk
 *.lib
@@ -16,6 +17,10 @@ x64/
 *.ipch
 *.tlog
 *.lastbuildstate
+*.user
+*.suo
+*.VC.db
+*.VC.VC.opendb
 
 # Original game files, decoded executables and runtime data
 CUSA00920/
