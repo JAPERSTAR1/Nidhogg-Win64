@@ -40,13 +40,17 @@ work/
 shot_*.png
 *.dmp
 
-# Python / temporary
+# Generated diagnostics, packages and dependency trees
+.tools/
+tests/results/
+dist/
+node_modules/
 __pycache__/
 *.pyc
 *.tmp
 *.bak
 
-# Credentials
+# Operator credentials and private room state
 .env
 .env.*
 *.pem
