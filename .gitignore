@@ -1,5 +1,6 @@
-﻿# Visual Studio / build artifacts
+# Build products and IDE state
 .vs/
+.vscode/
 build/
 out/
 Debug/
