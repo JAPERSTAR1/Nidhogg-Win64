@@ -23,18 +23,11 @@ Native Windows x64 port work for **Nidhogg** (PS4, `UP2143-CUSA00920`, v1.00).
 
 Source dump: `C:\Users\puy12\Downloads\g\CUSA00920`.
 
-## State
+The default endpoint is `https://lobby.japer.me`. The operator computer must stay
+on for matchmaking and relay. Players need no VPN, Node.js or tunnel software.
+An unavailable endpoint does not prevent offline play.
 
-| step | status |
-|---|---|
-| SELF → ELF extraction | done, `work/nidhogg.elf` |
-| image survey (segments, code, relocs, imports) | done, `analysis/` |
-| Windows host that maps and executes the image | done, `port/out/nidhogg_host.exe` |
-| relocations applied | 7,972 |
-| import slots found and stubbed | 465 |
-| entry point | **broken in the dump**, must be recovered |
-| SCE shim layer | not started |
-| renderer (GNM → D3D11) | not started |
+## Build
 
 Requirements: Windows 10/11 x64, Visual Studio Build Tools with the MSVC C++ x64
 toolset and Windows SDK. Python 3 is used by diagnostics; Node.js 20+ is required
