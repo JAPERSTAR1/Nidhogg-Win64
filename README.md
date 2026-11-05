@@ -67,14 +67,18 @@ suffers. Import identity has to come from call-site behaviour instead of NIDs.
 
 ## Tooling
 
-```
-tools/ps4_self.py    SELF → ELF, verifies the program headers and reports gaps
-tools/analyze.py     code survey, function candidates, strings, import slots
-tools/nids.py        import/library inventory from the dynlib segment
-port/build.ps1       MSVC build
-```
+| Location | Responsibility |
+| --- | --- |
+| `port/src/image.*`, `thunks.*`, `hle.*` | Guest mapping, ABI bridging, SCE compatibility |
+| `port/src/gnm/` | PM4 interpretation and Direct3D 11 rendering |
+| `port/src/audio/`, `atrac9/` | Windows audio and codec integration |
+| `port/src/core/`, `ui/` | Settings, diagnostics and native overlays |
+| `port/src/net/` | Input synchronization, packet authentication, UDP/STUN and WSS |
+| `server/`, `deploy/` | Lobby/relay backend and tunnel configuration template |
+| `analysis/`, `tools/` | Reverse-engineering records and investigation utilities |
+| `tests/` | Backend-independent native gameplay regression harnesses |
 
-## Host
+## Documentation
 
 - [Multiplayer architecture and deployment](docs/MULTIPLAYER.md)
 - [Verification status and outstanding limitations](docs/NETWORK-VERIFICATION.md)
