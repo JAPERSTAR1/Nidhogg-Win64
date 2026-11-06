@@ -36,14 +36,16 @@ Source dump: `C:\Users\puy12\Downloads\g\CUSA00920`.
 | SCE shim layer | not started |
 | renderer (GNM → D3D11) | not started |
 
-## What the dump actually contains
+Requirements: Windows 10/11 x64, Visual Studio Build Tools with the MSVC C++ x64
+toolset and Windows SDK. Python 3 is used by diagnostics; Node.js 20+ is required
+only for the lobby server and its tests. No original game files are needed to
+compile the runtime or run backend unit tests.
 
-The eboot is a SELF wrapping an `ET_SCE_RELEXEC` ELF. The code segments are
-plaintext x86-64, MSVC-built, with RTTI and the original build paths intact:
-
-```
-C:/Projects/FOCAL/Nidhogg/ps4/Nidhogg.elf
-C:\Projects\FOCAL\FOCAL\ps4\savedata.cpp
+```powershell
+git clone https://github.com/JAPERSTAR1/Nidhogg-Win64-Port.git
+cd Nidhogg-Win64-Port
+.\port\build.ps1
+.\port\out\Nidhogg.exe
 ```
 
 Outputs: GUI `port/out/Nidhogg.exe` and console diagnostic host
