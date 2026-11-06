@@ -55,17 +55,20 @@ PLT  0x16f310            465 entries, slots ascending from 0x33b2d8
 RELA 0x345980..0x374a80  7,972 R_X86_64_RELATIVE records
 ```
 
-Three independent structures agree on that mapping (PLT slot arithmetic,
-relocation offsets, `lea` targets of the game's own string references), so the
-image map is not guesswork.
+Use `python tests/multiplayer_pair.py --assets 'D:\Games\CUSA00920' --combat
+--frames 2800 --label my-local-duel` with a running local server for a real
+two-process match. Local tests do not certify connectivity across separate NATs.
+For the offline regression, set `NIDHOGG_ASSETS` to your asset folder and run
+`python tests/offline_network_regression.py`. Results and isolated saves go under
+ignored `tests/results/`. Never run tests against personal save directories.
 
-**The dump is truncated.** The file ends at 0x377081 while its own program
-headers declare data out to 0x37bd51 — 19,664 bytes of dynlib metadata are
-missing (the dynamic table, part of the SCE string/symbol tables, and the
-process-parameter block). The loadable image is complete; only symbol naming
-suffers. Import identity has to come from call-site behaviour instead of NIDs.
+`tools/package-windows.ps1` packages the runtime and operating instructions using
+an explicit manifest; original assets and operator credentials are excluded.
+`tools/package-desktop.py --assets 'D:\Games\CUSA00920'` is a separate local
+backup/portable-copy tool. Its asset-containing output must not be attached to
+source releases.
 
-## Tooling
+## Project map
 
 | Location | Responsibility |
 | --- | --- |
