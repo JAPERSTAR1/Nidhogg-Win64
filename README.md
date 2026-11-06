@@ -46,13 +46,18 @@ C:/Projects/FOCAL/Nidhogg/ps4/Nidhogg.elf
 C:\Projects\FOCAL\FOCAL\ps4\savedata.cpp
 ```
 
-Image layout (vaddr = file offset − 0x4000):
+Outputs: GUI `port/out/Nidhogg.exe` and console diagnostic host
+`port/out/nidhogg_host.exe`. Both share the same compiled runtime. Existing
+compiler warnings are not promoted to errors.
 
-```
-LOAD 0x000000  0x1ecf58  R+X   code
-LOAD 0x1f0000  0x22ec48  RW    data + bss
-PLT  0x16f310            465 entries, slots ascending from 0x33b2d8
-RELA 0x345980..0x374a80  7,972 R_X86_64_RELATIVE records
+## Develop and verify
+
+```powershell
+npm ci --prefix server
+npm test --prefix server
+python tools/verify-icon.py
+.\start-server.ps1
+.\start-game.ps1 -Endpoint http://127.0.0.1:27880 -Assets 'D:\Games\CUSA00920'
 ```
 
 Use `python tests/multiplayer_pair.py --assets 'D:\Games\CUSA00920' --combat
