@@ -19,9 +19,16 @@ check embedded resources and portable asset discovery/startup.
 The initial extraction notes below are historical; their "State" table does not
 describe the current rendering/audio/runtime implementation.
 
-Native Windows x64 port work for **Nidhogg** (PS4, `UP2143-CUSA00920`, v1.00).
+## Play on Windows
 
-Source dump: `C:\Users\puy12\Downloads\g\CUSA00920`.
+1. Build the runtime below, or obtain an asset-free Windows runtime package from
+   a release that actually includes one.
+2. Run `Nidhogg.exe` and select your CUSA00920 folder containing `eboot.bin` and
+   `Data/`. A sibling `CUSA00920/` folder is also discovered automatically.
+3. Use **F1** for display, audio, controls and online settings. Keyboard and
+   XInput controllers are supported; bindings are configurable.
+4. Open **Online Multiplayer → Host/Join → Ready → Start**. Private rooms have
+   six-character codes. Each online player uses their own Player 1 bindings.
 
 The default endpoint is `https://lobby.japer.me`. The operator computer must stay
 on for matchmaking and relay. Players need no VPN, Node.js or tunnel software.
