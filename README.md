@@ -8,16 +8,15 @@ remain unverified. The permanent `lobby.japer.me` tunnel is deployed; its normal
 resolver test on this PC awaits upstream ISP DNS propagation.
 Build `port/build.ps1`; player GUI `port/out/Nidhogg.exe`.
 
-The Windows EXEs embed the supplied artwork as a multi-size icon and the original
-PNG resource from `port/resources/`. `python tools/package-desktop.py --assets
-"PATH\TO\CUSA00920"` creates separate ready-to-play Windows and exact original
-PS4 folders/ZIPs on the Windows Desktop, verifies copied file hashes, and leaves
-the asset source unchanged. Existing desktop packages are kept. Use
-`python tools/verify-icon.py` and `python tests/verify-desktop-package.py` to
-check embedded resources and portable asset discovery/startup.
+This is a community engineering project, unaffiliated with the game's creators
+or Sony. Original game executables and assets are not included in this repository
+or its asset-free runtime packages. Supply your own CUSA00920 files.
 
-The initial extraction notes below are historical; their "State" table does not
-describe the current rendering/audio/runtime implementation.
+**Online play is experimental.** Two local guest processes completed matching
+games through a public HTTPS/WebSocket tunnel. Separate Windows PCs on independent
+internet connections have not been verified. Relay RTT measured 250–360 ms on
+the tested route; direct UDP is preferred. See the
+[verification record](docs/NETWORK-VERIFICATION.md) for evidence and limitations.
 
 ## Play on Windows
 
