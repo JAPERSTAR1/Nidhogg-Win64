@@ -43,5 +43,5 @@ Write-Host "built $exe" -ForegroundColor Green
 
 if ($Target -eq "run") {
     Push-Location (Split-Path -Parent $root)
-    try { & $exe (Join-Path $root "..\work\nidhogg.elf") } finally { Pop-Location }
+    try { & $exe } finally { Pop-Location }
 }
