@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('--assets', default=r'C:\Users\puy12\Downloads\g\CUSA00920')
+    p.add_argument('--assets', default=os.environ.get('NIDHOGG_ASSETS', str(ROOT / 'CUSA00920')))
     p.add_argument('--frames', type=int, default=1500)
     p.add_argument('--latency', type=int, default=0, help='UDP simulator RTT (direct transport only)')
     p.add_argument('--direct', action='store_true')
