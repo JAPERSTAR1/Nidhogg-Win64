@@ -1,12 +1,8 @@
-# nidhogg-port
+# Nidhogg Win64 Port
 
-Current Windows multiplayer work (2026-11-12): see
-[deployment and operation](docs/MULTIPLAYER.md) and
-[verification status](docs/NETWORK-VERIFICATION.md). Both original guests have
-completed matching local and public-tunnel matches; separate physical networks
-remain unverified. The permanent `lobby.japer.me` tunnel is deployed; its normal
-resolver test on this PC awaits upstream ISP DNS propagation.
-Build `port/build.ps1`; player GUI `port/out/Nidhogg.exe`.
+Experimental native Windows x64 compatibility runtime for the PS4 version of
+**Nidhogg (CUSA00920)**. It runs the original x86-64 game code, translates PS4
+graphics commands to Direct3D 11, and provides Windows audio, input and storage.
 
 This is a community engineering project, unaffiliated with the game's creators
 or Sony. Original game executables and assets are not included in this repository
