@@ -920,12 +920,18 @@ const char* SlotName(uint32_t s) {
         case 155: return "strstr";
         case 156: return "fmod";
         case 157: return "strncmp";
+        case 352: return "scePthreadMutexInit";
+        case 353: return "scePthreadMutexDestroy";
         case 354: return "scePthreadMutexLock";
         case 355: return "scePthreadMutexUnlock";
+        case 356: return "scePthreadMutexTrylock";
         case 359: return "open";
         case 360: return "lseek";
         case 361: return "read";
         case 362: return "close";
+        case 373: return "scePthreadMutexattrInit";
+        case 374: return "scePthreadMutexattrSettype";
+        case 375: return "scePthreadMutexattrDestroy";
         case 410: return "sceKernelGetDirectMemorySize";
         case 411: return "sceKernelAllocateDirectMemory";
         case 412: return "sceKernelMapDirectMemory";
@@ -1479,6 +1485,9 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
         case 140:
         case 141:
         case 143:
+        case 373:
+        case 374:
+        case 375:
             return 0;
         case 142: {  // pthread_create(&thr, &attr, startRoutine, arg)
             struct GuestThreadArgs {
@@ -1508,7 +1517,8 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             else if (us) Sleep(1);
             return 0;
         }
-        case 145: {  // pthread_mutex_init(mtx, attr)
+        case 145:    // pthread_mutex_init(mtx, attr)
+        case 352: {  // scePthreadMutexInit(mtx, attr, name)
             if (Readable(ptr(0), 8)) {
                 auto* cs = new CRITICAL_SECTION{};
                 InitializeCriticalSection(cs);
@@ -1516,7 +1526,8 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             }
             return 0;
         }
-        case 146: {  // pthread_mutex_destroy(mtx)
+        case 146:    // pthread_mutex_destroy(mtx)
+        case 353: {  // scePthreadMutexDestroy(mtx)
             if (Readable(ptr(0), 8)) {
                 auto** slotPtr = reinterpret_cast<CRITICAL_SECTION**>(ptr(0));
                 if (*slotPtr) {
@@ -1526,6 +1537,16 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                 }
             }
             return 0;
+        }
+        case 356: {  // scePthreadMutexTrylock(mtx)
+            if (!Readable(ptr(0), 8)) return 0;
+            auto** slotPtr = reinterpret_cast<CRITICAL_SECTION**>(ptr(0));
+            if (!*slotPtr) {
+                auto* cs = new CRITICAL_SECTION{};
+                InitializeCriticalSection(cs);
+                *slotPtr = cs;
+            }
+            return TryEnterCriticalSection(*slotPtr) ? 0 : 0x80020010ull;
         }
         case 147:    // pthread_mutex_lock(mtx)
         case 354: {  // scePthreadMutexLock(mtx)
