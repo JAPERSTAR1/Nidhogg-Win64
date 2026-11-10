@@ -1,0 +1,55 @@
+﻿# Visual Studio / build artifacts
+.vs/
+build/
+out/
+Debug/
+Release/
+x64/
+*.exe
+*.dll
+*.obj
+*.pdb
+*.ilk
+*.lib
+*.exp
+*.idb
+*.ipch
+*.tlog
+*.lastbuildstate
+
+# Original PS4 executables and libraries
+CUSA00920/
+*.elf
+*.self
+*.sprx
+*.prx
+*.pkg
+eboot.bin
+
+# Game assets and audio
+*.at9
+*.bnk
+*.vag
+*.wem
+*.dds
+
+# Runtime / extracted data
+work/
+*.log
+*.err
+shot_*.png
+*.dmp
+
+# Python / temporary
+__pycache__/
+*.pyc
+*.tmp
+*.bak
+
+# Credentials
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+service-account*.json
