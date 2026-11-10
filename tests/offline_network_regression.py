@@ -7,7 +7,7 @@ import struct
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSETS = r'C:\Users\puy12\Downloads\g\CUSA00920'
+ASSETS = os.environ.get('NIDHOGG_ASSETS', str(ROOT / 'CUSA00920'))
 OUT = ROOT / 'tests/results/offline-network-regression'
 OUT.mkdir(parents=True, exist_ok=True)
 checks = {}
