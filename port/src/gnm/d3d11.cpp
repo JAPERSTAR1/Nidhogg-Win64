@@ -1,17 +1,24 @@
+#define NOMINMAX
 #include "d3d11.h"
+
+#include "../core/logger.h"
+#include "../core/settings.h"
+#include "../ui/overlay.h"
 
 #include <windows.h>
 
 #include <d3d11.h>
 #include <d3dcompiler.h>
-#include <dxgi.h>
+#include <dxgi1_5.h>
 #include <wincodec.h>
 #include <wrl/client.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -20,15 +27,8 @@ using Microsoft::WRL::ComPtr;
 namespace ps4::gnm {
 namespace {
 
-// ---------------------------------------------------------------- registers --
-
-// SH register space: GNM numbers the stage user-data blocks from these bases
-// and the command stream carries them already biased by 0x2C00, which is the
-// same bias pm4.cpp applies.  PS dwords 4..11 are the 256-bit T#, 12..15 the
-// 128-bit S#; VS dwords 0..1 the fetch shader, 2..3 the V# table, 8..11 the matrix V#.
 constexpr uint32_t kPsTexture = 0x0C + 4;
 constexpr uint32_t kPsSampler = 0x0C + 12;
-constexpr uint32_t kVsFetch = 0x4C;
 constexpr uint32_t kVsTable = 0x4C + 2;
 constexpr uint32_t kVsMatrix = 0x4C + 8;
 
@@ -38,8 +38,6 @@ constexpr uint32_t kCtxViewport = 0x10F;
 constexpr uint32_t kCtxBlend0Control = 0x1E0;
 constexpr uint32_t kCtxColor0Base = 0x318;
 
-// One buffer descriptor (V#).  The address is 40 bits split across the first
-// two dwords; the rest is stride and the component format.
 struct BufferDesc {
     uint64_t base = 0;
     uint32_t stride = 0;
@@ -56,8 +54,6 @@ BufferDesc DecodeBuffer(const uint32_t* w) {
     return b;
 }
 
-// One 256-bit image descriptor (T#).  GNM stores the address as address >> 8,
-// and dword 4 bits 26:13 carry (pitch - 1) in texels for linear-aligned images.
 struct ImageDesc {
     uint64_t address = 0;
     uint32_t width = 0;
@@ -86,28 +82,23 @@ ImageDesc DecodeImage(const uint32_t* w) {
     return i;
 }
 
-// --------------------------------------------------------------- shader pair --
-
-const char* kShaderSource = R"(
+const char* kGuestShaderSource = R"(
 cbuffer Transform : register(b0) {
     float4 Row0;
     float4 Row1;
     float4 Row2;
     float4 Row3;
 };
-
 struct VsIn {
     float3 pos   : POSITION;
     float4 color : COLOR0;
     float2 uv    : TEXCOORD0;
 };
-
 struct VsOut {
     float4 pos   : SV_POSITION;
     float4 color : COLOR0;
     float2 uv    : TEXCOORD0;
 };
-
 VsOut VSMain(VsIn i) {
     VsOut o;
     o.pos = i.pos.x * Row0 + i.pos.y * Row1 + i.pos.z * Row2 + Row3;
@@ -115,12 +106,51 @@ VsOut VSMain(VsIn i) {
     o.uv = i.uv;
     return o;
 }
-
 Texture2D    Source : register(t0);
 SamplerState Linear : register(s0);
-
 float4 PSMain(VsOut i) : SV_Target {
     return Source.Sample(Linear, i.uv) * i.color;
+}
+)";
+
+const char* kPresentShaderSource = R"(
+cbuffer PresentParams : register(b0) {
+    float2 TexSize;
+    float2 InvTexSize;
+    int    FilterMode;   // 0=Point, 1=SharpBilinear, 2=Bilinear, 3=Anisotropic
+    int    Scanlines;
+    float2 Pad;
+};
+struct VsOut {
+    float4 pos : SV_POSITION;
+    float2 uv  : TEXCOORD0;
+};
+VsOut VSMain(uint vid : SV_VertexID) {
+    VsOut o;
+    o.uv = float2((vid << 1) & 2, vid & 2);
+    o.pos = float4(o.uv * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.0, 1.0);
+    return o;
+}
+Texture2D    MasterTex : register(t0);
+SamplerState Smp       : register(s0);
+float4 PSMain(VsOut i) : SV_Target {
+    float2 uv = i.uv;
+    if (FilterMode == 1) {
+        // Sharp-bilinear pixel-art anti-aliasing: crisp texel interiors with
+        // 1-device-pixel anti-aliased transitions on non-integer resolutions.
+        float2 tx = uv * TexSize;
+        float2 fw = max(fwidth(tx), float2(1e-4, 1e-4));
+        float2 fl = floor(tx - 0.5) + 0.5;
+        float2 fr = saturate((tx - fl) / fw);
+        uv = (fl + fr) * InvTexSize;
+    }
+    float4 col = MasterTex.Sample(Smp, uv);
+    if (Scanlines != 0) {
+        float s = 0.5 - 0.5 * cos(i.uv.y * 1080.0 * 6.2831853);
+        col.rgb *= lerp(1.0, 0.83, s);
+    }
+    col.a = 1.0;
+    return col;
 }
 )";
 
@@ -130,26 +160,52 @@ struct Vertex {
     float uv[2];
 };
 
-// --------------------------------------------------------------------- state --
+struct PresentCb {
+    float texSize[2];
+    float invTexSize[2];
+    int filterMode;
+    int scanlines;
+    float pad[2];
+};
 
 struct Renderer {
     bool tried = false;
     bool ok = false;
+    bool allowTearing = false;
+    bool displayInitialized = false;
 
     HWND hwnd = nullptr;
-    uint32_t width = 0;
-    uint32_t height = 0;
+    uint32_t swapWidth = 0;
+    uint32_t swapHeight = 0;
+    int swapBuffers = 2;
+
+    uint32_t masterWidth = 0;
+    uint32_t masterHeight = 0;
 
     ComPtr<ID3D11Device> device;
     ComPtr<ID3D11DeviceContext> context;
     ComPtr<IDXGISwapChain> swap;
     ComPtr<ID3D11RenderTargetView> backBuffer;
+
+    ComPtr<ID3D11Texture2D> masterTex;
+    ComPtr<ID3D11RenderTargetView> masterRtv;
+    ComPtr<ID3D11ShaderResourceView> masterSrv;
+
     ComPtr<ID3D11VertexShader> vs;
     ComPtr<ID3D11PixelShader> ps;
     ComPtr<ID3D11InputLayout> layout;
     ComPtr<ID3D11Buffer> vb;
     ComPtr<ID3D11Buffer> ib;
     ComPtr<ID3D11Buffer> cb;
+
+    ComPtr<ID3D11VertexShader> presentVs;
+    ComPtr<ID3D11PixelShader> presentPs;
+    ComPtr<ID3D11Buffer> presentCb;
+    ComPtr<ID3D11SamplerState> presentPointSmp;
+    ComPtr<ID3D11SamplerState> presentLinearSmp;
+    ComPtr<ID3D11SamplerState> presentAnisoSmp;
+    int builtAnisoLevel = 0;
+
     ComPtr<ID3D11BlendState> blendDisabled;
     ComPtr<ID3D11RasterizerState> rasterizer;
     ComPtr<ID3D11DepthStencilState> depthDisabled;
@@ -175,6 +231,7 @@ struct Renderer {
 
     uint32_t vbCapacity = 0;
     uint32_t ibCapacity = 0;
+    uint64_t lastPresentQpcUsec = 0;
 
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
@@ -183,30 +240,37 @@ struct Renderer {
 
 Renderer g;
 
+uint64_t QpcUsec() {
+    static LARGE_INTEGER freq{};
+    if (!freq.QuadPart) QueryPerformanceFrequency(&freq);
+    LARGE_INTEGER now{};
+    QueryPerformanceCounter(&now);
+    return static_cast<uint64_t>(now.QuadPart * 1000000ULL / freq.QuadPart);
+}
+
 bool Readable(uint64_t address, size_t bytes) {
     return address != 0 && ps4::gnm::HostReadable(address, bytes);
 }
 
-// Byte size of one texel of a Sea Islands (GCN) DataFormat, Table 8.13.
 uint32_t TexelBytes(uint32_t dataFormat) {
     switch (dataFormat) {
-        case 1: return 1;   // Format8
-        case 2: return 2;   // Format16
-        case 3: return 2;   // Format8_8
-        case 4: return 4;   // Format32
-        case 5: return 4;   // Format16_16
-        case 6: return 4;   // Format10_11_11
-        case 7: return 4;   // Format11_11_10
-        case 8: return 4;   // Format10_10_10_2
-        case 9: return 4;   // Format2_10_10_10
-        case 10: return 4;  // Format8_8_8_8
-        case 11: return 8;  // Format32_32
-        case 12: return 8;  // Format16_16_16_16
-        case 13: return 12; // Format32_32_32
-        case 14: return 16; // Format32_32_32_32
-        case 16: return 2;  // Format5_6_5
-        case 17: return 2;  // Format1_5_5_5
-        case 19: return 2;  // Format4_4_4_4
+        case 1: return 1;
+        case 2: return 2;
+        case 3: return 2;
+        case 4: return 4;
+        case 5: return 4;
+        case 6: return 4;
+        case 7: return 4;
+        case 8: return 4;
+        case 9: return 4;
+        case 10: return 4;
+        case 11: return 8;
+        case 12: return 8;
+        case 13: return 12;
+        case 14: return 16;
+        case 16: return 2;
+        case 17: return 2;
+        case 19: return 2;
         default: return 0;
     }
 }
@@ -333,12 +397,39 @@ ID3D11RenderTargetView* EnsureOffscreenRt(uint64_t addr, uint32_t w, uint32_t h)
         g.pendingClears.erase(pc);
     }
     g.context->ClearRenderTargetView(rt.rtv.Get(), clr);
-    std::printf("[d3d11] offscreen rt 0x%llx %ux%u\n",
-                static_cast<unsigned long long>(addr), w, h);
-    std::fflush(stdout);
     auto& slot = g.offscreenRts[addr];
     slot = std::move(rt);
     return slot.rtv.Get();
+}
+
+bool EnsureMasterRt(uint32_t w, uint32_t h) {
+    w = std::clamp(w, 320u, 7680u);
+    h = std::clamp(h, 180u, 4320u);
+    if (g.masterRtv && g.masterSrv && g.masterWidth == w && g.masterHeight == h) return true;
+
+    g.masterRtv.Reset();
+    g.masterSrv.Reset();
+    g.masterTex.Reset();
+
+    D3D11_TEXTURE2D_DESC td{};
+    td.Width = w;
+    td.Height = h;
+    td.MipLevels = 1;
+    td.ArraySize = 1;
+    td.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    td.SampleDesc.Count = 1;
+    td.Usage = D3D11_USAGE_DEFAULT;
+    td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+    if (FAILED(g.device->CreateTexture2D(&td, nullptr, &g.masterTex))) return false;
+    if (FAILED(g.device->CreateRenderTargetView(g.masterTex.Get(), nullptr, &g.masterRtv)))
+        return false;
+    if (FAILED(g.device->CreateShaderResourceView(g.masterTex.Get(), nullptr, &g.masterSrv)))
+        return false;
+
+    g.masterWidth = w;
+    g.masterHeight = h;
+    LOG_INFO("[d3d11] internal master RT resized to %ux%u", w, h);
+    return true;
 }
 
 D3D11_TEXTURE_ADDRESS_MODE MapClamp(uint32_t mode) {
@@ -352,8 +443,13 @@ D3D11_TEXTURE_ADDRESS_MODE MapClamp(uint32_t mode) {
 }
 
 ID3D11SamplerState* LookupSampler(const uint32_t* words) {
+    const auto& cfg = core::CurrentSettings();
+    const uint32_t anisoTag = (cfg.textureFilter == core::TextureFilterMode::Anisotropic)
+                                  ? static_cast<uint32_t>(std::clamp(cfg.anisotropy, 1, 16))
+                                  : 0u;
     const uint64_t key = (static_cast<uint64_t>(words[0]) * 1099511628211ull) ^
-                         (static_cast<uint64_t>(words[2]) << 32) ^ words[1];
+                         (static_cast<uint64_t>(words[2]) << 32) ^ words[1] ^
+                         (static_cast<uint64_t>(anisoTag) << 56);
     auto it = g.samplers.find(key);
     if (it != g.samplers.end()) return it->second;
 
@@ -362,7 +458,8 @@ ID3D11SamplerState* LookupSampler(const uint32_t* words) {
     const bool magLinear = ((w2 >> 20) & 0x3) == 1 || ((w2 >> 20) & 0x3) == 3;
     const bool minLinear = ((w2 >> 22) & 0x3) == 1 || ((w2 >> 22) & 0x3) == 3;
     D3D11_FILTER filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
-    if (minLinear && magLinear) filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    if (anisoTag > 1 && (minLinear || magLinear)) filter = D3D11_FILTER_ANISOTROPIC;
+    else if (minLinear && magLinear) filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
     else if (minLinear) filter = D3D11_FILTER_MIN_LINEAR_MAG_MIP_POINT;
     else if (magLinear) filter = D3D11_FILTER_MIN_POINT_MAG_LINEAR_MIP_POINT;
 
@@ -371,6 +468,7 @@ ID3D11SamplerState* LookupSampler(const uint32_t* words) {
     desc.AddressU = MapClamp(w0);
     desc.AddressV = MapClamp(w0 >> 3);
     desc.AddressW = MapClamp(w0 >> 6);
+    desc.MaxAnisotropy = std::max(1u, anisoTag);
     desc.MaxLOD = D3D11_FLOAT32_MAX;
 
     ID3D11SamplerState* state = nullptr;
@@ -444,21 +542,21 @@ ID3D11BlendState* LookupBlend(uint32_t ctl, uint32_t targetMask) {
 }
 
 bool CompileShaders() {
-    ComPtr<ID3DBlob> vsBlob, psBlob, errors;
+    ComPtr<ID3DBlob> vsBlob, psBlob, pvsBlob, ppsBlob, errors;
+    const UINT flags = D3DCOMPILE_ENABLE_STRICTNESS;
 
-    UINT flags = D3DCOMPILE_ENABLE_STRICTNESS;
-    if (FAILED(D3DCompile(kShaderSource, std::strlen(kShaderSource), "nidhogg.hlsl", nullptr,
-                          nullptr, "VSMain", "vs_5_0", flags, 0, &vsBlob, &errors))) {
-        std::printf("[d3d11] VS compile failed: %s\n",
-                    errors ? static_cast<const char*>(errors->GetBufferPointer()) : "?");
+    if (FAILED(D3DCompile(kGuestShaderSource, std::strlen(kGuestShaderSource), "nidhogg.hlsl",
+                          nullptr, nullptr, "VSMain", "vs_5_0", flags, 0, &vsBlob, &errors)))
         return false;
-    }
-    if (FAILED(D3DCompile(kShaderSource, std::strlen(kShaderSource), "nidhogg.hlsl", nullptr,
-                          nullptr, "PSMain", "ps_5_0", flags, 0, &psBlob, &errors))) {
-        std::printf("[d3d11] PS compile failed: %s\n",
-                    errors ? static_cast<const char*>(errors->GetBufferPointer()) : "?");
+    if (FAILED(D3DCompile(kGuestShaderSource, std::strlen(kGuestShaderSource), "nidhogg.hlsl",
+                          nullptr, nullptr, "PSMain", "ps_5_0", flags, 0, &psBlob, &errors)))
         return false;
-    }
+    if (FAILED(D3DCompile(kPresentShaderSource, std::strlen(kPresentShaderSource), "present.hlsl",
+                          nullptr, nullptr, "VSMain", "vs_5_0", flags, 0, &pvsBlob, &errors)))
+        return false;
+    if (FAILED(D3DCompile(kPresentShaderSource, std::strlen(kPresentShaderSource), "present.hlsl",
+                          nullptr, nullptr, "PSMain", "ps_5_0", flags, 0, &ppsBlob, &errors)))
+        return false;
 
     if (FAILED(g.device->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(),
                                             nullptr, &g.vs)))
@@ -466,33 +564,61 @@ bool CompileShaders() {
     if (FAILED(g.device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(),
                                            nullptr, &g.ps)))
         return false;
+    if (FAILED(g.device->CreateVertexShader(pvsBlob->GetBufferPointer(), pvsBlob->GetBufferSize(),
+                                            nullptr, &g.presentVs)))
+        return false;
+    if (FAILED(g.device->CreatePixelShader(ppsBlob->GetBufferPointer(), ppsBlob->GetBufferSize(),
+                                           nullptr, &g.presentPs)))
+        return false;
 
     const D3D11_INPUT_ELEMENT_DESC elements[] = {
-        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
-        {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0},
-        {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 28, D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, 0,  D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"COLOR",    0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,       0, 28, D3D11_INPUT_PER_VERTEX_DATA, 0},
     };
     return SUCCEEDED(g.device->CreateInputLayout(elements, 3, vsBlob->GetBufferPointer(),
                                                  vsBlob->GetBufferSize(), &g.layout));
 }
 
-bool EnsureSize(uint32_t width, uint32_t height) {
-    if (g.swap && width == g.width && height == g.height) return true;
+bool EnsureSwapchainSize(uint32_t width, uint32_t height, int wantBuffers) {
+    width = std::max(16u, width);
+    height = std::max(16u, height);
+    wantBuffers = std::clamp(wantBuffers, 2, 3);
+    if (g.swap && g.backBuffer && width == g.swapWidth && height == g.swapHeight &&
+        wantBuffers == g.swapBuffers)
+        return true;
+
     g.backBuffer.Reset();
     if (!g.swap) return false;
-    if (FAILED(g.swap->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0))) return false;
+    const UINT flags = g.allowTearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0u;
+    if (FAILED(g.swap->ResizeBuffers(static_cast<UINT>(wantBuffers), width, height,
+                                     DXGI_FORMAT_R8G8B8A8_UNORM, flags)))
+        return false;
 
     ComPtr<ID3D11Texture2D> back;
     if (FAILED(g.swap->GetBuffer(0, IID_PPV_ARGS(&back)))) return false;
     if (FAILED(g.device->CreateRenderTargetView(back.Get(), nullptr, &g.backBuffer))) return false;
-    g.width = width;
-    g.height = height;
+    g.swapWidth = width;
+    g.swapHeight = height;
+    g.swapBuffers = wantBuffers;
     return true;
 }
 
 bool CreateDevice(HWND hwnd, uint32_t width, uint32_t height) {
+    BOOL tearing = FALSE;
+    {
+        ComPtr<IDXGIFactory5> fac5;
+        if (SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&fac5)))) {
+            if (FAILED(fac5->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &tearing,
+                                                 sizeof(tearing))))
+                tearing = FALSE;
+        }
+    }
+    g.allowTearing = (tearing == TRUE);
+    const int initBufs = std::clamp(core::CurrentSettings().swapBuffers, 2, 3);
+
     DXGI_SWAP_CHAIN_DESC swapDesc{};
-    swapDesc.BufferCount = 2;
+    swapDesc.BufferCount = static_cast<UINT>(initBufs);
     swapDesc.BufferDesc.Width = width;
     swapDesc.BufferDesc.Height = height;
     swapDesc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -500,7 +626,8 @@ bool CreateDevice(HWND hwnd, uint32_t width, uint32_t height) {
     swapDesc.OutputWindow = hwnd;
     swapDesc.SampleDesc.Count = 1;
     swapDesc.Windowed = TRUE;
-    swapDesc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+    swapDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    swapDesc.Flags = g.allowTearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0u;
 
     const D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0};
     D3D_FEATURE_LEVEL got{};
@@ -508,10 +635,31 @@ bool CreateDevice(HWND hwnd, uint32_t width, uint32_t height) {
         nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, levels, 2, D3D11_SDK_VERSION, &swapDesc,
         &g.swap, &g.device, &got, &g.context);
     if (FAILED(hr)) {
-        std::printf("[d3d11] device creation failed 0x%08lx\n", static_cast<unsigned long>(hr));
+        g.allowTearing = false;
+        swapDesc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+        swapDesc.Flags = 0;
+        hr = D3D11CreateDeviceAndSwapChain(
+            nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, levels, 2, D3D11_SDK_VERSION, &swapDesc,
+            &g.swap, &g.device, &got, &g.context);
+    }
+    if (FAILED(hr)) {
+        LOG_ERROR("[d3d11] device creation failed 0x%08lx", static_cast<unsigned long>(hr));
         return false;
     }
-    std::printf("[d3d11] feature level 0x%x\n", static_cast<unsigned>(got));
+
+    // Disable DXGI's built-in Alt+Enter handler so our settings/revert manager owns it cleanly.
+    {
+        ComPtr<IDXGIDevice> dxgiDev;
+        ComPtr<IDXGIAdapter> dxgiAdp;
+        ComPtr<IDXGIFactory1> dxgiFac;
+        if (SUCCEEDED(g.device.As(&dxgiDev)) && SUCCEEDED(dxgiDev->GetAdapter(&dxgiAdp)) &&
+            SUCCEEDED(dxgiAdp->GetParent(IID_PPV_ARGS(&dxgiFac)))) {
+            dxgiFac->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER);
+        }
+    }
+
+    LOG_INFO("[d3d11] feature level 0x%x (tearing=%d)", static_cast<unsigned>(got),
+             g.allowTearing ? 1 : 0);
 
     ComPtr<ID3D11Texture2D> back;
     if (FAILED(g.swap->GetBuffer(0, IID_PPV_ARGS(&back)))) return false;
@@ -534,11 +682,6 @@ bool CreateDevice(HWND hwnd, uint32_t width, uint32_t height) {
     depth.StencilEnable = FALSE;
     if (FAILED(g.device->CreateDepthStencilState(&depth, &g.depthDisabled))) return false;
 
-    D3D11_SHADER_RESOURCE_VIEW_DESC white{};
-    white.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    white.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-    white.Texture2D.MipLevels = 1;
-
     const uint32_t pixels[4] = {0xffffffffu, 0xffffffffu, 0xffffffffu, 0xffffffffu};
     D3D11_TEXTURE2D_DESC whiteDesc{};
     whiteDesc.Width = 2;
@@ -549,20 +692,22 @@ bool CreateDevice(HWND hwnd, uint32_t width, uint32_t height) {
     whiteDesc.SampleDesc.Count = 1;
     whiteDesc.Usage = D3D11_USAGE_IMMUTABLE;
     whiteDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-    D3D11_SUBRESOURCE_DATA whiteData{};
-    whiteData.pSysMem = pixels;
-    whiteData.SysMemPitch = 8;
+    D3D11_SUBRESOURCE_DATA whiteData{pixels, 8, 0};
     ComPtr<ID3D11Texture2D> whiteTexture;
     if (SUCCEEDED(g.device->CreateTexture2D(&whiteDesc, &whiteData, &whiteTexture)))
-        g.device->CreateShaderResourceView(whiteTexture.Get(), &white, &g.missingTexture);
+        g.device->CreateShaderResourceView(whiteTexture.Get(), nullptr, &g.missingTexture);
 
-    D3D11_SAMPLER_DESC sampler{};
-    sampler.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
-    sampler.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
-    sampler.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
-    sampler.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-    sampler.MaxLOD = D3D11_FLOAT32_MAX;
-    if (FAILED(g.device->CreateSamplerState(&sampler, &g.defaultSampler))) return false;
+    D3D11_SAMPLER_DESC smp{};
+    smp.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+    smp.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+    smp.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+    smp.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+    smp.MaxLOD = D3D11_FLOAT32_MAX;
+    if (FAILED(g.device->CreateSamplerState(&smp, &g.defaultSampler))) return false;
+    if (FAILED(g.device->CreateSamplerState(&smp, &g.presentPointSmp))) return false;
+
+    smp.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    if (FAILED(g.device->CreateSamplerState(&smp, &g.presentLinearSmp))) return false;
 
     D3D11_BUFFER_DESC bufferDesc{};
     bufferDesc.Usage = D3D11_USAGE_DYNAMIC;
@@ -571,26 +716,39 @@ bool CreateDevice(HWND hwnd, uint32_t width, uint32_t height) {
     bufferDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
     if (FAILED(g.device->CreateBuffer(&bufferDesc, nullptr, &g.cb))) return false;
 
-    g.width = width;
-    g.height = height;
+    bufferDesc.ByteWidth = sizeof(PresentCb);
+    if (FAILED(g.device->CreateBuffer(&bufferDesc, nullptr, &g.presentCb))) return false;
+
+    g.swapWidth = width;
+    g.swapHeight = height;
+    g.swapBuffers = initBufs;
     return CompileShaders();
 }
 
-bool EnsureRenderer(HWND hwnd, uint32_t width, uint32_t height) {
-    if (g.ok && g.hwnd == hwnd) return EnsureSize(width, height);
+bool EnsureRenderer(HWND hwnd) {
+    RECT rc{};
+    GetClientRect(hwnd, &rc);
+    const uint32_t cw = static_cast<uint32_t>(std::max<LONG>(16, rc.right - rc.left));
+    const uint32_t ch = static_cast<uint32_t>(std::max<LONG>(16, rc.bottom - rc.top));
+
+    if (g.ok && g.hwnd == hwnd) {
+        return EnsureSwapchainSize(cw, ch, core::CurrentSettings().swapBuffers);
+    }
     if (g.tried) return false;
     g.tried = true;
-    if (!hwnd || !width || !height) return false;
     g.hwnd = hwnd;
-    g.ok = CreateDevice(hwnd, width, height);
-    std::printf("[d3d11] %s\n", g.ok ? "ready" : "unavailable");
+    g.ok = CreateDevice(hwnd, cw, ch);
+    if (g.ok && !g.displayInitialized) {
+        g.displayInitialized = true;
+        ApplyDisplaySettings(hwnd);
+        GetClientRect(hwnd, &rc);
+        EnsureSwapchainSize(static_cast<uint32_t>(std::max<LONG>(16, rc.right - rc.left)),
+                            static_cast<uint32_t>(std::max<LONG>(16, rc.bottom - rc.top)),
+                            core::CurrentSettings().swapBuffers);
+    }
     return g.ok;
 }
 
-// ------------------------------------------------------------------- drawing --
-
-// Appends one draw's geometry.  Returns false when the state is not the shape
-// this backend knows how to reproduce.
 bool BuildGeometry(const Draw& draw, const uint32_t* sh) {
     const uint64_t table = (static_cast<uint64_t>(sh[kVsTable + 1] & 0xffff) << 32) |
                            sh[kVsTable];
@@ -657,9 +815,6 @@ bool BuildGeometry(const Draw& draw, const uint32_t* sh) {
     return true;
 }
 
-// The matrix lives behind VS user-data slot 2 as a V# whose base points at four
-// float4 rows.  Row order is x, y, z, w because the VS multiplies the rows the
-// shader loads from offsets 0x0, 0x4, 0x8 and 0xc.
 bool LoadMatrix(const uint32_t* sh) {
     const uint64_t address = (static_cast<uint64_t>(sh[kVsMatrix + 1] & 0xffff) << 32) |
                              sh[kVsMatrix];
@@ -673,7 +828,7 @@ bool LoadMatrix(const uint32_t* sh) {
     return true;
 }
 
-void UploadAndDraw(uint32_t vpWidth, uint32_t vpHeight) {
+void UploadAndDraw() {
     if (g.indices.empty() || g.vertices.empty()) return;
 
     if (!g.vb || g.vbCapacity < g.vertices.size()) {
@@ -723,46 +878,218 @@ void UploadAndDraw(uint32_t vpWidth, uint32_t vpHeight) {
     g.context->VSSetConstantBuffers(0, 1, &cb);
     g.context->PSSetShader(g.ps.Get(), nullptr, 0);
     g.context->DrawIndexed(static_cast<UINT>(g.indices.size()), 0, 0);
-    (void)vpWidth;
-    (void)vpHeight;
+}
+
+void MaybeCaptureScreenshot(uint64_t simFrame) {
+    static std::vector<uint64_t> s_shotFrames;
+    static std::string s_shotDir = "work";
+    static bool s_parsedShots = false;
+    if (!s_parsedShots) {
+        s_parsedShots = true;
+        char* dirEnv = nullptr;
+        size_t dirLen = 0;
+        if (_dupenv_s(&dirEnv, &dirLen, "NIDHOGG_SCREENSHOT_DIR") == 0 && dirEnv && *dirEnv)
+            s_shotDir = dirEnv;
+        if (dirEnv) std::free(dirEnv);
+
+        char* env = nullptr;
+        size_t len = 0;
+        if (_dupenv_s(&env, &len, "NIDHOGG_SCREENSHOT") == 0 && env) {
+            const char* p = env;
+            while (*p) {
+                char* end = nullptr;
+                unsigned long long f = std::strtoull(p, &end, 10);
+                if (end == p) break;
+                if (f > 0) s_shotFrames.push_back(f);
+                p = (*end == ',') ? (end + 1) : end;
+            }
+            std::free(env);
+        }
+    }
+    bool takeShot = false;
+    for (uint64_t f : s_shotFrames) {
+        if (f == simFrame) { takeShot = true; break; }
+    }
+    if (!takeShot) return;
+
+    core::MakeDirsUtf8(s_shotDir);
+    ComPtr<ID3D11Texture2D> back;
+    if (FAILED(g.swap->GetBuffer(0, IID_PPV_ARGS(&back)))) return;
+    D3D11_TEXTURE2D_DESC td{};
+    back->GetDesc(&td);
+    td.Usage = D3D11_USAGE_STAGING;
+    td.BindFlags = 0;
+    td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    ComPtr<ID3D11Texture2D> stage;
+    if (FAILED(g.device->CreateTexture2D(&td, nullptr, &stage))) return;
+    g.context->CopyResource(stage.Get(), back.Get());
+    D3D11_MAPPED_SUBRESOURCE map{};
+    if (FAILED(g.context->Map(stage.Get(), 0, D3D11_MAP_READ, 0, &map))) return;
+
+    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    ComPtr<IWICImagingFactory> wic;
+    if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr,
+                                   CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic)))) {
+        std::string shotPath = s_shotDir + "\\shot_" + std::to_string(simFrame) + ".png";
+        std::wstring wpath = core::Utf8ToWide(shotPath);
+        ComPtr<IWICStream> stream;
+        ComPtr<IWICBitmapEncoder> enc;
+        ComPtr<IWICBitmapFrameEncode> frm;
+        if (!wpath.empty() &&
+            SUCCEEDED(wic->CreateStream(&stream)) &&
+            SUCCEEDED(stream->InitializeFromFilename(wpath.c_str(), GENERIC_WRITE)) &&
+            SUCCEEDED(wic->CreateEncoder(GUID_ContainerFormatPng, nullptr, &enc)) &&
+            SUCCEEDED(enc->Initialize(stream.Get(), WICBitmapEncoderNoCache)) &&
+            SUCCEEDED(enc->CreateNewFrame(&frm, nullptr)) &&
+            SUCCEEDED(frm->Initialize(nullptr)) &&
+            SUCCEEDED(frm->SetSize(td.Width, td.Height))) {
+            WICPixelFormatGUID pf = GUID_WICPixelFormat32bppRGBA;
+            frm->SetPixelFormat(&pf);
+            ComPtr<IWICBitmap> bmp;
+            if (SUCCEEDED(wic->CreateBitmapFromMemory(
+                    td.Width, td.Height, GUID_WICPixelFormat32bppRGBA,
+                    map.RowPitch, map.RowPitch * td.Height,
+                    static_cast<BYTE*>(map.pData), &bmp))) {
+                frm->WriteSource(bmp.Get(), nullptr);
+                frm->Commit();
+                enc->Commit();
+                LOG_INFO("[d3d11] saved %s", shotPath.c_str());
+            }
+        }
+    }
+    g.context->Unmap(stage.Get(), 0);
+}
+
+void CompositeAndPresent(HWND hwnd, uint64_t simFrame, bool isNewSimFrame) {
+    if (!g.backBuffer || !g.masterSrv) return;
+    const auto& cfg = core::CurrentSettings();
+
+    // Unbind masterRtv before sampling masterSrv
+    ID3D11RenderTargetView* backRtv = g.backBuffer.Get();
+    g.context->OMSetRenderTargets(1, &backRtv, nullptr);
+    const float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    g.context->ClearRenderTargetView(backRtv, black);
+
+    // Compute aspect-correct presentation viewport (16:9 letterbox/pillarbox or integer scale)
+    const float sw = static_cast<float>(g.swapWidth);
+    const float sh = static_cast<float>(g.swapHeight);
+    float vpW = sw, vpH = sh;
+    if (cfg.aspectMode == core::AspectMode::IntegerScale && sw >= 480.0f && sh >= 270.0f) {
+        const int scale = std::max(1, std::min(static_cast<int>(sw) / 480, static_cast<int>(sh) / 270));
+        vpW = static_cast<float>(480 * scale);
+        vpH = static_cast<float>(270 * scale);
+    } else {
+        if (sw * 9.0f > sh * 16.0f) {
+            vpH = sh;
+            vpW = std::floor(sh * (16.0f / 9.0f) + 0.5f);
+        } else {
+            vpW = sw;
+            vpH = std::floor(sw * (9.0f / 16.0f) + 0.5f);
+        }
+    }
+    const float vpX = std::floor((sw - vpW) * 0.5f);
+    const float vpY = std::floor((sh - vpH) * 0.5f);
+
+    const D3D11_VIEWPORT presVp{vpX, vpY, vpW, vpH, 0.0f, 1.0f};
+    g.context->RSSetViewports(1, &presVp);
+    g.context->RSSetState(g.rasterizer.Get());
+    g.context->OMSetBlendState(g.blendDisabled.Get(), nullptr, 0xffffffffu);
+    g.context->OMSetDepthStencilState(g.depthDisabled.Get(), 0);
+
+    PresentCb pcb{};
+    pcb.texSize[0] = static_cast<float>(g.masterWidth);
+    pcb.texSize[1] = static_cast<float>(g.masterHeight);
+    pcb.invTexSize[0] = 1.0f / pcb.texSize[0];
+    pcb.invTexSize[1] = 1.0f / pcb.texSize[1];
+    pcb.filterMode = static_cast<int>(cfg.textureFilter);
+    pcb.scanlines = cfg.postScanlines ? 1 : 0;
+
+    D3D11_MAPPED_SUBRESOURCE map{};
+    if (SUCCEEDED(g.context->Map(g.presentCb.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &map))) {
+        std::memcpy(map.pData, &pcb, sizeof(pcb));
+        g.context->Unmap(g.presentCb.Get(), 0);
+    }
+
+    ID3D11SamplerState* smp = g.presentPointSmp.Get();
+    if (cfg.textureFilter == core::TextureFilterMode::SharpBilinear ||
+        cfg.textureFilter == core::TextureFilterMode::Bilinear) {
+        smp = g.presentLinearSmp.Get();
+    } else if (cfg.textureFilter == core::TextureFilterMode::Anisotropic) {
+        const int wantAniso = std::clamp(cfg.anisotropy, 1, 16);
+        if (!g.presentAnisoSmp || g.builtAnisoLevel != wantAniso) {
+            g.presentAnisoSmp.Reset();
+            D3D11_SAMPLER_DESC ad{};
+            ad.Filter = wantAniso > 1 ? D3D11_FILTER_ANISOTROPIC : D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+            ad.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+            ad.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+            ad.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+            ad.MaxAnisotropy = static_cast<UINT>(wantAniso);
+            ad.MaxLOD = D3D11_FLOAT32_MAX;
+            g.device->CreateSamplerState(&ad, &g.presentAnisoSmp);
+            g.builtAnisoLevel = wantAniso;
+        }
+        if (g.presentAnisoSmp) smp = g.presentAnisoSmp.Get();
+    }
+
+    ID3D11Buffer* pcbPtr = g.presentCb.Get();
+    ID3D11ShaderResourceView* msrv = g.masterSrv.Get();
+    g.context->IASetInputLayout(nullptr);
+    g.context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    g.context->VSSetShader(g.presentVs.Get(), nullptr, 0);
+    g.context->PSSetShader(g.presentPs.Get(), nullptr, 0);
+    g.context->PSSetConstantBuffers(0, 1, &pcbPtr);
+    g.context->PSSetShaderResources(0, 1, &msrv);
+    g.context->PSSetSamplers(0, 1, &smp);
+    g.context->Draw(3, 0);
+
+    ID3D11ShaderResourceView* nullSrv = nullptr;
+    g.context->PSSetShaderResources(0, 1, &nullSrv);
+
+    // Composite native Settings / Online / Diagnostics UI at full display resolution
+    ui::RenderOverlay(hwnd, g.device.Get(), g.context.Get(), g.swapWidth, g.swapHeight,
+                      isNewSimFrame);
+
+    if (isNewSimFrame) {
+        MaybeCaptureScreenshot(simFrame);
+    }
+
+    const uint64_t nowUsec = QpcUsec();
+    const double dtMs = g.lastPresentQpcUsec
+                            ? static_cast<double>(nowUsec - g.lastPresentQpcUsec) / 1000.0
+                            : 16.67;
+    g.lastPresentQpcUsec = nowUsec;
+
+    BOOL inFs = FALSE;
+    g.swap->GetFullscreenState(&inFs, nullptr);
+    UINT sync = 1u;
+    if (cfg.vsync == core::VSyncMode::Off) {
+        sync = 0u;
+    } else if (cfg.vsync == core::VSyncMode::Adaptive) {
+        sync = (dtMs > 17.2) ? 0u : 1u;
+    }
+    const UINT pflags = (sync == 0u && g.allowTearing && !inFs) ? DXGI_PRESENT_ALLOW_TEARING : 0u;
+    g.swap->Present(sync, pflags);
 }
 
 }  // namespace
 
-void RenderFrame(void* hwnd, const std::vector<Draw>& draws) {
+void RenderFrame(void* hwndVoid, const std::vector<Draw>& draws) {
+    HWND hwnd = static_cast<HWND>(hwndVoid);
     if (!hwnd || draws.empty()) return;
-
-    // Pick the swapchain dimensions from the final display-buffer draw so an
-    // earlier 512x256 or 1024x256 offscreen pass never shrinks the backbuffer.
-    uint32_t vpWidth = 1920, vpHeight = 1080;
-    for (auto it = draws.rbegin(); it != draws.rend(); ++it) {
-        if (it->kind != Draw::Kind::Indexed) continue;
-        const uint32_t* sh = it->regs[Space::Sh];
-        if (sh[0x048] && sh[0x048] != 0x40100010u) continue;
-        const uint32_t* cx = it->regs[Space::Context];
-        const float xScale = *reinterpret_cast<const float*>(&cx[kCtxViewport + 0]);
-        const float yScale = *reinterpret_cast<const float*>(&cx[kCtxViewport + 2]);
-        if (xScale > 0.0f && yScale < 0.0f) {
-            vpWidth = static_cast<uint32_t>(xScale * 2.0f + 0.5f);
-            vpHeight = static_cast<uint32_t>(-yScale * 2.0f + 0.5f);
-        }
-        break;
-    }
-    if (vpWidth < 16 || vpHeight < 16 || vpWidth > 4096 || vpHeight > 4096) {
-        vpWidth = 1920;
-        vpHeight = 1080;
-    }
-
-    if (!EnsureRenderer(static_cast<HWND>(hwnd), vpWidth, vpHeight)) return;
+    if (!EnsureRenderer(hwnd)) return;
 
     MSG msg;
-    while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) {
+    while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
         TranslateMessage(&msg);
-        DispatchMessageA(&msg);
+        DispatchMessageW(&msg);
     }
 
-    // Identify the display buffer presented at the end of the submit so
-    // offscreen surface passes route to their own D3D11 render targets.
+    const auto& cfg = core::CurrentSettings();
+    const float scale = std::clamp(cfg.renderScale, 0.5f, 2.0f);
+    const uint32_t targetMasterW = static_cast<uint32_t>(1920.0f * scale + 0.5f);
+    const uint32_t targetMasterH = static_cast<uint32_t>(1080.0f * scale + 0.5f);
+    if (!EnsureMasterRt(targetMasterW, targetMasterH)) return;
+
     uint64_t mainRtAddr = 0;
     for (auto it = draws.rbegin(); it != draws.rend(); ++it) {
         if (it->kind == Draw::Kind::Dispatch) continue;
@@ -773,15 +1100,18 @@ void RenderFrame(void* hwnd, const std::vector<Draw>& draws) {
     }
 
     const float clear[4] = {0.0f, 0.0f, 0.0f, 1.0f};
-    ID3D11RenderTargetView* currentRtv = g.backBuffer.Get();
+    ID3D11RenderTargetView* currentRtv = g.masterRtv.Get();
     g.context->OMSetRenderTargets(1, &currentRtv, nullptr);
-    g.context->ClearRenderTargetView(g.backBuffer.Get(), clear);
+    g.context->ClearRenderTargetView(g.masterRtv.Get(), clear);
     g.context->OMSetBlendState(g.blendDisabled.Get(), nullptr, 0xffffffff);
     g.context->OMSetDepthStencilState(g.depthDisabled.Get(), 0);
     g.context->RSSetState(g.rasterizer.Get());
-    const D3D11_VIEWPORT viewport{0.0f, 0.0f, static_cast<float>(g.width),
-                                  static_cast<float>(g.height), 0.0f, 1.0f};
-    g.context->RSSetViewports(1, &viewport);
+    const D3D11_VIEWPORT masterVp{0.0f, 0.0f, static_cast<float>(g.masterWidth),
+                                  static_cast<float>(g.masterHeight), 0.0f, 1.0f};
+    g.context->RSSetViewports(1, &masterVp);
+
+    const float sx = static_cast<float>(g.masterWidth) / 1920.0f;
+    const float sy = static_cast<float>(g.masterHeight) / 1080.0f;
 
     g.vertices.clear();
     g.indices.clear();
@@ -803,7 +1133,7 @@ void RenderFrame(void* hwnd, const std::vector<Draw>& draws) {
                         ((rgba >> 24) & 0xffu) / 255.0f,
                     }};
                     if (dst.base == mainRtAddr) {
-                        g.context->ClearRenderTargetView(g.backBuffer.Get(), cc.c);
+                        g.context->ClearRenderTargetView(g.masterRtv.Get(), cc.c);
                     } else {
                         auto rtIt = g.offscreenRts.find(dst.base);
                         if (rtIt != g.offscreenRts.end() && rtIt->second.rtv)
@@ -816,7 +1146,6 @@ void RenderFrame(void* hwnd, const std::vector<Draw>& draws) {
             continue;
         }
 
-        // Skip embedded Gnmx fast-clear / CMASK passes (VS != shader_vv.sb).
         if (sh[0x048] && sh[0x048] != 0x40100010u) continue;
         if (!LoadMatrix(sh)) continue;
 
@@ -829,15 +1158,18 @@ void RenderFrame(void* hwnd, const std::vector<Draw>& draws) {
         const float yOffset = *reinterpret_cast<const float*>(&cx[kCtxViewport + 3]);
 
         const uint64_t rtAddr = static_cast<uint64_t>(cx[kCtxColor0Base]) << 8;
-        ID3D11RenderTargetView* targetRtv = g.backBuffer.Get();
+        bool isOffscreen = false;
+        ID3D11RenderTargetView* targetRtv = g.masterRtv.Get();
         if (rtAddr && mainRtAddr && rtAddr != mainRtAddr) {
             const uint32_t rtPitch = ((cx[0x319] & 0x7ffu) + 1u) << 3;
             const uint32_t rtSliceH = rtPitch ? (((cx[0x31A] & 0x3fffffu) + 1u) * 64u / rtPitch) : 0;
             uint32_t rw = (xScale > 0.0f) ? static_cast<uint32_t>(xScale * 2.0f + 0.5f) : rtPitch;
             uint32_t rh = (yScale < 0.0f) ? static_cast<uint32_t>(-yScale * 2.0f + 0.5f) : rtSliceH;
             if (rw >= 16 && rh >= 16 && rw <= 4096 && rh <= 4096) {
-                if (ID3D11RenderTargetView* off = EnsureOffscreenRt(rtAddr, rw, rh))
+                if (ID3D11RenderTargetView* off = EnsureOffscreenRt(rtAddr, rw, rh)) {
                     targetRtv = off;
+                    isOffscreen = true;
+                }
             }
         }
         if (targetRtv != currentRtv) {
@@ -848,8 +1180,10 @@ void RenderFrame(void* hwnd, const std::vector<Draw>& draws) {
         }
 
         if (xScale > 0.0f && yScale < 0.0f) {
-            const D3D11_VIEWPORT dvp{xOffset - xScale, yOffset + yScale, xScale * 2.0f,
-                                     -yScale * 2.0f, 0.0f, 1.0f};
+            const float mulX = isOffscreen ? 1.0f : sx;
+            const float mulY = isOffscreen ? 1.0f : sy;
+            const D3D11_VIEWPORT dvp{(xOffset - xScale) * mulX, (yOffset + yScale) * mulY,
+                                     (xScale * 2.0f) * mulX, (-yScale * 2.0f) * mulY, 0.0f, 1.0f};
             g.context->RSSetViewports(1, &dvp);
         }
 
@@ -869,88 +1203,182 @@ void RenderFrame(void* hwnd, const std::vector<Draw>& draws) {
         if (!sampler) sampler = g.defaultSampler.Get();
         g.context->PSSetShaderResources(0, 1, &srv);
         g.context->PSSetSamplers(0, 1, &sampler);
-        UploadAndDraw(g.width, g.height);
+        UploadAndDraw();
         g.indices.resize(firstIndex);
         g.vertices.clear();
     }
 
-    static uint64_t s_frame = 0;
-    ++s_frame;
-    static std::vector<uint64_t> s_shotFrames;
-    static bool s_parsedShots = false;
-    if (!s_parsedShots) {
-        s_parsedShots = true;
-        char* env = nullptr;
-        size_t len = 0;
-        if (_dupenv_s(&env, &len, "NIDHOGG_SCREENSHOT") == 0 && env) {
-            const char* p = env;
-            while (*p) {
-                char* end = nullptr;
-                unsigned long long f = std::strtoull(p, &end, 10);
-                if (end == p) break;
-                if (f > 0) s_shotFrames.push_back(f);
-                p = (*end == ',') ? (end + 1) : end;
-            }
-            std::free(env);
-        }
+    static uint64_t s_simFrame = 0;
+    ++s_simFrame;
+
+    // Decoupled 30 FPS presentation cap: simulation continues at 60.00 Hz while
+    // every 2nd frame skips swapchain presentation unless a screenshot is scheduled.
+    if (cfg.presentationFpsLimit > 0 && cfg.presentationFpsLimit <= 30 && (s_simFrame & 1u) != 0) {
+        MaybeCaptureScreenshot(s_simFrame);
+        return;
     }
-    bool takeShot = false;
-    for (uint64_t f : s_shotFrames) {
-        if (f == s_frame) { takeShot = true; break; }
+
+    CompositeAndPresent(hwnd, s_simFrame, true);
+}
+
+void PresentCachedFrame(void* hwndVoid) {
+    HWND hwnd = static_cast<HWND>(hwndVoid);
+    if (!hwnd || !g.ok || !g.swap || !g.masterSrv) return;
+    MSG msg;
+    while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
     }
-    if (takeShot) {
-        ComPtr<ID3D11Texture2D> back;
-        if (SUCCEEDED(g.swap->GetBuffer(0, IID_PPV_ARGS(&back)))) {
-            D3D11_TEXTURE2D_DESC td{};
-            back->GetDesc(&td);
-            td.Usage = D3D11_USAGE_STAGING;
-            td.BindFlags = 0;
-            td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-            ComPtr<ID3D11Texture2D> stage;
-            if (SUCCEEDED(g.device->CreateTexture2D(&td, nullptr, &stage))) {
-                g.context->CopyResource(stage.Get(), back.Get());
-                D3D11_MAPPED_SUBRESOURCE map{};
-                if (SUCCEEDED(g.context->Map(stage.Get(), 0, D3D11_MAP_READ, 0, &map))) {
-                    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-                    ComPtr<IWICImagingFactory> wic;
-                    if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr,
-                                                   CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic)))) {
-                        wchar_t path[128];
-                        std::swprintf(path, 128, L"work\\shot_%llu.png",
-                                      static_cast<unsigned long long>(s_frame));
-                        ComPtr<IWICStream> stream;
-                        ComPtr<IWICBitmapEncoder> enc;
-                        ComPtr<IWICBitmapFrameEncode> frm;
-                        if (SUCCEEDED(wic->CreateStream(&stream)) &&
-                            SUCCEEDED(stream->InitializeFromFilename(path, GENERIC_WRITE)) &&
-                            SUCCEEDED(wic->CreateEncoder(GUID_ContainerFormatPng, nullptr, &enc)) &&
-                            SUCCEEDED(enc->Initialize(stream.Get(), WICBitmapEncoderNoCache)) &&
-                            SUCCEEDED(enc->CreateNewFrame(&frm, nullptr)) &&
-                            SUCCEEDED(frm->Initialize(nullptr)) &&
-                            SUCCEEDED(frm->SetSize(td.Width, td.Height))) {
-                            WICPixelFormatGUID pf = GUID_WICPixelFormat32bppRGBA;
-                            frm->SetPixelFormat(&pf);
-                            ComPtr<IWICBitmap> bmp;
-                            if (SUCCEEDED(wic->CreateBitmapFromMemory(
-                                    td.Width, td.Height, GUID_WICPixelFormat32bppRGBA,
-                                    map.RowPitch, map.RowPitch * td.Height,
-                                    static_cast<BYTE*>(map.pData), &bmp))) {
-                                frm->WriteSource(bmp.Get(), nullptr);
-                                frm->Commit();
-                                enc->Commit();
-                                std::printf("[d3d11] saved work/shot_%llu.png\n",
-                                            static_cast<unsigned long long>(s_frame));
-                                std::fflush(stdout);
-                            }
-                        }
+    if (!EnsureRenderer(hwnd)) return;
+    CompositeAndPresent(hwnd, 0, false);
+}
+
+bool OnWindowMessage(void* hwnd, uint32_t msg, uint64_t wp, int64_t lp) {
+    return ui::OnWindowMessage(hwnd, msg, wp, lp);
+}
+
+bool IsOverlayCapturingInput() {
+    return ui::IsOverlayOpen();
+}
+
+void ApplyDisplaySettings(void* hwndVoid) {
+    HWND hwnd = static_cast<HWND>(hwndVoid);
+    if (!hwnd) return;
+
+    auto& cfg = core::CurrentSettings();
+    const auto monitors = core::EnumerateMonitors();
+    const int mi = std::clamp(cfg.monitorIndex, 0,
+                              std::max(0, static_cast<int>(monitors.size()) - 1));
+    const core::MonitorInfo mon = monitors.empty()
+                                      ? core::MonitorInfo{0, "Primary", 0, 0, 1920, 1080, true, {}}
+                                      : monitors[mi];
+
+    // Always exit exclusive fullscreen before changing window styles or monitor
+    if (g.swap) {
+        g.backBuffer.Reset();
+        g.swap->SetFullscreenState(FALSE, nullptr);
+    }
+
+    if (cfg.displayMode == core::DisplayMode::Windowed) {
+        const uint32_t w = std::clamp(cfg.displayWidth, 640u, std::max(640u, mon.width));
+        const uint32_t h = std::clamp(cfg.displayHeight, 360u, std::max(360u, mon.height));
+        const DWORD style = WS_OVERLAPPEDWINDOW | WS_VISIBLE;
+        SetWindowLongPtrW(hwnd, GWL_STYLE, style);
+        RECT rc{0, 0, static_cast<LONG>(w), static_cast<LONG>(h)};
+        AdjustWindowRect(&rc, style, FALSE);
+        const int winW = rc.right - rc.left;
+        const int winH = rc.bottom - rc.top;
+        const int winX = mon.left + std::max(0, (static_cast<int>(mon.width) - winW) / 2);
+        const int winY = mon.top + std::max(0, (static_cast<int>(mon.height) - winH) / 2);
+        SetWindowPos(hwnd, HWND_NOTOPMOST, winX, winY, winW, winH,
+                     SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+        LOG_INFO("[display] applied Windowed %ux%u on monitor #%d", w, h, mi);
+    } else if (cfg.displayMode == core::DisplayMode::Borderless) {
+        SetWindowLongPtrW(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+        SetWindowPos(hwnd, HWND_TOP, mon.left, mon.top,
+                     static_cast<int>(mon.width), static_cast<int>(mon.height),
+                     SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+        LOG_INFO("[display] applied Borderless Windowed %ux%u on monitor #%d",
+                 mon.width, mon.height, mi);
+    } else if (cfg.displayMode == core::DisplayMode::ExclusiveFullscreen) {
+        SetWindowLongPtrW(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+        SetWindowPos(hwnd, HWND_TOP, mon.left, mon.top,
+                     static_cast<int>(mon.width), static_cast<int>(mon.height),
+                     SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+
+        bool enteredExclusive = false;
+        if (g.swap) {
+            ComPtr<IDXGIOutput> targetOut;
+            ComPtr<IDXGIFactory1> fac;
+            if (SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&fac)))) {
+                int curIdx = 0;
+                for (UINT a = 0; !targetOut; ++a) {
+                    ComPtr<IDXGIAdapter1> adp;
+                    if (fac->EnumAdapters1(a, &adp) == DXGI_ERROR_NOT_FOUND) break;
+                    for (UINT o = 0;; ++o) {
+                        ComPtr<IDXGIOutput> out;
+                        if (adp->EnumOutputs(o, &out) == DXGI_ERROR_NOT_FOUND) break;
+                        DXGI_OUTPUT_DESC od{};
+                        if (FAILED(out->GetDesc(&od)) || !od.AttachedToDesktop) continue;
+                        if (curIdx == mi) { targetOut = out; break; }
+                        ++curIdx;
                     }
-                    g.context->Unmap(stage.Get(), 0);
                 }
             }
+
+            DXGI_MODE_DESC md{};
+            md.Width = cfg.displayWidth ? cfg.displayWidth : mon.width;
+            md.Height = cfg.displayHeight ? cfg.displayHeight : mon.height;
+            md.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+            g.swap->ResizeTarget(&md);
+            if (SUCCEEDED(g.swap->SetFullscreenState(TRUE, targetOut.Get()))) {
+                enteredExclusive = true;
+                LOG_INFO("[display] entered Exclusive Fullscreen %ux%u on monitor #%d",
+                         md.Width, md.Height, mi);
+            }
+        }
+        if (!enteredExclusive) {
+            LOG_WARN("[display] DXGI Exclusive Fullscreen unavailable on current session; using Borderless Fullscreen fallback");
+            cfg.displayMode = core::DisplayMode::Borderless;
         }
     }
 
-    g.swap->Present(1, 0);
+    if (g.swap && g.device) {
+        RECT client{};
+        GetClientRect(hwnd, &client);
+        g.swapWidth = 0;  // force backbuffer recreation
+        EnsureSwapchainSize(static_cast<uint32_t>(std::max<LONG>(16, client.right - client.left)),
+                            static_cast<uint32_t>(std::max<LONG>(16, client.bottom - client.top)),
+                            cfg.swapBuffers);
+    }
+}
+
+void ShutdownRenderer() {
+    ui::ShutdownOverlay();
+    if (g.swap) {
+        g.swap->SetFullscreenState(FALSE, nullptr);
+    }
+    for (auto& [k, srv] : g.textures) {
+        if (srv) srv->Release();
+    }
+    g.textures.clear();
+    for (auto& [k, smp] : g.samplers) {
+        if (smp) smp->Release();
+    }
+    g.samplers.clear();
+    for (auto& [k, bl] : g.blends) {
+        if (bl) bl->Release();
+    }
+    g.blends.clear();
+    g.offscreenRts.clear();
+    g.pendingClears.clear();
+    g.masterRtv.Reset();
+    g.masterSrv.Reset();
+    g.masterTex.Reset();
+    g.backBuffer.Reset();
+    g.vb.Reset();
+    g.ib.Reset();
+    g.cb.Reset();
+    g.presentCb.Reset();
+    g.presentVs.Reset();
+    g.presentPs.Reset();
+    g.presentPointSmp.Reset();
+    g.presentLinearSmp.Reset();
+    g.presentAnisoSmp.Reset();
+    g.vs.Reset();
+    g.ps.Reset();
+    g.layout.Reset();
+    g.blendDisabled.Reset();
+    g.rasterizer.Reset();
+    g.depthDisabled.Reset();
+    g.missingTexture.Reset();
+    g.defaultSampler.Reset();
+    g.swap.Reset();
+    g.context.Reset();
+    g.device.Reset();
+    g.ok = false;
+    g.tried = false;
+    g.displayInitialized = false;
 }
 
 }  // namespace ps4::gnm

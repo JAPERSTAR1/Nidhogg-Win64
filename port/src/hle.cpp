@@ -1,8 +1,12 @@
 #include "hle.h"
 
 #include "audio/ngs2.h"
+#include "core/logger.h"
+#include "core/settings.h"
 #include "gnm/d3d11.h"
 #include "gnm/pm4.h"
+#include "net/netplay.h"
+#include "ui/overlay.h"
 
 #include <windows.h>
 #include <direct.h>
@@ -10,6 +14,8 @@
 #include <wrl/client.h>
 #include <xinput.h>
 
+#include <algorithm>
+#include <atomic>
 #include <bit>
 #include <cmath>
 #include <cstdarg>
@@ -28,6 +34,22 @@ namespace {
 thread_local uint32_t g_lastSlot = 0xffffffff;
 thread_local uint64_t g_lastRet = 0;
 uint64_t g_base = 0;
+DWORD g_simThreadId = 0;
+uint32_t g_simRandState = 0x13579BDFu;
+std::atomic<bool> g_quitRequested{false};
+std::atomic<bool> g_shutDownDone{false};
+uint64_t g_maxFrames = 0;
+bool g_qaUnfocused = false;
+NetplayStepFn g_netplayStep = nullptr;
+std::atomic<bool> g_netplayClockLock{false};
+std::atomic<uint64_t> g_netplaySimFrame{0};
+uint32_t g_netplayP1Buttons = 0;
+uint32_t g_netplayP2Buttons = 0;
+uint64_t g_netplaySyncedFrame = UINT64_MAX;
+std::mutex g_roomMtx;
+std::string g_currentRoom = "boot";
+std::string g_app0Override;
+
 uint64_t g_logLimit = 0;   // per-call trace budget; 0 turns it off
 uint64_t g_traceFrom = 0;  // frame to begin tracing from
 uint64_t g_calls = 0;
@@ -40,6 +62,7 @@ uint64_t g_slotCalls[512] = {};   // since the last histogram reset
 void Configure() {
     if (g_configured) return;
     g_configured = true;
+    g_simThreadId = GetCurrentThreadId();
     char* lim = nullptr;
     size_t n = 0;
     if (_dupenv_s(&lim, &n, "NIDHOGG_IMPORT_LIMIT") == 0 && lim) {
@@ -56,6 +79,14 @@ void Configure() {
     }
     if (_dupenv_s(&lim, &n, "NIDHOGG_UNCAPPED") == 0 && lim) {
         g_uncapped = (*lim != '\0' && *lim != '0');
+        std::free(lim);
+    }
+    if (_dupenv_s(&lim, &n, "NIDHOGG_MAX_FRAMES") == 0 && lim) {
+        g_maxFrames = std::strtoull(lim, nullptr, 0);
+        std::free(lim);
+    }
+    if (_dupenv_s(&lim, &n, "NIDHOGG_QA_UNFOCUSED") == 0 && lim) {
+        g_qaUnfocused = (*lim != '\0' && *lim != '0');
         std::free(lim);
     }
 }
@@ -264,7 +295,7 @@ int NullSafeStricmp(const char* a, const char* b) {
 }
 
 // High-resolution monotonic clock in microseconds and simulated 1.6 GHz TSC.
-uint64_t NowUsec() {
+uint64_t HostNowUsec() {
     static LARGE_INTEGER freq{};
     static LARGE_INTEGER start{};
     if (!freq.QuadPart) {
@@ -274,6 +305,16 @@ uint64_t NowUsec() {
     LARGE_INTEGER now{};
     QueryPerformanceCounter(&now);
     return static_cast<uint64_t>((now.QuadPart - start.QuadPart) * 1000000ULL / freq.QuadPart);
+}
+
+// Guest-visible clock: locked to synchronized simulation frame on the main
+// simulation thread during online matches so frame delta-timers stay identical.
+uint64_t NowUsec() {
+    if (g_netplayClockLock.load(std::memory_order_relaxed) &&
+        GetCurrentThreadId() == g_simThreadId) {
+        return 1000000ULL + g_netplaySimFrame.load(std::memory_order_relaxed) * 16667ULL;
+    }
+    return HostNowUsec();
 }
 
 // Runtime Win64 -> SysV 2-argument shim for guest qsort comparators.
@@ -461,9 +502,26 @@ uint32_t* Pm4Nop(uint32_t* cmd, uint32_t totalDwords) {
 }
 
 void Emit(const char* text, size_t len) {
-    if (len) {
-        std::fwrite(text, 1, len, stdout);
-        std::fflush(stdout);
+    if (!text || !len) return;
+    core::LogRaw(text, len);
+    // Capture guest room transitions ("Created room rMainMenu\n", etc.)
+    const char* tag = "Created room ";
+    const size_t tagLen = 13;
+    std::string sv(text, len);
+    size_t pos = sv.find(tag);
+    if (pos != std::string::npos) {
+        pos += tagLen;
+        size_t end = pos;
+        while (end < sv.size() && sv[end] != '\n' && sv[end] != '\r' && sv[end] != ' ') ++end;
+        if (end > pos) {
+            std::scoped_lock lk(g_roomMtx);
+            g_currentRoom = sv.substr(pos, end - pos);
+        }
+    }
+    if (sv.find("SteamCreateLobby") != std::string::npos ||
+        sv.find("SteamFindLobby") != std::string::npos ||
+        sv.find("Created room rShowLobbies") != std::string::npos) {
+        ui::OpenOverlayTab(4);
     }
 }
 
@@ -526,28 +584,21 @@ void* DirectMap(uint64_t phys, uint64_t len) {
 // overrides the default so the host can be run from anywhere.
 const std::string& App0() {
     static std::string root;
+    if (!g_app0Override.empty()) return g_app0Override;
     if (!root.empty()) return root;
 
-    char* v = nullptr;
-    size_t n = 0;
-    if (_dupenv_s(&v, &n, "NIDHOGG_APP0") == 0 && v && *v) {
-        root = v;
-        std::free(v);
+    const auto& cfg = core::CurrentSettings();
+    core::AssetValidation v = core::AutoDiscoverAssets(cfg, nullptr);
+    if (v.valid && !v.rootDir.empty()) {
+        root = v.rootDir;
     } else {
-        std::free(v);
-        for (const char* cand : {"..\\CUSA00920", "CUSA00920", "..\\..\\CUSA00920"}) {
-            DWORD a = GetFileAttributesA(cand);
-            if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY)) {
-                root = cand;
-                break;
-            }
-        }
-        if (root.empty()) root = ".";
+        root = ".";
     }
-    char full[MAX_PATH]{};
-    if (GetFullPathNameA(root.c_str(), MAX_PATH, full, nullptr)) root = full;
-    std::printf("[fios] app0 = %s\n", root.c_str());
-    std::fflush(stdout);
+    std::wstring w = core::Utf8ToWide(root);
+    wchar_t full[MAX_PATH * 4]{};
+    if (!w.empty() && GetFullPathNameW(w.c_str(), MAX_PATH * 4, full, nullptr))
+        root = core::WideToUtf8(full);
+    LOG_INFO("[fios] app0 = %s", root.c_str());
     return root;
 }
 
@@ -574,9 +625,7 @@ uint32_t AllocFiosOp(uint64_t req, uint64_t act) {
 }
 
 std::string SaveRoot(const char* dirName) {
-    char full[MAX_PATH]{};
-    GetFullPathNameA("savedata", MAX_PATH, full, nullptr);
-    std::string out = full[0] ? full : "savedata";
+    std::string out = core::SavesDirPath();
     if (dirName && *dirName) {
         out += '\\';
         out += dirName;
@@ -591,7 +640,7 @@ std::string HostPath(const char* p) {
         for (char& c : rest) {
             if (c == '/') c = '\\';
         }
-        std::string out = g_saveMountDir.empty() ? SaveRoot("00") : g_saveMountDir;
+        std::string out = g_saveMountDir.empty() ? SaveRoot("SAVEDATA00") : g_saveMountDir;
         if (!rest.empty()) {
             out += '\\';
             out += rest;
@@ -610,12 +659,8 @@ std::string HostPath(const char* p) {
 }
 
 void MakeParentDirs(const std::string& path) {
-    for (size_t i = 1; i < path.size(); ++i) {
-        if (path[i] != '\\') continue;
-        std::string dir = path.substr(0, i);
-        DWORD a = GetFileAttributesA(dir.c_str());
-        if (a == INVALID_FILE_ATTRIBUTES) CreateDirectoryA(dir.c_str(), nullptr);
-    }
+    size_t slash = path.find_last_of("\\/");
+    if (slash != std::string::npos) core::MakeDirsUtf8(path.substr(0, slash));
 }
 
 // ------------------------------------------------------------- gnm submit --
@@ -805,35 +850,146 @@ bool Readable(const void* p, size_t n) {
 }
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (gnm::OnWindowMessage(hwnd, msg, static_cast<uint64_t>(wp), static_cast<int64_t>(lp))) {
+        return 0;
+    }
     switch (msg) {
         case WM_CLOSE:
-            DestroyWindow(hwnd);
+            RequestQuit();
             return 0;
         case WM_DESTROY:
-            PostQuitMessage(0);
+            if (g_videoOut.window == hwnd) g_videoOut.window = nullptr;
+            RequestQuit();
             return 0;
+        case WM_SYSCOMMAND:
+            if ((wp & 0xFFF0) == SC_KEYMENU) return 0;  // Suppress Alt menu beep
+            return DefWindowProcW(hwnd, msg, wp, lp);
         default:
-            return DefWindowProcA(hwnd, msg, wp, lp);
+            return DefWindowProcW(hwnd, msg, wp, lp);
     }
 }
 
 HWND CreatePortWindow(uint32_t w, uint32_t h) {
     if (g_videoOut.window) return g_videoOut.window;
-    HINSTANCE inst = GetModuleHandleA(nullptr);
-    WNDCLASSA wc{};
+    HINSTANCE inst = GetModuleHandleW(nullptr);
+    const wchar_t* kWideClass = L"NidhoggPortWindow";
+    WNDCLASSW wc{};
     wc.style = CS_OWNDC;
     wc.lpfnWndProc = WndProc;
     wc.hInstance = inst;
-    wc.hCursor = LoadCursorA(nullptr, IDC_ARROW);
-    wc.lpszClassName = kClassName;
-    if (!RegisterClassA(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return nullptr;
-    RECT rc{0, 0, static_cast<LONG>(w), static_cast<LONG>(h)};
-    AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
-    HWND hwnd = CreateWindowExA(0, kClassName, "Nidhogg", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+    wc.hCursor = LoadCursorW(nullptr, reinterpret_cast<LPCWSTR>(IDC_ARROW));
+    wc.hIcon = LoadIconW(inst, MAKEINTRESOURCEW(101));
+    if (!wc.hIcon) wc.hIcon = LoadIconW(nullptr, reinterpret_cast<LPCWSTR>(IDI_APPLICATION));
+    wc.lpszClassName = kWideClass;
+    if (!RegisterClassW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return nullptr;
+
+    const auto& cfg = core::CurrentSettings();
+    const uint32_t initW = cfg.displayWidth ? cfg.displayWidth : w;
+    const uint32_t initH = cfg.displayHeight ? cfg.displayHeight : h;
+    DWORD style = WS_OVERLAPPEDWINDOW | WS_VISIBLE;
+    RECT rc{0, 0, static_cast<LONG>(initW), static_cast<LONG>(initH)};
+    AdjustWindowRect(&rc, style, FALSE);
+    HWND hwnd = CreateWindowExW(0, kWideClass, L"Nidhogg", style,
                                 CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left,
                                 rc.bottom - rc.top, nullptr, nullptr, inst, nullptr);
     g_videoOut.window = hwnd;
     return hwnd;
+}
+
+struct AutoPressCmd {
+    uint64_t startFrame = 0;
+    uint64_t duration = 6;
+    uint32_t mask = 0;
+};
+
+std::vector<AutoPressCmd> ParseAutoPressEnv(const char* envName) {
+    std::vector<AutoPressCmd> out;
+    char* env = nullptr;
+    size_t len = 0;
+    if (_dupenv_s(&env, &len, envName) != 0 || !env) return out;
+    const char* p = env;
+    while (*p && out.size() < 512) {
+        while (*p == ' ' || *p == ',') ++p;
+        if (!*p) break;
+        char* mid = nullptr;
+        unsigned long long f = std::strtoull(p, &mid, 10);
+        if (mid == p || *mid != ':') break;
+        char* end = nullptr;
+        unsigned long m = std::strtoul(mid + 1, &end, 0);
+        if (end == mid + 1) break;
+        unsigned long long dur = 6;
+        if (*end == ':') {
+            char* durEnd = nullptr;
+            unsigned long long parsedDur = std::strtoull(end + 1, &durEnd, 10);
+            if (durEnd != end + 1 && parsedDur > 0) {
+                dur = parsedDur;
+                end = durEnd;
+            }
+        }
+        out.push_back({f, dur, static_cast<uint32_t>(m)});
+        p = (*end == ',') ? (end + 1) : end;
+    }
+    std::free(env);
+    return out;
+}
+
+uint32_t ReadLocalPlayerButtons(int playerIndex, uint8_t& lx, uint8_t& ly, uint8_t& rx, uint8_t& ry) {
+    uint32_t buttons = 0;
+    lx = 0x80; ly = 0x80; rx = 0x80; ry = 0x80;
+
+    const auto& cfg = core::CurrentSettings();
+    const bool focused = !g_qaUnfocused && g_videoOut.window &&
+                         GetForegroundWindow() == g_videoOut.window &&
+                         !gnm::IsOverlayCapturingInput();
+    auto down = [&](int vk) {
+        return vk != 0 && focused && (GetAsyncKeyState(vk) & 0x8000) != 0;
+    };
+
+    const auto& kb = (playerIndex == 1) ? cfg.p1Keys : cfg.p2Keys;
+    if (down(kb.up) || down(kb.altUp))         buttons |= 0x0010;  // Up
+    if (down(kb.down) || down(kb.altDown))     buttons |= 0x0040;  // Down
+    if (down(kb.left) || down(kb.altLeft))     buttons |= 0x0080;  // Left
+    if (down(kb.right) || down(kb.altRight))   buttons |= 0x0020;  // Right
+    if (down(kb.jump) || down(kb.altJump))     buttons |= 0x4000;  // Cross (Jump/Confirm)
+    if (down(kb.attack) || down(kb.altAttack)) buttons |= 0x8000;  // Square (Attack/Throw)
+    if (down(kb.back))                         buttons |= 0x2000;  // Circle (Back)
+    if (down(kb.start))                        buttons |= 0x0008;  // Options (Start)
+    if (playerIndex == 1 && down('E'))         buttons |= 0x1000;  // Triangle
+
+    const int padIdx = (playerIndex == 1) ? cfg.p1Controller : cfg.p2Controller;
+    if (!g_qaUnfocused && !gnm::IsOverlayCapturingInput() && padIdx >= 0 && padIdx <= 3) {
+        XINPUT_STATE xi{};
+        if (XInputGetState(static_cast<DWORD>(padIdx), &xi) == ERROR_SUCCESS) {
+            const WORD xb = xi.Gamepad.wButtons;
+            if (xb & XINPUT_GAMEPAD_DPAD_UP)        buttons |= 0x0010;
+            if (xb & XINPUT_GAMEPAD_DPAD_DOWN)      buttons |= 0x0040;
+            if (xb & XINPUT_GAMEPAD_DPAD_LEFT)      buttons |= 0x0080;
+            if (xb & XINPUT_GAMEPAD_DPAD_RIGHT)     buttons |= 0x0020;
+            if (xb & XINPUT_GAMEPAD_START)          buttons |= 0x0008;
+            if (xb & XINPUT_GAMEPAD_A)              buttons |= 0x4000;
+            if (xb & XINPUT_GAMEPAD_B)              buttons |= 0x2000;
+            if (xb & XINPUT_GAMEPAD_X)              buttons |= 0x8000;
+            if (xb & XINPUT_GAMEPAD_Y)              buttons |= 0x1000;
+            if (xb & XINPUT_GAMEPAD_LEFT_SHOULDER)  buttons |= 0x0400;
+            if (xb & XINPUT_GAMEPAD_RIGHT_SHOULDER) buttons |= 0x0800;
+            if (xi.Gamepad.bLeftTrigger > 64)       buttons |= 0x0100;
+            if (xi.Gamepad.bRightTrigger > 64)      buttons |= 0x0200;
+            lx = static_cast<uint8_t>((static_cast<int>(xi.Gamepad.sThumbLX) + 32768) >> 8);
+            ly = static_cast<uint8_t>((32767 - static_cast<int>(xi.Gamepad.sThumbLY)) >> 8);
+            rx = static_cast<uint8_t>((static_cast<int>(xi.Gamepad.sThumbRX) + 32768) >> 8);
+            ry = static_cast<uint8_t>((32767 - static_cast<int>(xi.Gamepad.sThumbRY)) >> 8);
+        }
+    }
+
+    static std::vector<AutoPressCmd> s_p1Auto = ParseAutoPressEnv("NIDHOGG_AUTOPRESS");
+    static std::vector<AutoPressCmd> s_p2Auto = ParseAutoPressEnv("NIDHOGG_AUTOPRESS_P2");
+    const auto& seq = (playerIndex == 1) ? s_p1Auto : s_p2Auto;
+    for (const auto& cmd : seq) {
+        if (g_submits >= cmd.startFrame && g_submits < cmd.startFrame + cmd.duration) {
+            buttons |= cmd.mask;
+        }
+    }
+    return buttons;
 }
 
 }  // namespace
@@ -841,6 +997,106 @@ HWND CreatePortWindow(uint32_t w, uint32_t h) {
 uint32_t LastSlot() { return g_lastSlot; }
 uint64_t LastCallSite() { return g_lastRet; }
 void HleSetImageBase(uint64_t base) { g_base = base; }
+
+void HleSetApp0(const std::string& app0Dir) {
+    if (app0Dir.empty()) return;
+    std::wstring w = core::Utf8ToWide(app0Dir);
+    wchar_t full[MAX_PATH * 4]{};
+    if (!w.empty() && GetFullPathNameW(w.c_str(), MAX_PATH * 4, full, nullptr))
+        g_app0Override = core::WideToUtf8(full);
+    else
+        g_app0Override = app0Dir;
+}
+
+void RequestQuit() {
+    g_quitRequested.store(true, std::memory_order_relaxed);
+}
+
+bool IsQuitRequested() {
+    return g_quitRequested.load(std::memory_order_relaxed);
+}
+
+void HleShutdown() {
+    if (g_shutDownDone.exchange(true)) return;
+    LOG_INFO("[hle] shutting down cleanly at frame %llu (room=%s)",
+             static_cast<unsigned long long>(g_submits), CurrentRoom().c_str());
+
+    for (DWORD i = 0; i < 4; ++i) {
+        XINPUT_VIBRATION vib{};
+        XInputSetState(i, &vib);
+    }
+    {
+        std::scoped_lock lk(g_fiosMtx);
+        for (int fd = 3; fd < 64; ++fd) {
+            if (g_posixFds[fd]) {
+                std::fflush(g_posixFds[fd]);
+                std::fclose(g_posixFds[fd]);
+                g_posixFds[fd] = nullptr;
+            }
+        }
+    }
+    net::ShutdownNetplay();
+    audio::ShutdownAudio();
+    gnm::ShutdownRenderer();
+    if (g_videoOut.window) {
+        HWND w = g_videoOut.window;
+        g_videoOut.window = nullptr;
+        DestroyWindow(w);
+    }
+    timeEndPeriod(1);
+    core::ShutdownLogger();
+}
+
+void* GameWindow() { return g_videoOut.window; }
+uint64_t SubmittedFrames() { return g_submits; }
+
+std::string CurrentRoom() {
+    std::scoped_lock lk(g_roomMtx);
+    return g_currentRoom;
+}
+
+uint64_t ComputeGuestStateHash() {
+    if (!g_base) return 0;
+    uint64_t h = 1469598103934665603ULL;
+    auto mixBytes = [&](const void* data, size_t len) {
+        const auto* b = static_cast<const uint8_t*>(data);
+        for (size_t i = 0; i < len; ++i) {
+            h ^= b[i];
+            h *= 1099511628211ULL;
+        }
+    };
+
+    // Room index (+0x3e22b0) and guest LCG state (+0x1f0068)
+    if (Readable(reinterpret_cast<void*>(g_base + 0x3e22b0), 4))
+        mixBytes(reinterpret_cast<const void*>(g_base + 0x3e22b0), 4);
+    mixBytes(&g_simRandState, sizeof(g_simRandState));
+
+    // Walk active FOCAL/GameMaker entity list (+0x3e2230): hash relative vtable
+    // and deterministic non-pointer simulation fields [+0x80..+0x124].
+    uint32_t entityCount = 0;
+    if (Readable(reinterpret_cast<void*>(g_base + 0x3e2230), 8)) {
+        uint64_t ent = *reinterpret_cast<const uint64_t*>(g_base + 0x3e2230);
+        while (ent && entityCount < 2048 && Readable(reinterpret_cast<void*>(ent), 0x128)) {
+            const auto* eb = reinterpret_cast<const uint8_t*>(ent);
+            if (eb[0x9b] == 0) {  // not marked destroyed
+                const uint64_t vt = *reinterpret_cast<const uint64_t*>(eb);
+                const uint64_t relVt = (vt >= g_base) ? (vt - g_base) : vt;
+                mixBytes(&relVt, sizeof(relVt));
+                mixBytes(eb + 0x80, 0xA4);  // positions, velocities, alarms, sprite, angles
+                ++entityCount;
+            }
+            ent = *reinterpret_cast<const uint64_t*>(eb + 0x08);
+        }
+    }
+    mixBytes(&entityCount, sizeof(entityCount));
+    return h;
+}
+
+void SetNetplayStepCallback(NetplayStepFn fn) {
+    g_netplayStep = fn;
+    g_netplaySyncedFrame = UINT64_MAX;
+    if (!fn) g_netplayClockLock.store(false, std::memory_order_relaxed);
+}
 
 // ------------------------------------------------------------------ names --
 
@@ -1143,8 +1399,15 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                        static_cast<size_t>(r.gpr[1]),
                        static_cast<size_t>(r.gpr[2]), r.gpr[3]);
             return 0;
-        case 153:
-            return static_cast<uint64_t>(std::rand() & 0x7fff);
+        case 153: {
+            if (GetCurrentThreadId() == g_simThreadId) {
+                g_simRandState = g_simRandState * 214013u + 2531011u;
+                return static_cast<uint64_t>((g_simRandState >> 16) & 0x7fffu);
+            }
+            thread_local uint32_t tl_rng = 0x2468ACE1u ^ GetCurrentThreadId();
+            tl_rng = tl_rng * 214013u + 2531011u;
+            return static_cast<uint64_t>((tl_rng >> 16) & 0x7fffu);
+        }
         case 155: {
             if (!r.gpr[0] || !r.gpr[1]) return 0;
             const char* p = std::strstr(reinterpret_cast<const char*>(r.gpr[0]), str(1));
@@ -1220,38 +1483,36 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                 mode += 'b';
             if (mode.find('w') != std::string::npos || mode.find('a') != std::string::npos)
                 MakeParentDirs(path);
-            std::FILE* f = std::fopen(path.c_str(), mode.c_str());
-            std::printf("[fios] fopen \"%s\" mode \"%s\" -> %p\n", path.c_str(),
-                        mode.c_str(), static_cast<void*>(f));
-            std::fflush(stdout);
+            std::FILE* f = core::FopenUtf8(path, mode.c_str());
+            if (g_verbose) LOG_INFO("[fios] fopen \"%s\" mode \"%s\" -> %p", path.c_str(), mode.c_str(), static_cast<void*>(f));
             return reinterpret_cast<uint64_t>(f);
         }
         case 47:  // fseek
-            return static_cast<uint64_t>(static_cast<int64_t>(
+            return r.gpr[0] ? static_cast<uint64_t>(static_cast<int64_t>(
                 std::fseek(reinterpret_cast<std::FILE*>(r.gpr[0]),
-                           static_cast<long>(r.gpr[1]), static_cast<int>(r.gpr[2]))));
+                           static_cast<long>(r.gpr[1]), static_cast<int>(r.gpr[2])))) : static_cast<uint64_t>(-1ll);
         case 48:  // ftell
-            return static_cast<uint64_t>(static_cast<int64_t>(
-                std::ftell(reinterpret_cast<std::FILE*>(r.gpr[0]))));
+            return r.gpr[0] ? static_cast<uint64_t>(static_cast<int64_t>(
+                std::ftell(reinterpret_cast<std::FILE*>(r.gpr[0])))) : static_cast<uint64_t>(-1ll);
         case 49:  // fread
-            return std::fread(ptr(0), static_cast<size_t>(r.gpr[1]),
-                              static_cast<size_t>(r.gpr[2]),
-                              reinterpret_cast<std::FILE*>(r.gpr[3]));
+            return r.gpr[0] ? std::fread(ptr(0), static_cast<size_t>(r.gpr[1]),
+                                         static_cast<size_t>(r.gpr[2]),
+                                         reinterpret_cast<std::FILE*>(r.gpr[3])) : 0;
         case 50:  // fclose
-            return static_cast<uint64_t>(
-                std::fclose(reinterpret_cast<std::FILE*>(r.gpr[0])));
+            return r.gpr[0] ? static_cast<uint64_t>(
+                std::fclose(reinterpret_cast<std::FILE*>(r.gpr[0]))) : 0;
         case 52: {  // mkdir(path, mode)
             std::string path = HostPath(str(0));
-            MakeParentDirs(path);
-            return static_cast<uint64_t>(static_cast<int64_t>(_mkdir(path.c_str())));
+            return core::MakeDirsUtf8(path) ? 0 : static_cast<uint64_t>(static_cast<int64_t>(-1));
         }
         case 53:  // fwrite
-            return std::fwrite(ptr(0), static_cast<size_t>(r.gpr[1]),
-                               static_cast<size_t>(r.gpr[2]),
-                               reinterpret_cast<std::FILE*>(r.gpr[3]));
+            return r.gpr[3] ? std::fwrite(ptr(0), static_cast<size_t>(r.gpr[1]),
+                                          static_cast<size_t>(r.gpr[2]),
+                                          reinterpret_cast<std::FILE*>(r.gpr[3])) : 0;
         case 54: {  // remove
-            std::string path = HostPath(str(0));
-            return static_cast<uint64_t>(static_cast<int64_t>(std::remove(path.c_str())));
+            std::wstring w = core::Utf8ToWide(HostPath(str(0)));
+            return w.empty() ? static_cast<uint64_t>(-1ll)
+                             : static_cast<uint64_t>(static_cast<int64_t>(_wremove(w.c_str())));
         }
 
         // ---- libScePngDec
@@ -1372,7 +1633,21 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             if (uid == 2) return 2;
             return 0x80920004ull;
         }
-        case 29:  // scePadSetVibration(handle, param)
+        case 29: {  // scePadSetVibration(handle, param)
+            const int32_t handle = static_cast<int32_t>(r.gpr[0]);
+            const auto& cfg = core::CurrentSettings();
+            const int padIdx = (handle == 1) ? cfg.p1Controller : (handle == 2 ? cfg.p2Controller : -1);
+            if (padIdx >= 0 && padIdx <= 3 && Readable(ptr(1), 2)) {
+                const auto* vp = reinterpret_cast<const uint8_t*>(r.gpr[1]);
+                XINPUT_VIBRATION vib{};
+                if (cfg.vibration) {
+                    vib.wLeftMotorSpeed = static_cast<WORD>(vp[0]) * 257u;
+                    vib.wRightMotorSpeed = static_cast<WORD>(vp[1]) * 257u;
+                }
+                XInputSetState(static_cast<DWORD>(padIdx), &vib);
+            }
+            return 0;
+        }
         case 30:  // scePadClose(handle)
         case 38:  // scePadSetLightBar(handle, color)
         case 39:  // scePadResetLightBar(handle)
@@ -1384,83 +1659,33 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             if ((handle != 1 && handle != 2) || want <= 0 || !Readable(out, 0x78))
                 return 0x80920003ull;
             std::memset(out, 0, 0x78);
-            uint32_t buttons = 0;
+
             uint8_t lx = 0x80, ly = 0x80, rx = 0x80, ry = 0x80;
+            uint32_t buttons = ReadLocalPlayerButtons(handle, lx, ly, rx, ry);
 
-            const bool focused = g_videoOut.window && GetForegroundWindow() == g_videoOut.window;
-            auto down = [&](int vk) {
-                return focused && (GetAsyncKeyState(vk) & 0x8000) != 0;
-            };
-            if (handle == 1) {
-                if (down('W') || down(VK_UP))    buttons |= 0x0010;  // Up
-                if (down('S') || down(VK_DOWN))  buttons |= 0x0040;  // Down
-                if (down('A') || down(VK_LEFT))  buttons |= 0x0080;  // Left
-                if (down('D') || down(VK_RIGHT)) buttons |= 0x0020;  // Right
-                if (down(VK_SPACE) || down('Z') || down('G')) buttons |= 0x4000;  // Cross (Jump/OK)
-                if (down('F') || down('X'))      buttons |= 0x8000;  // Square (Attack/Throw)
-                if (down(VK_ESCAPE) || down('C')) buttons |= 0x2000; // Circle (Back)
-                if (down('E'))                   buttons |= 0x1000;  // Triangle
-                if (down(VK_RETURN))             buttons |= 0x0008;  // Options (Start)
-            } else if (handle == 2) {
-                if (down('I'))                   buttons |= 0x0010;
-                if (down('K'))                   buttons |= 0x0040;
-                if (down('J'))                   buttons |= 0x0080;
-                if (down('L'))                   buttons |= 0x0020;
-                if (down('O') || down(VK_RCONTROL)) buttons |= 0x4000;
-                if (down('U') || down(VK_RSHIFT))   buttons |= 0x8000;
-                if (down(VK_BACK))               buttons |= 0x2000;
-            }
-
-            XINPUT_STATE xi{};
-            if (XInputGetState(static_cast<DWORD>(handle - 1), &xi) == ERROR_SUCCESS) {
-                const WORD xb = xi.Gamepad.wButtons;
-                if (xb & XINPUT_GAMEPAD_DPAD_UP)        buttons |= 0x0010;
-                if (xb & XINPUT_GAMEPAD_DPAD_DOWN)      buttons |= 0x0040;
-                if (xb & XINPUT_GAMEPAD_DPAD_LEFT)      buttons |= 0x0080;
-                if (xb & XINPUT_GAMEPAD_DPAD_RIGHT)     buttons |= 0x0020;
-                if (xb & XINPUT_GAMEPAD_START)          buttons |= 0x0008;
-                if (xb & XINPUT_GAMEPAD_A)              buttons |= 0x4000;
-                if (xb & XINPUT_GAMEPAD_B)              buttons |= 0x2000;
-                if (xb & XINPUT_GAMEPAD_X)              buttons |= 0x8000;
-                if (xb & XINPUT_GAMEPAD_Y)              buttons |= 0x1000;
-                if (xb & XINPUT_GAMEPAD_LEFT_SHOULDER)  buttons |= 0x0400;
-                if (xb & XINPUT_GAMEPAD_RIGHT_SHOULDER) buttons |= 0x0800;
-                if (xi.Gamepad.bLeftTrigger > 64)       buttons |= 0x0100;
-                if (xi.Gamepad.bRightTrigger > 64)      buttons |= 0x0200;
-                lx = static_cast<uint8_t>((static_cast<int>(xi.Gamepad.sThumbLX) + 32768) >> 8);
-                ly = static_cast<uint8_t>((32767 - static_cast<int>(xi.Gamepad.sThumbLY)) >> 8);
-                rx = static_cast<uint8_t>((static_cast<int>(xi.Gamepad.sThumbRX) + 32768) >> 8);
-                ry = static_cast<uint8_t>((32767 - static_cast<int>(xi.Gamepad.sThumbRY)) >> 8);
-            }
-
-            static struct AutoPress {
-                uint64_t frame;
-                uint32_t mask;
-            } s_press[32];
-            static int s_pressCount = -1;
-            if (s_pressCount < 0) {
-                s_pressCount = 0;
-                char* env = nullptr;
-                size_t len = 0;
-                if (_dupenv_s(&env, &len, "NIDHOGG_AUTOPRESS") == 0 && env) {
-                    const char* p = env;
-                    while (*p && s_pressCount < 32) {
-                        char* mid = nullptr;
-                        unsigned long long f = std::strtoull(p, &mid, 10);
-                        if (mid == p || *mid != ':') break;
-                        char* end = nullptr;
-                        unsigned long m = std::strtoul(mid + 1, &end, 0);
-                        if (end == mid + 1) break;
-                        s_press[s_pressCount++] = {f, static_cast<uint32_t>(m)};
-                        p = (*end == ',') ? (end + 1) : end;
+            if (g_netplayStep) {
+                if (g_netplaySyncedFrame != g_submits) {
+                    uint8_t dummyLx, dummyLy, dummyRx, dummyRy;
+                    const uint32_t localP1 = (handle == 1)
+                        ? buttons
+                        : ReadLocalPlayerButtons(1, dummyLx, dummyLy, dummyRx, dummyRy);
+                    uint32_t syncedP1 = 0, syncedP2 = 0;
+                    if (g_netplayStep(g_submits, localP1, syncedP1, syncedP2, g_simRandState)) {
+                        g_netplayClockLock.store(true, std::memory_order_relaxed);
+                        g_netplaySimFrame.store(g_submits, std::memory_order_relaxed);
+                        g_netplayP1Buttons = syncedP1;
+                        g_netplayP2Buttons = syncedP2;
+                        g_netplaySyncedFrame = g_submits;
+                        if (g_base && Readable(reinterpret_cast<void*>(g_base + 0x1f0068), 4)) {
+                            *reinterpret_cast<uint32_t*>(g_base + 0x1f0068) = g_simRandState;
+                        }
+                    } else {
+                        g_netplayClockLock.store(false, std::memory_order_relaxed);
                     }
-                    std::free(env);
                 }
-            }
-            if (handle == 1) {
-                for (int i = 0; i < s_pressCount; ++i) {
-                    if (g_submits >= s_press[i].frame && g_submits < s_press[i].frame + 6)
-                        buttons |= s_press[i].mask;
+                if (g_netplaySyncedFrame == g_submits) {
+                    buttons = (handle == 1) ? g_netplayP1Buttons : g_netplayP2Buttons;
+                    lx = 0x80; ly = 0x80; rx = 0x80; ry = 0x80;
                 }
             }
 
@@ -1487,15 +1712,18 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             const auto* m = reinterpret_cast<const uint8_t*>(r.gpr[0]);
             const char* dirName = *reinterpret_cast<const char* const*>(m + 0x10);
             const uint32_t mode = *reinterpret_cast<const uint32_t*>(m + 0x28);
-            std::string hostDir = SaveRoot((dirName && Readable(dirName, 1)) ? dirName : "00");
-            DWORD attr = GetFileAttributesA(hostDir.c_str());
+            std::string hostDir = SaveRoot((dirName && Readable(dirName, 1)) ? dirName : "SAVEDATA00");
             if (mode == 1) {  // READ_ONLY
-                if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY))
+                if (!core::DirExistsUtf8(hostDir))
                     return 0x809f0008ull;  // SCE_SAVE_DATA_ERROR_NOT_FOUND
             } else {
-                MakeParentDirs(hostDir + "\\_");
+                if (!core::MakeDirsUtf8(hostDir))
+                    return 0x809f000full;  // permission / IO failure
             }
-            g_saveMountDir = hostDir;
+            {
+                std::scoped_lock lk(g_fiosMtx);
+                g_saveMountDir = hostDir;
+            }
             char* dst = reinterpret_cast<char*>(r.gpr[1]);
             std::memset(dst, 0, 0x20);
             std::strcpy(dst, "/savedata0");
@@ -1507,8 +1735,13 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             const uint32_t flags = static_cast<uint32_t>(r.gpr[1]);
             const bool writing = (flags & 0x3u) != 0 || (flags & 0x200u) != 0;
             if (writing) MakeParentDirs(path);
-            std::FILE* f = std::fopen(path.c_str(), writing ? "wb" : "rb");
-            if (!f) return slot == 359 ? static_cast<uint64_t>(static_cast<int64_t>(-1)) : 0x80020002ull;
+            std::FILE* f = core::FopenUtf8(path, writing ? "wb" : "rb");
+            if (!f) {
+                return slot == 359
+                    ? static_cast<uint64_t>(static_cast<int64_t>(-1))
+                    : (writing ? 0x8002000dull : 0x80020002ull);
+            }
+            std::scoped_lock lk(g_fiosMtx);
             for (int fd = 3; fd < 64; ++fd) {
                 if (!g_posixFds[fd]) {
                     g_posixFds[fd] = f;
@@ -1520,6 +1753,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
         }
         case 360:    // lseek(fd, offset, whence)
         case 397: {  // sceKernelLseek(fd, offset, whence)
+            std::scoped_lock lk(g_fiosMtx);
             const int fd = static_cast<int>(r.gpr[0]);
             if (fd < 3 || fd >= 64 || !g_posixFds[fd])
                 return static_cast<uint64_t>(static_cast<int64_t>(-1));
@@ -1529,14 +1763,18 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             return static_cast<uint64_t>(_ftelli64(g_posixFds[fd]));
         }
         case 129: {  // sceKernelWrite(fd, buf, nbytes)
+            std::scoped_lock lk(g_fiosMtx);
             const int fd = static_cast<int>(r.gpr[0]);
             if (fd < 3 || fd >= 64 || !g_posixFds[fd]) return 0x80020009ull;
-            const size_t n = std::fwrite(ptr(1), 1, static_cast<size_t>(r.gpr[2]), g_posixFds[fd]);
+            const size_t want = static_cast<size_t>(r.gpr[2]);
+            if (!Readable(ptr(1), want)) return 0x8002000eull;
+            const size_t n = std::fwrite(ptr(1), 1, want, g_posixFds[fd]);
             std::fflush(g_posixFds[fd]);
             return static_cast<uint64_t>(n);
         }
         case 130:    // sceKernelClose(fd)
         case 362: {  // close(fd)
+            std::scoped_lock lk(g_fiosMtx);
             const int fd = static_cast<int>(r.gpr[0]);
             if (fd >= 3 && fd < 64 && g_posixFds[fd]) {
                 std::fclose(g_posixFds[fd]);
@@ -1545,25 +1783,30 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             return 0;
         }
         case 135: {  // sceKernelStat(path, sb)
-            std::string path = HostPath(str(0));
+            std::wstring wpath = core::Utf8ToWide(HostPath(str(0)));
             WIN32_FILE_ATTRIBUTE_DATA fad{};
-            if (!GetFileAttributesExA(path.c_str(), GetFileExInfoStandard, &fad))
+            if (wpath.empty() || !GetFileAttributesExW(wpath.c_str(), GetFileExInfoStandard, &fad))
                 return 0x80020002ull;
             if (Readable(ptr(1), 0x78)) {
                 auto* sb = reinterpret_cast<uint8_t*>(r.gpr[1]);
                 std::memset(sb, 0, 0x78);
-                const uint64_t sz = (static_cast<uint64_t>(fad.nFileSizeHigh) << 32) |
-                                    fad.nFileSizeLow;
+                uint64_t sz = (static_cast<uint64_t>(fad.nFileSizeHigh) << 32) |
+                              fad.nFileSizeLow;
+                if (sz > (64ULL << 20)) sz = (64ULL << 20);  // guard against multi-GB corrupted save
                 *reinterpret_cast<uint64_t*>(sb + 0x48) = sz;  // Orbis st_size
             }
             return 0;
         }
         case 136:    // sceKernelRead(fd, buf, nbytes)
         case 361: {  // read(fd, buf, nbytes)
+            std::scoped_lock lk(g_fiosMtx);
             const int fd = static_cast<int>(r.gpr[0]);
             if (fd < 3 || fd >= 64 || !g_posixFds[fd])
                 return slot == 361 ? static_cast<uint64_t>(static_cast<int64_t>(-1)) : 0x80020009ull;
-            const size_t n = std::fread(ptr(1), 1, static_cast<size_t>(r.gpr[2]), g_posixFds[fd]);
+            const size_t want = static_cast<size_t>(r.gpr[2]);
+            if (!Readable(ptr(1), want))
+                return slot == 361 ? static_cast<uint64_t>(static_cast<int64_t>(-1)) : 0x8002000eull;
+            const size_t n = std::fread(ptr(1), 1, want, g_posixFds[fd]);
             return static_cast<uint64_t>(n);
         }
 
@@ -1746,7 +1989,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
         case 400: {  // sceFiosFHOpen(attr, &outFH, path, openParams)
             std::scoped_lock lk(g_fiosMtx);
             std::string path = HostPath(str(2));
-            std::FILE* f = std::fopen(path.c_str(), "rb");
+            std::FILE* f = core::FopenUtf8(path, "rb");
             if (!f) {
                 if (Readable(ptr(1), 4)) *reinterpret_cast<int32_t*>(r.gpr[1]) = 0;
                 return 0;
@@ -1782,10 +2025,11 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             void* dst = ptr(2);
             const uint32_t len = static_cast<uint32_t>(r.gpr[3]);
             const int64_t off = static_cast<int64_t>(r.gpr[4]);
-            if (fh < 3 || fh >= 64 || !g_posixFds[fh] || !Readable(dst, len)) return 0;
+            if (fh < 3 || fh >= 64 || !Readable(dst, len)) return 0;
             size_t got = 0;
             {
                 std::scoped_lock lk(g_fiosMtx);
+                if (!g_posixFds[fh]) return 0;
                 if (_fseeki64(g_posixFds[fh], off, SEEK_SET) == 0)
                     got = std::fread(dst, 1, len, g_posixFds[fh]);
             }
@@ -2033,7 +2277,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                 }
             }
 
-            if (g_submits <= 3) {
+            if (g_verbose && g_submits <= 3) {
                 std::printf("[gnm] submit #%llu count=%u vid=%llu display=%u mode=%d arg=%lld label=%p value=%u\n",
                             static_cast<unsigned long long>(g_submits),
                             count, static_cast<unsigned long long>(r.gpr[5]), displayIndex,
@@ -2364,14 +2608,15 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             if (first && g_verbose) {
                 DumpFrameState();
             } else if ((g_submits % 300) == 0) {
-                std::printf("[gnm] frame %llu: %zu draws, %llu writes, %u errors | [audio] mixed=%llu voices=%u peak=%.4f\n",
-                            static_cast<unsigned long long>(g_submits),
-                            g_machine.draws().size(),
-                            static_cast<unsigned long long>(g_machine.memoryWrites()),
-                            g_machine.errors(),
-                            static_cast<unsigned long long>(audio::MixedFrames()),
-                            audio::ActiveVoices(),
-                            audio::PeakAmplitude());
+                LOG_INFO("[gnm] frame %llu (room=%s): %zu draws, %llu writes, %u errors | [audio] mixed=%llu voices=%u peak=%.4f",
+                         static_cast<unsigned long long>(g_submits),
+                         CurrentRoom().c_str(),
+                         g_machine.draws().size(),
+                         static_cast<unsigned long long>(g_machine.memoryWrites()),
+                         g_machine.errors(),
+                         static_cast<unsigned long long>(audio::MixedFrames()),
+                         audio::ActiveVoices(),
+                         audio::PeakAmplitude());
                 if (g_verbose) {
                     for (int rank = 0; rank < 64; ++rank) {
                         uint32_t best = 512, bestCalls = 0;
@@ -2391,35 +2636,59 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                     }
                 }
                 for (uint32_t s = 0; s < 512; ++s) g_slotCalls[s] = 0;
-                std::fflush(stdout);
             }
 
             ++g_videoOut.flipCount;
             g_videoOut.lastFlipArg = static_cast<uint64_t>(flipArg);
+
+            // Anchor target flip deadline BEFORE RenderFrame/Present so VSync
+            // blocking time and CPU sleep time never double-count into 30 FPS.
+            static bool s_timerInit = false;
+            static uint64_t s_nextFlipUsec = 0;
+            if (!g_uncapped) {
+                if (!s_timerInit) {
+                    s_timerInit = true;
+                    timeBeginPeriod(1);
+                    s_nextFlipUsec = HostNowUsec();
+                }
+                const uint64_t periodUsec =
+                    (g_videoOut.flipRate == 1) ? 33333ULL :
+                    (g_videoOut.flipRate == 2) ? 50000ULL : 16667ULL;
+                s_nextFlipUsec += periodUsec;
+                const uint64_t preNow = HostNowUsec();
+                if (preNow > s_nextFlipUsec + 100000ULL) s_nextFlipUsec = preNow + periodUsec;
+            }
 
             // Hand the frame to the backend.  This is the whole point of the
             // interpreter: the guest produced a command stream, the stream
             // produced draw state, and the state becomes real GPU work here.
             gnm::RenderFrame(g_videoOut.window, g_machine.draws());
 
-            // Hardware flip-rate pacing (0 = 60 Hz, 1 = 30 Hz, 2 = 20 Hz) so the
-            // fixed-timestep simulation runs at original PS4 speed on high-Hz
-            // displays or when DXGI windowed Present does not block on vblank.
+            if (IsQuitRequested() || (g_maxFrames > 0 && g_submits >= g_maxFrames)) {
+                HleShutdown();
+                ExitProcess(0);
+            }
+
             if (!g_uncapped) {
-                static bool s_timerInit = false;
-                static uint64_t s_nextFlipUsec = 0;
-                if (!s_timerInit) {
-                    s_timerInit = true;
-                    timeBeginPeriod(1);
-                    s_nextFlipUsec = NowUsec();
-                }
-                const uint64_t periodUsec =
-                    (g_videoOut.flipRate == 1) ? 33333ULL :
-                    (g_videoOut.flipRate == 2) ? 50000ULL : 16667ULL;
-                s_nextFlipUsec += periodUsec;
-                uint64_t now = NowUsec();
-                if (now > s_nextFlipUsec + 100000ULL) s_nextFlipUsec = now;
-                while ((now = NowUsec()) < s_nextFlipUsec) {
+                uint64_t now = HostNowUsec();
+                const int presLimit = core::CurrentSettings().presentationFpsLimit;
+                const bool highRatePres = (presLimit == 0 || presLimit > 60);
+                const uint64_t subPeriod = (presLimit > 60)
+                    ? (1000000ULL / static_cast<uint64_t>(presLimit))
+                    : 2000ULL;
+                uint64_t nextSubPresent = now + subPeriod;
+
+                while ((now = HostNowUsec()) < s_nextFlipUsec) {
+                    if (IsQuitRequested()) {
+                        HleShutdown();
+                        ExitProcess(0);
+                    }
+                    if (highRatePres && now >= nextSubPresent &&
+                        now + 1200ULL < s_nextFlipUsec) {
+                        gnm::PresentCachedFrame(g_videoOut.window);
+                        nextSubPresent = HostNowUsec() + subPeriod;
+                        continue;
+                    }
                     if (s_nextFlipUsec - now > 2500ULL) Sleep(1);
                     else YieldProcessor();
                 }

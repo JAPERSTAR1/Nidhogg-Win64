@@ -27,7 +27,8 @@ int32_t AudioOutOutput(int32_t handle, const void* ptr);
 int32_t AudioOutOutputs(const void* params, uint32_t count);
 int32_t AudioOutClose(int32_t handle);
 
-// Diagnostics: total frames mixed and non-silent peak amplitude.
+// Diagnostics & lifecycle
+void ShutdownAudio();
 uint64_t MixedFrames();
 float PeakAmplitude();
 uint32_t ActiveVoices();
