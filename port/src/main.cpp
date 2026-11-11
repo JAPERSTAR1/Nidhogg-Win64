@@ -19,6 +19,7 @@
 #include "core/settings.h"
 #include "hle.h"
 #include "image.h"
+#include "net/netplay.h"
 #include "thunks.h"
 
 namespace {
@@ -159,6 +160,7 @@ int RunMain(const std::vector<std::string>& args, bool hasConsole) {
     std::string positionalPath;
     std::string cliAssets;
     std::string cliUserDir;
+    std::string cliLobbyUrl;
     uint64_t callAt = 0;
     uint64_t maxFrames = 0;
     bool wantConsole = hasConsole;
@@ -170,6 +172,8 @@ int RunMain(const std::vector<std::string>& args, bool hasConsole) {
         const std::string& a = args[i];
         if (a == "--user-dir" && i + 1 < args.size()) {
             cliUserDir = args[++i];
+        } else if (a == "--lobby-url" && i + 1 < args.size()) {
+            cliLobbyUrl = args[++i];
         } else if (a == "--assets" && i + 1 < args.size()) {
             cliAssets = args[++i];
         } else if (a == "--call" && i + 1 < args.size()) {
@@ -222,6 +226,7 @@ int RunMain(const std::vector<std::string>& args, bool hasConsole) {
     if (!ps4::core::LoadSettings(settings)) {
         ps4::core::SaveSettings(settings);
     }
+    if (!cliLobbyUrl.empty()) settings.lobbyServerUrl = cliLobbyUrl;
 
     const char* assetHint = !cliAssets.empty()
                                 ? cliAssets.c_str()
@@ -351,6 +356,7 @@ int RunMain(const std::vector<std::string>& args, bool hasConsole) {
     }
 
     LOG_INFO("entering guest 0x%llx", static_cast<unsigned long long>(image.entry()));
+    if (!ps4::net::ResumeOnlineSession()) return 1;
     auto call = MakeSysvCall();
     call(reinterpret_cast<uint64_t>(image.at(image.entry())),
          reinterpret_cast<uint64_t>(block), 0);

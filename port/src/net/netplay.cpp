@@ -2,10 +2,14 @@
 #define WIN32_LEAN_AND_MEAN
 #include "netplay.h"
 #include "crypto.h"
+#include "websocket.h"
+#include "stun.h"
 
 #include "../core/logger.h"
 #include "../core/settings.h"
 #include "../hle.h"
+#include "../gnm/d3d11.h"
+#include "../ui/overlay.h"
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -20,6 +24,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <future>
 #include <mutex>
 #include <sstream>
 #include <thread>
@@ -165,6 +170,7 @@ bool JsonGetBool(const std::string& j, const char* key, bool& out) {
 }
 
 struct ParsedUrl {
+    bool valid = false;
     bool https = false;
     std::wstring host = L"127.0.0.1";
     std::string hostUtf8 = "127.0.0.1";
@@ -173,21 +179,15 @@ struct ParsedUrl {
 
 ParsedUrl ParseServerUrl(const std::string& url) {
     ParsedUrl u;
-    std::string s = url;
-    if (s.rfind("https://", 0) == 0) { u.https = true; u.port = 443; s.erase(0, 8); }
-    else if (s.rfind("http://", 0) == 0) { u.https = false; u.port = 80; s.erase(0, 7); }
-    size_t slash = s.find('/');
-    if (slash != std::string::npos) s.resize(slash);
-    size_t colon = s.find(':');
-    if (colon != std::string::npos) {
-        u.hostUtf8 = s.substr(0, colon);
-        int p = std::atoi(s.substr(colon + 1).c_str());
-        if (p > 0 && p <= 65535) u.port = static_cast<uint16_t>(p);
-    } else if (!s.empty()) {
-        u.hostUtf8 = s;
-    }
-    if (u.hostUtf8.empty()) u.hostUtf8 = "127.0.0.1";
-    u.host = core::Utf8ToWide(u.hostUtf8);
+    const auto wide = core::Utf8ToWide(url);
+    URL_COMPONENTS p{}; p.dwStructSize = sizeof(p);
+    p.dwHostNameLength = p.dwUrlPathLength = p.dwExtraInfoLength = p.dwUserNameLength = p.dwPasswordLength = static_cast<DWORD>(-1);
+    if (!WinHttpCrackUrl(wide.c_str(), 0, 0, &p) || !p.dwHostNameLength || p.dwUserNameLength || p.dwPasswordLength ||
+        p.dwExtraInfoLength || (p.dwUrlPathLength && std::wstring(p.lpszUrlPath, p.dwUrlPathLength) != L"/") ||
+        (p.nScheme != INTERNET_SCHEME_HTTP && p.nScheme != INTERNET_SCHEME_HTTPS)) return u;
+    u.host.assign(p.lpszHostName, p.dwHostNameLength);
+    u.hostUtf8 = core::WideToUtf8(u.host); u.https = p.nScheme == INTERNET_SCHEME_HTTPS;
+    u.port = p.nPort; u.valid = true;
     return u;
 }
 
@@ -207,6 +207,7 @@ bool HttpRequestJson(const std::string& method, const std::string& path, const s
                      int& outStatus, std::string& outResponse, std::string& outErr,
                      uint32_t* outRttMs = nullptr) {
     const ParsedUrl u = ParseServerUrl(core::CurrentSettings().lobbyServerUrl);
+    if (!u.valid) { outErr = "Server URL must be http://host:port or https://host (without a path)."; return false; }
     const uint64_t t0 = MonoUsec();
 
     HINTERNET hSession = WinHttpOpen(L"NidhoggPort/1.0", WINHTTP_ACCESS_TYPE_NO_PROXY,
@@ -240,10 +241,12 @@ bool HttpRequestJson(const std::string& method, const std::string& path, const s
         body.empty() ? WINHTTP_NO_REQUEST_DATA : const_cast<char*>(body.data()),
         static_cast<DWORD>(body.size()), static_cast<DWORD>(body.size()), 0);
     if (!sent || !WinHttpReceiveResponse(hReq, nullptr)) {
+        const DWORD error = GetLastError();
         WinHttpCloseHandle(hReq);
         WinHttpCloseHandle(hConnect);
         WinHttpCloseHandle(hSession);
-        outErr = "Lobby server unreachable (" + core::CurrentSettings().lobbyServerUrl + ")";
+        outErr = "Lobby server unreachable (" + core::CurrentSettings().lobbyServerUrl +
+            "; WinHTTP " + std::to_string(error) + ")";
         return false;
     }
 
@@ -254,12 +257,15 @@ bool HttpRequestJson(const std::string& method, const std::string& path, const s
     outStatus = static_cast<int>(statusCode);
 
     outResponse.clear();
+    bool readOk = true;
     for (;;) {
         DWORD avail = 0;
-        if (!WinHttpQueryDataAvailable(hReq, &avail) || avail == 0) break;
+        if (!WinHttpQueryDataAvailable(hReq, &avail)) { readOk = false; break; }
+        if (avail == 0) break;
+        if (avail > 1024 * 1024 || outResponse.size() + avail > 1024 * 1024) { readOk = false; break; }
         std::string chunk(avail, '\0');
         DWORD got = 0;
-        if (!WinHttpReadData(hReq, chunk.data(), avail, &got) || got == 0) break;
+        if (!WinHttpReadData(hReq, chunk.data(), avail, &got) || got == 0) { readOk = false; break; }
         chunk.resize(got);
         outResponse += chunk;
     }
@@ -271,7 +277,8 @@ bool HttpRequestJson(const std::string& method, const std::string& path, const s
     WinHttpCloseHandle(hReq);
     WinHttpCloseHandle(hConnect);
     WinHttpCloseHandle(hSession);
-    return true;
+    if (!readOk) outErr = "Incomplete or oversized response from lobby server.";
+    return readOk;
 }
 
 struct NetState {
@@ -280,6 +287,8 @@ struct NetState {
     SOCKET udpSock = INVALID_SOCKET;
     uint16_t localUdpPort = 0;
     std::string localLanIp = "127.0.0.1";
+    std::string publicIp;
+    uint16_t publicPort = 0;
 
     // Network condition simulator (for Phase 11 testing)
     int simOneWayLatencyMs = 0;  // half of simulated RTT
@@ -295,10 +304,14 @@ struct NetState {
     uint64_t sessionId = 0;
     uint8_t sessionKey[32]{};
     bool hasSessionKey = false;
+    uint64_t peerNonceHigh = 0;
+    uint64_t peerNonceMask = 0;
     uint32_t matchSeed = 0xCAFE1234u;
     uint16_t relayUdpPort = 27881;
     sockaddr_in relayAddr{};
     bool hasRelayAddr = false;
+    bool websocketRelay = false;
+    WebSocketRelay websocket;
 
     sockaddr_in peerPublicAddr{};
     bool hasPeerPublic = false;
@@ -306,6 +319,8 @@ struct NetState {
     bool hasPeerLan = false;
     sockaddr_in activePeerAddr{};
     bool directEstablished = false;
+    uint64_t lastDirectRxUsec = 0;
+    bool stalled = false;
 
     uint64_t connectStartUsec = 0;
     uint64_t lastHeartbeatUsec = 0;
@@ -328,9 +343,72 @@ struct NetState {
     // CLI auto-test state
     bool cliHandled = false;
     bool cliAutoStart = false;
+    bool autoExitOnDisconnect = false;
+    bool qaCombat = false;
+    uint64_t gameStartSubmit = UINT64_MAX;
+    bool resumed = false;
+    bool restartPending = false;
+    bool handingOff = false;
+    bool bootNavigating = false;
+    uint64_t stageSelectionStart = UINT64_MAX;
 };
 
 NetState g_net;
+
+struct HeartbeatResult {
+    std::string roomId, response, error;
+    int status = 0;
+    bool ok = false;
+};
+std::future<HeartbeatResult> g_heartbeat;
+
+void RestartAtDeterministicBoot() {
+    // The menu has persistent actors, alarms and frame-dependent animation state.
+    // A fresh process starts the *original* guest from identical initial conditions.
+    // Credentials travel only in the child's private environment, never argv/files.
+    std::string resume;
+    {
+        std::scoped_lock lk(g_net.mtx);
+        if (!g_net.restartPending || g_net.resumed) return;
+        g_net.restartPending = false;
+        resume = "{\"roomId\":\"" + JsonEsc(g_net.snap.roomId) + "\",\"authToken\":\"" +
+            JsonEsc(g_net.authToken) + "\",\"udpPort\":" + std::to_string(g_net.localUdpPort) +
+            ",\"isHost\":" + (g_net.snap.isHost ? "true" : "false") + "}";
+    }
+    std::vector<wchar_t> environment;
+    LPWCH source = GetEnvironmentStringsW();
+    if (!source) return;
+    for (const wchar_t* p = source; *p; p += wcslen(p) + 1) {
+        std::wstring entry(p);
+        if (entry.rfind(L"NIDHOGG_NET_RESUME=", 0) == 0 || entry.rfind(L"NIDHOGG_NET_AUTO=", 0) == 0 ||
+            entry.rfind(L"NIDHOGG_OPEN_ONLINE=", 0) == 0 || entry.rfind(L"NIDHOGG_OPEN_SETTINGS=", 0) == 0) continue;
+        environment.insert(environment.end(), entry.begin(), entry.end()); environment.push_back(0);
+    }
+    FreeEnvironmentStringsW(source);
+    const auto credential = core::Utf8ToWide("NIDHOGG_NET_RESUME=" + resume);
+    environment.insert(environment.end(), credential.begin(), credential.end());
+    environment.push_back(0); environment.push_back(0);
+    std::wstring command = GetCommandLineW();
+    STARTUPINFOW startup{}; startup.cb = sizeof(startup);
+    // This is the player's new interactive game window, not an operator helper.
+    startup.dwFlags = STARTF_USESHOWWINDOW; startup.wShowWindow = SW_SHOWNORMAL;
+    PROCESS_INFORMATION process{};
+    if (!CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE,
+        CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED | CREATE_NO_WINDOW,
+        environment.data(), nullptr, &startup, &process)) {
+        std::scoped_lock lk(g_net.mtx);
+        g_net.snap.phase = SessionPhase::Error;
+        g_net.snap.errorText = "Cannot launch synchronized game (Windows " + std::to_string(GetLastError()) + ")";
+        return;
+    }
+    LOG_INFO("[netplay] handing room membership to clean synchronized guest process");
+    g_net.handingOff = true;
+    ps4::HleShutdown();
+    ResumeThread(process.hThread); CloseHandle(process.hThread);
+    WaitForSingleObject(process.hProcess, INFINITE);
+    DWORD code = 1; GetExitCodeProcess(process.hProcess, &code); CloseHandle(process.hProcess);
+    ExitProcess(code);
+}
 
 std::string DetectLocalLanIp() {
     SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -365,7 +443,7 @@ bool EnsureUdpSocketLocked() {
     sockaddr_in bindAddr{};
     bindAddr.sin_family = AF_INET;
     bindAddr.sin_addr.s_addr = htonl(INADDR_ANY);
-    bindAddr.sin_port = 0;
+    bindAddr.sin_port = htons(g_net.localUdpPort);
     if (bind(s, reinterpret_cast<sockaddr*>(&bindAddr), sizeof(bindAddr)) != 0) {
         closesocket(s);
         return false;
@@ -378,6 +456,20 @@ bool EnsureUdpSocketLocked() {
     g_net.udpSock = s;
     LOG_INFO("[netplay] opened UDP socket on %s:%u", g_net.localLanIp.c_str(), g_net.localUdpPort);
     return true;
+}
+
+void DiscoverPublicEndpoint() {
+    SOCKET socket;
+    { std::scoped_lock lk(g_net.mtx);
+      if (g_net.forceRelay || !g_net.publicIp.empty()) return;
+      socket = g_net.udpSock; }
+    std::string ip; uint16_t port = 0;
+    if (!DiscoverStunEndpoint(socket, ip, port)) return;
+    std::scoped_lock lk(g_net.mtx);
+    if (g_net.udpSock == socket) {
+        g_net.publicIp = ip; g_net.publicPort = port;
+        LOG_INFO("[netplay] STUN discovered a public UDP candidate");
+    }
 }
 
 void FlushTxQueueLocked() {
@@ -431,11 +523,16 @@ void SendSealedPeerPacketLocked(uint8_t pktType, const void* payload, size_t pay
     aad.sessionId = g_net.sessionId;
 
     std::vector<uint8_t> sealed;
-    if (!SealPacket(g_net.sessionKey, g_net.nextNonce++, reinterpret_cast<const uint8_t*>(&aad),
+    const uint64_t nonce = (g_net.nextNonce++) | (g_net.snap.isHost ? 0ULL : (1ULL << 63));
+    if (!SealPacket(g_net.sessionKey, nonce, reinterpret_cast<const uint8_t*>(&aad),
                     sizeof(aad), static_cast<const uint8_t*>(payload), payloadLen, sealed))
         return;
 
     auto sendViaRelay = [&]() {
+        if (g_net.websocketRelay) {
+            if (g_net.websocket.Send(sealed)) ++g_net.snap.packetsSent;
+            return;
+        }
         if (!g_net.hasRelayAddr) return;
         std::vector<uint8_t> env(1 + 8 + 1 + sealed.size());
         env[0] = kPktRelayEnvelope;
@@ -450,8 +547,14 @@ void SendSealedPeerPacketLocked(uint8_t pktType, const void* payload, size_t pay
         return;
     }
 
+    if (g_net.directEstablished && MonoUsec() - g_net.lastDirectRxUsec > 500000ULL) {
+        g_net.directEstablished = false;
+        g_net.snap.transport = TransportMode::RelayFallback;
+    }
+
     if (g_net.directEstablished) {
         QueueUdpSendLocked(g_net.activePeerAddr, sealed.data(), sealed.size());
+        if (g_net.stalled) sendViaRelay();
     } else {
         if (g_net.hasPeerPublic)
             QueueUdpSendLocked(g_net.peerPublicAddr, sealed.data(), sealed.size());
@@ -462,6 +565,7 @@ void SendSealedPeerPacketLocked(uint8_t pktType, const void* payload, size_t pay
 }
 
 void SendRegisterEndpointToRelayLocked() {
+    if (g_net.websocketRelay) return;
     if (!g_net.hasRelayAddr || !g_net.hasSessionKey || g_net.sessionId == 0) return;
     WireAad aad{};
     aad.magic = kWireMagic;
@@ -500,13 +604,18 @@ void VerifyHashesForFrameLocked(uint64_t f) {
     ++g_net.snap.stateChecks;
     g_net.snap.lastLocalHash = lit->second;
     g_net.snap.lastRemoteHash = rit->second;
-    if (lit->second != rit->second && !g_net.snap.desyncDetected) {
-        g_net.snap.desyncDetected = true;
-        g_net.snap.desyncFrame = f;
+    if (lit->second != rit->second) {
+        if (!g_net.snap.desyncDetected || (f % 120) == 0) {
+          g_net.snap.desyncDetected = true;
+          g_net.snap.desyncFrame = f;
         LOG_ERROR("[netplay] DESYNC DETECTED at matchFrame=%llu local=%016llx remote=%016llx",
                   static_cast<unsigned long long>(f),
                   static_cast<unsigned long long>(lit->second),
                   static_cast<unsigned long long>(rit->second));
+          g_net.snap.phase = SessionPhase::Error;
+          g_net.snap.errorText = "Simulation mismatch. Leave the room and start a new match.";
+          g_net.snap.statusText = g_net.snap.errorText;
+        }
     } else if ((f % 120) == 0) {
         LOG_INFO("[netplay] frame=%llu mode=%s rtt=%.1fms jitter=%.1fms hash=%016llx sync=OK",
                  static_cast<unsigned long long>(f),
@@ -526,11 +635,18 @@ void PumpUdpRxLocked() {
     for (int iter = 0; iter < 64; ++iter) {
         sockaddr_in from{};
         int fromLen = sizeof(from);
-        int n = recvfrom(g_net.udpSock, reinterpret_cast<char*>(buf), sizeof(buf), 0,
+        std::vector<uint8_t> wsPacket;
+        const bool viaWebSocket = g_net.websocketRelay && g_net.websocket.Receive(wsPacket);
+        int n;
+        if (viaWebSocket) {
+            n = static_cast<int>(wsPacket.size());
+            if (n > sizeof(buf)) continue;
+            std::memcpy(buf, wsPacket.data(), n);
+        } else n = recvfrom(g_net.udpSock, reinterpret_cast<char*>(buf), sizeof(buf), 0,
                          reinterpret_cast<sockaddr*>(&from), &fromLen);
         if (n <= 0) break;
 
-        bool cameFromRelay = false;
+        bool cameFromRelay = viaWebSocket;
         const uint8_t* pkt = buf;
         size_t pktLen = static_cast<size_t>(n);
         if (pktLen > 10 && pkt[0] == kPktRelayEnvelope) {
@@ -551,11 +667,21 @@ void PumpUdpRxLocked() {
         if (!OpenPacket(g_net.sessionKey, pkt, pktLen, sizeof(WireAad), nonce, plain)) {
             continue;  // Failed HMAC authentication
         }
+        if (nonce > g_net.peerNonceHigh) {
+            const uint64_t shift = nonce - g_net.peerNonceHigh;
+            g_net.peerNonceMask = shift >= 64 ? 1 : ((g_net.peerNonceMask << shift) | 1);
+            g_net.peerNonceHigh = nonce;
+        } else {
+            const uint64_t age = g_net.peerNonceHigh - nonce;
+            if (age >= 64 || (g_net.peerNonceMask & (1ULL << age))) continue;
+            g_net.peerNonceMask |= 1ULL << age;
+        }
 
         ++g_net.snap.packetsReceived;
         g_net.lastRxUsec = MonoUsec();
 
         if (!cameFromRelay && !g_net.forceRelay) {
+            g_net.lastDirectRxUsec = MonoUsec();
             g_net.directEstablished = true;
             g_net.activePeerAddr = from;
             g_net.snap.transport = TransportMode::DirectP2P;
@@ -619,8 +745,9 @@ void PumpUdpRxLocked() {
                 g_net.peerAckedBarrier = true;
 
                 const uint8_t count = std::min<uint8_t>(ip.historyCount, 16);
+                if (!count || ip.latestFrame > g_net.matchFrame + 64) break;
                 for (uint8_t k = 0; k < count; ++k) {
-                    if (ip.latestFrame >= k) {
+                    if (ip.latestFrame >= k && ip.latestFrame - k + 64 >= g_net.matchFrame) {
                         g_net.remoteInputs[ip.latestFrame - k] = ip.buttonsHistory[k];
                     }
                 }
@@ -662,11 +789,32 @@ void SendInputPacketForFrameLocked(uint64_t targetFrame, bool includeHash, uint6
     SendSealedPeerPacketLocked(kPktInput, &ip, sizeof(ip));
 }
 
-bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
+bool NetplayStepCallbackImpl(uint64_t simFrame, uint32_t localButtons,
                              uint32_t& outP1Buttons, uint32_t& outP2Buttons,
                              uint32_t& ioRandState) {
     std::unique_lock<std::mutex> lk(g_net.mtx);
     PumpUdpRxLocked();
+    if (g_net.snap.phase == SessionPhase::InMatch && g_net.websocketRelay &&
+        !g_net.websocket.Connected() && !g_net.websocket.Error().empty() && !g_net.directEstablished) {
+        g_net.snap.phase = SessionPhase::Disconnected;
+        g_net.snap.statusText = g_net.websocket.Error();
+    }
+    bool shownDisconnect = false;
+    while ((g_net.snap.phase == SessionPhase::Error || g_net.snap.phase == SessionPhase::Disconnected) &&
+           !ps4::IsQuitRequested()) {
+        if (g_net.autoExitOnDisconnect) {
+            LOG_INFO("[netplay] match stopped: %s", g_net.snap.statusText.c_str());
+            ps4::RequestQuit(); break;
+        }
+        if (!shownDisconnect) { ps4::ui::OpenOverlayTab(4); shownDisconnect = true; }
+        lk.unlock();
+        gnm::PresentCachedFrame(ps4::GameWindow());
+        MSG message;
+        while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&message); DispatchMessageW(&message);
+        }
+        Sleep(10); lk.lock();
+    }
 
     if (g_net.snap.phase == SessionPhase::ConnectingTransport) {
         const uint64_t now = MonoUsec();
@@ -730,25 +878,55 @@ bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
         }
     }
 
-    if (g_net.snap.phase != SessionPhase::InMatch) {
+    if (g_net.snap.phase != SessionPhase::InMatch || ps4::IsQuitRequested()) {
         return false;
     }
 
     const uint64_t f = g_net.matchFrame;
+    ioRandState = g_net.matchSeed ^ static_cast<uint32_t>(f * 0x9e3779b9ULL);
+    if (f == 0 || f == 30 || (f % 300) == 0)
+        LOG_INFO("[netplay] input frame=%llu submit=%llu room=%s", f, simFrame, ps4::CurrentRoom().c_str());
     const uint32_t delay = static_cast<uint32_t>(std::clamp(g_net.snap.inputDelayFrames, 1, 8));
 
     // Deterministic stage-selection macro on frames 0..150 inside rLevelSelect so
     // both peers enter the exact chosen stage on the exact same simulation frame.
     uint32_t effectiveLocal = localButtons;
-    if (f < 160) {
+    if (g_net.bootNavigating) {
+        effectiveLocal = 0;
+        if (ps4::CurrentRoom() == "rLevelSelect") {
+            g_net.bootNavigating = false;
+            g_net.stageSelectionStart = f;
+            LOG_INFO("[netplay] deterministic boot reached stage selection at frame=%llu", f);
+        } else if (g_net.snap.isHost && (f % 50) < 8) effectiveLocal = 0x4000u;
+    }
+    const uint64_t stageFrame = f - g_net.stageSelectionStart;
+    if (!g_net.bootNavigating && stageFrame < 130) {
         effectiveLocal = 0;
         if (g_net.snap.isHost) {
             const int stg = g_net.snap.stageIndex;
-            if (stg == 3 && f >= 15 && f < 23) effectiveLocal = 0x0040u;        // Down -> Wilds
-            else if (stg == 1 && ((f >= 15 && f < 23) || (f >= 60 && f < 68)))  // Down x2 -> Mines
+            if (stg == 3 && stageFrame >= 15 && stageFrame < 23) effectiveLocal = 0x0040u;
+            else if (stg == 1 && ((stageFrame >= 15 && stageFrame < 23) || (stageFrame >= 60 && stageFrame < 68)))
                 effectiveLocal = 0x0040u;
-            else if (stg == 2 && f >= 15 && f < 23) effectiveLocal = 0x0010u;   // Up -> Clouds
-            if (f >= 115 && f < 125) effectiveLocal = 0x4000u;                  // Cross -> Start Match!
+            else if (stg == 2 && stageFrame >= 15 && stageFrame < 23) effectiveLocal = 0x0010u;
+            if (stageFrame >= 115 && stageFrame < 125) effectiveLocal = 0x4000u;
+        }
+    }
+    // Test-only controls expressed relative to the original match-start event,
+    // including negotiated delay. They exercise real input, never mutate actors.
+    if (g_net.qaCombat && g_net.gameStartSubmit != UINT64_MAX) {
+        const uint64_t c = simFrame + delay - g_net.gameStartSubmit;
+        effectiveLocal = 0;
+        auto held = [c](uint64_t start, uint64_t length) { return c >= start && c < start + length; };
+        if (g_net.snap.isHost) {
+            if (held(40, 35)) effectiveLocal |= 0x0040;
+            if (held(80, 20)) effectiveLocal |= 0x0010;
+            if (held(90, 8)) effectiveLocal |= 0x8000;
+            if (held(115, 2200)) effectiveLocal |= 0x0020;
+            if (c >= 200 && c < 2200 && (c - 200) % 95 < 12) effectiveLocal |= 0x4000;
+        } else {
+            if (held(40, 20)) effectiveLocal |= 0x0010;
+            if (held(50, 8)) effectiveLocal |= 0x8000;
+            if (held(135, 2200)) effectiveLocal |= 0x0080;
         }
     }
 
@@ -757,8 +935,8 @@ bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
 
     bool sendHash = false;
     uint64_t curHash = 0;
-    if (f > 0 && (f % 30) == 0) {
-        curHash = ps4::ComputeGuestStateHash();
+    if (f > 0 && (f % 30) == 0 && !g_net.bootNavigating && stageFrame >= 160) {
+        curHash = ps4::ComputeGuestStateHash(f);
         g_net.localStateHashes[f] = curHash;
         VerifyHashesForFrameLocked(f);
         sendHash = true;
@@ -770,6 +948,7 @@ bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
     // Wait for remote input for frame `f`, pumping UDP RX & retransmitting every 4 ms.
     const uint64_t waitStart = MonoUsec();
     uint64_t lastRetx = waitStart;
+    uint64_t lastWaitingPresent = waitStart;
     while (g_net.remoteInputs.find(f) == g_net.remoteInputs.end()) {
         PumpUdpRxLocked();
         if (g_net.remoteInputs.find(f) != g_net.remoteInputs.end()) break;
@@ -786,11 +965,15 @@ bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
             return false;
         }
         if (now - lastRetx >= 4000ULL) {
+            g_net.stalled = now - waitStart > 80000ULL;
             SendInputPacketForFrameLocked(futureFrame, sendHash, f, curHash);
             FlushTxQueueLocked();
             lastRetx = now;
         }
         lk.unlock();
+        if (now - lastWaitingPresent >= 16000ULL) {
+            gnm::PresentCachedFrame(ps4::GameWindow()); lastWaitingPresent = now;
+        }
         MSG msg;
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
             TranslateMessage(&msg);
@@ -799,6 +982,7 @@ bool NetplayStepCallbackImpl(uint64_t /*simFrame*/, uint32_t localButtons,
         Sleep(1);
         lk.lock();
     }
+    g_net.stalled = false;
 
     const uint32_t myInput = g_net.localInputs[f];
     const uint32_t peerInput = g_net.remoteInputs[f];
@@ -842,6 +1026,8 @@ void ApplyRoomStateFromJsonLocked(const std::string& resp) {
     }
 
     int64_t pCount = 1, stageIdx = 0, relayPort = 27881;
+    int64_t agreedDelay = 3;
+    if (JsonGetInt(resp, "inputDelayFrames", agreedDelay)) g_net.snap.inputDelayFrames = std::clamp<int>(static_cast<int>(agreedDelay), 1, 8);
     if (JsonGetInt(resp, "playerCount", pCount)) g_net.snap.playerCount = static_cast<int>(pCount);
     if (JsonGetInt(resp, "stageIndex", stageIdx)) g_net.snap.stageIndex = static_cast<int>(stageIdx);
     if (JsonGetInt(resp, "relayUdpPort", relayPort) && relayPort > 0 && relayPort <= 65535)
@@ -855,6 +1041,13 @@ void ApplyRoomStateFromJsonLocked(const std::string& resp) {
     std::string keyHex;
     if (JsonGetStr(resp, "sessionKey", keyHex) && keyHex.size() == 64) {
         if (HexToBytes(keyHex, g_net.sessionKey, 32)) g_net.hasSessionKey = true;
+    }
+    std::string relayTransport;
+    if (JsonGetStr(resp, "relayTransport", relayTransport) && relayTransport == "websocket") {
+        if (!g_net.websocketRelay) {
+            g_net.websocketRelay = true;
+            g_net.websocket.Start(core::CurrentSettings().lobbyServerUrl, g_net.snap.roomId, g_net.authToken);
+        }
     }
 
     // Configure relay UDP sockaddr
@@ -871,7 +1064,7 @@ void ApplyRoomStateFromJsonLocked(const std::string& resp) {
     std::string peerPubIp, peerLanIp;
     int64_t peerPubPort = 0, peerLanPort = 0;
     if (JsonGetStr(resp, "peerPublicIp", peerPubIp) && JsonGetInt(resp, "peerPublicPort", peerPubPort) &&
-        !peerPubIp.empty() && peerPubPort > 0) {
+        !peerPubIp.empty() && peerPubPort > 0 && peerPubPort <= 65535) {
         sockaddr_in pa{};
         pa.sin_family = AF_INET;
         pa.sin_port = htons(static_cast<uint16_t>(peerPubPort));
@@ -881,7 +1074,7 @@ void ApplyRoomStateFromJsonLocked(const std::string& resp) {
         }
     }
     if (JsonGetStr(resp, "peerLanIp", peerLanIp) && JsonGetInt(resp, "peerLanPort", peerLanPort) &&
-        !peerLanIp.empty() && peerLanPort > 0) {
+        !peerLanIp.empty() && peerLanPort > 0 && peerLanPort <= 65535) {
         sockaddr_in la{};
         la.sin_family = AF_INET;
         la.sin_port = htons(static_cast<uint16_t>(peerLanPort));
@@ -912,6 +1105,11 @@ void ApplyRoomStateFromJsonLocked(const std::string& resp) {
 
     if (roomStatus == "in_match" && g_net.snap.phase == SessionPhase::LobbyWaiting &&
         g_net.hasSessionKey) {
+        if (!g_net.resumed) {
+            g_net.restartPending = true;
+            g_net.snap.statusText = "Starting a clean synchronized game...";
+            return;
+        }
         g_net.snap.phase = SessionPhase::ConnectingTransport;
         g_net.snap.transport = g_net.forceRelay ? TransportMode::RelayFallback
                                                 : TransportMode::PunchingP2P;
@@ -950,6 +1148,8 @@ void CheckEnvSimConfigLocked() {
     g_net.simJitterMs = std::max(0, envInt("NIDHOGG_NET_SIM_JITTER_MS", 0));
     g_net.simLossPct = std::clamp(envInt("NIDHOGG_NET_SIM_LOSS_PCT", 0), 0, 90);
     g_net.forceRelay = envInt("NIDHOGG_FORCE_RELAY", 0) != 0;
+    g_net.autoExitOnDisconnect = envInt("NIDHOGG_NET_AUTO_EXIT", 0) != 0;
+    g_net.qaCombat = envInt("NIDHOGG_NET_QA_COMBAT", 0) != 0;
 }
 
 }  // namespace
@@ -963,8 +1163,57 @@ void InitNetplay() {
     g_net.initialized = true;
 }
 
+bool ResumeOnlineSession() {
+    char* value = nullptr; size_t size = 0;
+    if (_dupenv_s(&value, &size, "NIDHOGG_NET_RESUME") != 0 || !value) return true;
+    std::string metadata(value); std::free(value); _putenv_s("NIDHOGG_NET_RESUME", "");
+    _putenv_s("NIDHOGG_OPEN_ONLINE", ""); _putenv_s("NIDHOGG_OPEN_SETTINGS", "");
+    std::string room, token; bool host = false;
+    if (!JsonGetStr(metadata, "roomId", room) || !JsonGetStr(metadata, "authToken", token) ||
+        !JsonGetBool(metadata, "isHost", host)) return false;
+    InitNetplay();
+    int status = 0; std::string response, error;
+    if (!HttpRequestJson("POST", "/api/rooms/heartbeat", "{\"roomId\":\"" + JsonEsc(room) +
+        "\",\"authToken\":\"" + JsonEsc(token) + "\"}", status, response, error) || status != 200) {
+        LOG_ERROR("[netplay] cannot resume room (HTTP %d): %s", status, error.c_str()); return false;
+    }
+    std::unique_lock lk(g_net.mtx);
+    int64_t originalPort = 0;
+    if (JsonGetInt(metadata, "udpPort", originalPort) && originalPort > 0 && originalPort <= 65535)
+        g_net.localUdpPort = static_cast<uint16_t>(originalPort);
+    if (!EnsureUdpSocketLocked()) return false;
+    lk.unlock(); DiscoverPublicEndpoint(); lk.lock();
+    g_net.resumed = true; g_net.cliHandled = true;
+    g_net.authToken = token;
+    g_net.snap.isHost = host; g_net.snap.localPlayerNum = host ? 1 : 2;
+    g_net.snap.phase = SessionPhase::InMatch;
+    g_net.snap.transport = TransportMode::RelayFallback;
+    g_net.snap.inputDelayFrames = 3; // Identical negotiated value for both peers.
+    g_net.snap.statusText = "Starting synchronized game...";
+    ApplyRoomStateFromJsonLocked(response);
+    if (!g_net.hasSessionKey) return false;
+    g_net.bootNavigating = true;
+    for (int f = 0; f < g_net.snap.inputDelayFrames; ++f) {
+        g_net.localInputs[f] = 0; g_net.remoteInputs[f] = 0;
+    }
+    ps4::BeginDeterministicSession(g_net.matchSeed);
+    ps4::SetNetplayStepCallback(&NetplayStepCallbackImpl);
+    LOG_INFO("[netplay] BARRIER SYNCED -> deterministic boot (seed=0x%08x, role=%s)",
+        g_net.matchSeed, host ? "host" : "guest");
+    return true;
+}
+
+void NotifyOriginalMatchStart(uint64_t submittedFrame) {
+    std::scoped_lock lk(g_net.mtx);
+    if (g_net.resumed) g_net.gameStartSubmit = submittedFrame;
+}
+
 void ShutdownNetplay() {
-    LeaveRoom();
+    if (g_heartbeat.valid()) g_heartbeat.wait();
+    LOG_INFO("[netplay] summary frames=%llu checks=%llu desync=%d",
+        g_net.snap.matchFrame, g_net.snap.stateChecks, g_net.snap.desyncDetected ? 1 : 0);
+    if (!g_net.handingOff) LeaveRoom();
+    else g_net.websocket.Stop();
     std::scoped_lock lk(g_net.mtx);
     if (g_net.udpSock != INVALID_SOCKET) {
         closesocket(g_net.udpSock);
@@ -1043,6 +1292,7 @@ bool CreateRoom(const std::string& roomName, bool isPublic, int stageIndex, std:
         lanIp = g_net.localLanIp;
     }
 
+    DiscoverPublicEndpoint();
     const auto& cfg = core::CurrentSettings();
     const std::string rName = roomName.empty() ? (cfg.playerName + "'s Arena") : roomName;
     std::ostringstream body;
@@ -1051,6 +1301,7 @@ bool CreateRoom(const std::string& roomName, bool isPublic, int stageIndex, std:
          << "\"region\":\"" << JsonEsc(cfg.region) << "\","
          << "\"isPublic\":" << (isPublic ? "true" : "false") << ","
          << "\"stageIndex\":" << stageIndex << ","
+         << "\"inputDelayFrames\":" << cfg.inputDelayFrames << ","
          << "\"lanIp\":\"" << JsonEsc(lanIp) << "\","
          << "\"lanPort\":" << udpPort << "}";
 
@@ -1095,6 +1346,7 @@ bool JoinRoomById(const std::string& roomId, std::string& outError) {
         lanIp = g_net.localLanIp;
     }
 
+    DiscoverPublicEndpoint();
     const auto& cfg = core::CurrentSettings();
     std::ostringstream body;
     body << "{\"roomId\":\"" << JsonEsc(roomId) << "\","
@@ -1151,6 +1403,7 @@ bool JoinRoomByCode(const std::string& roomCode, std::string& outError) {
         lanIp = g_net.localLanIp;
     }
 
+    DiscoverPublicEndpoint();
     const auto& cfg = core::CurrentSettings();
     std::ostringstream body;
     body << "{\"roomCode\":\"" << JsonEsc(cleanCode) << "\","
@@ -1199,6 +1452,7 @@ bool QuickMatch(const std::string& preferredRegion, bool& outNoRoomsAvailable,
         lanIp = g_net.localLanIp;
     }
 
+    DiscoverPublicEndpoint();
     const auto& cfg = core::CurrentSettings();
     std::ostringstream body;
     body << "{\"region\":\"" << JsonEsc(preferredRegion.empty() ? cfg.region : preferredRegion) << "\","
@@ -1371,6 +1625,9 @@ void LeaveRoom() {
         g_net.authToken.clear();
         g_net.sessionId = 0;
         g_net.hasSessionKey = false;
+        g_net.peerNonceHigh = 0; g_net.peerNonceMask = 0;
+        g_net.websocket.Stop();
+        g_net.websocketRelay = false;
         g_net.directEstablished = false;
         g_net.hasPeerPublic = false;
         g_net.hasPeerLan = false;
@@ -1452,7 +1709,7 @@ void TickNetplayLobby() {
         if (!err.empty()) LOG_WARN("[netplay-auto] mode=%s err=%s", mode.c_str(), err.c_str());
     }
 
-    std::string roomId, token;
+    std::string roomId, token, heartbeatBody;
     bool shouldPoll = false;
     bool autoStartReady = false;
     {
@@ -1467,20 +1724,28 @@ void TickNetplayLobby() {
             g_net.lastHeartbeatUsec = now;
             roomId = g_net.snap.roomId;
             token = g_net.authToken;
+            heartbeatBody = "{\"roomId\":\"" + JsonEsc(roomId) + "\",\"authToken\":\"" + JsonEsc(token) +
+                "\",\"lanIp\":\"" + g_net.localLanIp + "\",\"lanPort\":" + std::to_string(g_net.localUdpPort) +
+                ",\"publicIp\":\"" + g_net.publicIp + "\",\"publicPort\":" + std::to_string(g_net.publicPort) + "}";
             shouldPoll = true;
         }
     }
 
-    if (shouldPoll) {
-        std::ostringstream body;
-        body << "{\"roomId\":\"" << JsonEsc(roomId) << "\",\"authToken\":\"" << JsonEsc(token) << "\"}";
-        int status = 0;
-        std::string resp, err;
-        if (HttpRequestJson("POST", "/api/rooms/heartbeat", body.str(), status, resp, err) &&
-            status == 200) {
+    if (shouldPoll && !g_heartbeat.valid()) {
+        g_heartbeat = std::async(std::launch::async, [roomId, heartbeatBody] {
+            HeartbeatResult result; result.roomId = roomId;
+            result.ok = HttpRequestJson("POST", "/api/rooms/heartbeat", heartbeatBody,
+                result.status, result.response, result.error);
+            return result;
+        });
+    }
+    if (g_heartbeat.valid() && g_heartbeat.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+        const auto result = g_heartbeat.get();
+        roomId = result.roomId;
+        if (result.ok && result.status == 200) {
             std::scoped_lock lk(g_net.mtx);
             if (g_net.snap.roomId == roomId) {
-                ApplyRoomStateFromJsonLocked(resp);
+                ApplyRoomStateFromJsonLocked(result.response);
                 if (g_net.snap.phase == SessionPhase::LobbyWaiting) {
                     SendRegisterEndpointToRelayLocked();
                     if (g_net.cliAutoStart && g_net.snap.isHost && g_net.snap.remoteConnected &&
@@ -1489,9 +1754,9 @@ void TickNetplayLobby() {
                     }
                 }
             }
-        } else if (status == 404 || status == 403) {
+        } else if (result.status == 404 || result.status == 403) {
             std::scoped_lock lk(g_net.mtx);
-            if (g_net.snap.phase == SessionPhase::LobbyWaiting) {
+            if (g_net.snap.roomId == roomId && g_net.snap.phase == SessionPhase::LobbyWaiting) {
                 g_net.snap.phase = SessionPhase::Disconnected;
                 g_net.snap.statusText = "Room expired or closed.";
                 g_net.authToken.clear();
@@ -1504,6 +1769,7 @@ void TickNetplayLobby() {
         SetReady(true, err);
         StartMatch(err);
     }
+    RestartAtDeterministicBoot();
 }
 
 NetStatsSnapshot GetSnapshot() {

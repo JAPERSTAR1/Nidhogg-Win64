@@ -36,16 +36,17 @@ thread_local uint64_t g_lastRet = 0;
 uint64_t g_base = 0;
 DWORD g_simThreadId = 0;
 uint32_t g_simRandState = 0x13579BDFu;
+uint32_t g_onlineMatchSeed = 0;
 std::atomic<bool> g_quitRequested{false};
 std::atomic<bool> g_shutDownDone{false};
 uint64_t g_maxFrames = 0;
 bool g_qaUnfocused = false;
-NetplayStepFn g_netplayStep = nullptr;
+std::atomic<NetplayStepFn> g_netplayStep{nullptr};
 std::atomic<bool> g_netplayClockLock{false};
 std::atomic<uint64_t> g_netplaySimFrame{0};
 uint32_t g_netplayP1Buttons = 0;
 uint32_t g_netplayP2Buttons = 0;
-uint64_t g_netplaySyncedFrame = UINT64_MAX;
+std::atomic<uint64_t> g_netplaySyncedFrame{UINT64_MAX};
 std::mutex g_roomMtx;
 std::string g_currentRoom = "boot";
 std::string g_app0Override;
@@ -508,6 +509,12 @@ void Emit(const char* text, size_t len) {
     const char* tag = "Created room ";
     const size_t tagLen = 13;
     std::string sv(text, len);
+    if (g_netplayClockLock.load() && sv.find("match start") != std::string::npos) {
+        *reinterpret_cast<uint32_t*>(g_base + 0x1f0068) = g_onlineMatchSeed;
+        g_simRandState = g_onlineMatchSeed;
+        net::NotifyOriginalMatchStart(SubmittedFrames());
+        LOG_INFO("[netplay] original match-start event: synchronized native PRNG seed=%08x", g_onlineMatchSeed);
+    }
     size_t pos = sv.find(tag);
     if (pos != std::string::npos) {
         pos += tagLen;
@@ -1035,6 +1042,7 @@ void HleShutdown() {
             }
         }
     }
+    ui::FinishOnlineActions();
     net::ShutdownNetplay();
     audio::ShutdownAudio();
     gnm::ShutdownRenderer();
@@ -1055,7 +1063,7 @@ std::string CurrentRoom() {
     return g_currentRoom;
 }
 
-uint64_t ComputeGuestStateHash() {
+uint64_t ComputeGuestStateHash(uint64_t matchFrame) {
     if (!g_base) return 0;
     uint64_t h = 1469598103934665603ULL;
     auto mixBytes = [&](const void* data, size_t len) {
@@ -1069,11 +1077,20 @@ uint64_t ComputeGuestStateHash() {
     // Room index (+0x3e22b0) and guest LCG state (+0x1f0068)
     if (Readable(reinterpret_cast<void*>(g_base + 0x3e22b0), 4))
         mixBytes(reinterpret_cast<const void*>(g_base + 0x3e22b0), 4);
-    mixBytes(&g_simRandState, sizeof(g_simRandState));
+    mixBytes(reinterpret_cast<const void*>(g_base + 0x1f0068), 4);
 
     // Walk active FOCAL/GameMaker entity list (+0x3e2230): hash relative vtable
     // and deterministic non-pointer simulation fields [+0x80..+0x124].
     uint32_t entityCount = 0;
+    std::FILE* dump = nullptr;
+    char* trace = nullptr; size_t traceLen = 0;
+    if (_dupenv_s(&trace, &traceLen, "NIDHOGG_NET_DUMP") == 0 && trace && *trace == '1' &&
+        (matchFrame == 30 || (matchFrame % 300) == 0)) {
+        dump = core::FopenUtf8(core::LogsDirPath() + "\\state-" + std::to_string(matchFrame) + ".txt", "wb");
+        if (dump) std::fprintf(dump, "room=%s rand=%08x native=%08x start=%08x\n", CurrentRoom().c_str(), g_simRandState,
+            *reinterpret_cast<uint32_t*>(g_base + 0x1f0068), *reinterpret_cast<uint32_t*>(g_base + 0x3e3160));
+    }
+    if (trace) std::free(trace);
     if (Readable(reinterpret_cast<void*>(g_base + 0x3e2230), 8)) {
         uint64_t ent = *reinterpret_cast<const uint64_t*>(g_base + 0x3e2230);
         while (ent && entityCount < 2048 && Readable(reinterpret_cast<void*>(ent), 0x128)) {
@@ -1081,14 +1098,31 @@ uint64_t ComputeGuestStateHash() {
             if (eb[0x9b] == 0) {  // not marked destroyed
                 const uint64_t vt = *reinterpret_cast<const uint64_t*>(eb);
                 const uint64_t relVt = (vt >= g_base) ? (vt - g_base) : vt;
+                if (dump) {
+                    std::fprintf(dump, "%u vt=%llx", entityCount, static_cast<unsigned long long>(relVt));
+                    for (size_t offset = 0x10; offset < 0x128; offset += 4)
+                        std::fprintf(dump, " %03zx:%08x", offset, *reinterpret_cast<const uint32_t*>(eb + offset));
+                    std::fputc('\n', dump);
+                }
                 mixBytes(&relVt, sizeof(relVt));
-                mixBytes(eb + 0x80, 0xA4);  // positions, velocities, alarms, sprite, angles
+                // The old bulk hash included pointers (+0x88), padding (+0x84,
+                // +0x9e, +0xdc, +0x124) and uninitialized allocator bytes.
+                mixBytes(eb + 0x80, 1);
+                mixBytes(eb + 0x98, 6); // colour and flags; +0x90 is another owned pointer
+                for (size_t offset = 0xa0; offset < 0xd0; offset += 4) {
+                    const int32_t value = *reinterpret_cast<const int32_t*>(eb + offset);
+                    const int32_t alarm = value < 0 ? -1 : value;
+                    mixBytes(&alarm, sizeof(alarm));
+                }
+                mixBytes(eb + 0xd0, 0x0c); // depth and x/y
+                mixBytes(eb + 0xe0, 0x44); // previous x/y, motion and sprite state
                 ++entityCount;
             }
             ent = *reinterpret_cast<const uint64_t*>(eb + 0x08);
         }
     }
     mixBytes(&entityCount, sizeof(entityCount));
+    if (dump) std::fclose(dump);
     return h;
 }
 
@@ -1096,6 +1130,14 @@ void SetNetplayStepCallback(NetplayStepFn fn) {
     g_netplayStep = fn;
     g_netplaySyncedFrame = UINT64_MAX;
     if (!fn) g_netplayClockLock.store(false, std::memory_order_relaxed);
+}
+
+void BeginDeterministicSession(uint32_t seed) {
+    g_onlineMatchSeed = seed;
+    g_simRandState = seed;
+    g_netplayClockLock.store(true);
+    g_netplaySimFrame.store(0);
+    if (g_base) *reinterpret_cast<uint32_t*>(g_base + 0x1f0068) = seed;
 }
 
 // ------------------------------------------------------------------ names --
@@ -1400,6 +1442,11 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                        static_cast<size_t>(r.gpr[2]), r.gpr[3]);
             return 0;
         case 153: {
+            // Native match-start code obtains a seed here, stores it at +0x3e3160,
+            // then calls its own srand at +0x70e6e. Preserve that path with the
+            // lobby's agreed seed, independent of cosmetic CRT rand() calls.
+            if (g_netplayClockLock.load() && (ret - g_base == 0x70c09 || ret - g_base == 0x70d9c))
+                return g_onlineMatchSeed;
             if (GetCurrentThreadId() == g_simThreadId) {
                 g_simRandState = g_simRandState * 214013u + 2531011u;
                 return static_cast<uint64_t>((g_simRandState >> 16) & 0x7fffu);
@@ -1663,22 +1710,22 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             uint8_t lx = 0x80, ly = 0x80, rx = 0x80, ry = 0x80;
             uint32_t buttons = ReadLocalPlayerButtons(handle, lx, ly, rx, ry);
 
-            if (g_netplayStep) {
+            if (const auto netplayStep = g_netplayStep.load()) {
                 if (g_netplaySyncedFrame != g_submits) {
                     uint8_t dummyLx, dummyLy, dummyRx, dummyRy;
                     const uint32_t localP1 = (handle == 1)
                         ? buttons
                         : ReadLocalPlayerButtons(1, dummyLx, dummyLy, dummyRx, dummyRy);
                     uint32_t syncedP1 = 0, syncedP2 = 0;
-                    if (g_netplayStep(g_submits, localP1, syncedP1, syncedP2, g_simRandState)) {
+                    if (netplayStep(g_submits, localP1, syncedP1, syncedP2, g_simRandState)) {
                         g_netplayClockLock.store(true, std::memory_order_relaxed);
                         g_netplaySimFrame.store(g_submits, std::memory_order_relaxed);
                         g_netplayP1Buttons = syncedP1;
                         g_netplayP2Buttons = syncedP2;
                         g_netplaySyncedFrame = g_submits;
-                        if (g_base && Readable(reinterpret_cast<void*>(g_base + 0x1f0068), 4)) {
-                            *reinterpret_cast<uint32_t*>(g_base + 0x1f0068) = g_simRandState;
-                        }
+                        // The game has a separate simulation PRNG at +0x1f0068.
+                        // Never overwrite it with CRT rand(): draw events use that
+                        // stream for cosmetics (+0x3e226c in guest random helpers).
                     } else {
                         g_netplayClockLock.store(false, std::memory_order_relaxed);
                     }

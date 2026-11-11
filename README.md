@@ -1,5 +1,15 @@
 # nidhogg-port
 
+Current Windows multiplayer work (2026-11-12): see
+[deployment and operation](docs/MULTIPLAYER.md) and
+[verification status](docs/NETWORK-VERIFICATION.md). Both original guests have
+completed matching local and public-tunnel matches; separate physical networks
+and the permanent `lobby.japer.me` deployment remain unverified/blocked.
+Build `port/build.ps1`; player GUI `port/out/Nidhogg.exe`.
+
+The initial extraction notes below are historical; their "State" table does not
+describe the current rendering/audio/runtime implementation.
+
 Native Windows x64 port work for **Nidhogg** (PS4, `UP2143-CUSA00920`, v1.00).
 
 Source dump: `C:\Users\puy12\Downloads\g\CUSA00920`.
