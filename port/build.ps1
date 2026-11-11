@@ -24,8 +24,12 @@ if ($Target -eq "clean") {
 
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 
-$src = Get-ChildItem (Join-Path $root "src") -Recurse -Filter *.cpp | ForEach-Object { '"' + $_.FullName + '"' }
-$cmd = "call `"$vcvars`" >nul && cl /nologo /std:c++20 /EHsc /O2 /W4 /WX- /Fe:`"$out\nidhogg_host.exe`" /Fo:`"$out\\`" $($src -join ' ') /link /SUBSYSTEM:CONSOLE user32.lib gdi32.lib ole32.lib windowscodecs.lib xinput.lib d3d11.lib d3dcompiler.lib dxgi.lib"
+New-Item -ItemType Directory -Force -Path (Join-Path $out "c") | Out-Null
+$cpp = Get-ChildItem (Join-Path $root "src") -Recurse -Filter *.cpp | ForEach-Object { '"' + $_.FullName + '"' }
+$csrc = Get-ChildItem (Join-Path $root "src") -Recurse -Filter *.c | ForEach-Object { '"' + $_.FullName + '"' }
+$cStep = if ($csrc) { "cl /nologo /c /TC /O2 /W0 /Fo:`"$out\c\\`" $($csrc -join ' ') && " } else { "" }
+$objs = if ($csrc) { "`"$out\c\*.obj`"" } else { "" }
+$cmd = "call `"$vcvars`" >nul && ${cStep}cl /nologo /std:c++20 /EHsc /O2 /W4 /WX- /Fe:`"$out\nidhogg_host.exe`" /Fo:`"$out\\`" $($cpp -join ' ') $objs /link /SUBSYSTEM:CONSOLE user32.lib gdi32.lib ole32.lib windowscodecs.lib xinput.lib winmm.lib d3d11.lib d3dcompiler.lib dxgi.lib"
 Write-Host "building..." -ForegroundColor DarkGray
 cmd /c $cmd
 if ($LASTEXITCODE -ne 0) { throw "build failed ($LASTEXITCODE)" }

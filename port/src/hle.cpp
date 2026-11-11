@@ -1,5 +1,6 @@
 #include "hle.h"
 
+#include "audio/ngs2.h"
 #include "gnm/d3d11.h"
 #include "gnm/pm4.h"
 
@@ -901,7 +902,9 @@ const char* SlotName(uint32_t s) {
         case 134: return "sceSaveDataLoadIcon";
         case 135: return "sceKernelStat";
         case 136: return "sceKernelRead";
+        case 137: return "sceFiosInitialize";
         case 138: return "strrchr";
+        case 139: return "_FLog";
         case 140: return "pthread_attr_init";
         case 141: return "pthread_attr_setdetachstate";
         case 142: return "pthread_create";
@@ -920,18 +923,51 @@ const char* SlotName(uint32_t s) {
         case 155: return "strstr";
         case 156: return "fmod";
         case 157: return "strncmp";
+        case 222: return "scePthreadCreate";
+        case 223: return "scePthreadExit";
+        case 224: return "scePthreadJoin";
+        case 344: return "scePthreadCondattrInit";
+        case 345: return "scePthreadCondInit";
+        case 346: return "scePthreadCondattrDestroy";
+        case 347: return "scePthreadCondDestroy";
+        case 348: return "scePthreadCondSignal";
+        case 349: return "scePthreadCondBroadcast";
+        case 350: return "scePthreadCondTimedwait";
+        case 351: return "scePthreadCondWait";
         case 352: return "scePthreadMutexInit";
         case 353: return "scePthreadMutexDestroy";
         case 354: return "scePthreadMutexLock";
         case 355: return "scePthreadMutexUnlock";
         case 356: return "scePthreadMutexTrylock";
+        case 357: return "vsnprintf";
         case 359: return "open";
         case 360: return "lseek";
         case 361: return "read";
         case 362: return "close";
+        case 363: return "sceNgs2VoiceControl";
+        case 364: return "sceNgs2VoiceGetStateFlags";
+        case 365: return "sceNgs2VoiceGetState";
+        case 366: return "sceNgs2SystemRender";
+        case 367: return "sceNgs2SystemCreateWithAllocator";
+        case 368: return "sceNgs2RackCreateWithAllocator";
+        case 369: return "sceNgs2RackGetVoiceHandle";
+        case 372: return "sceAudioOutInit";
         case 373: return "scePthreadMutexattrInit";
         case 374: return "scePthreadMutexattrSettype";
         case 375: return "scePthreadMutexattrDestroy";
+        case 376: return "scePthreadAttrInit";
+        case 377: return "scePthreadAttrSetstacksize";
+        case 378: return "scePthreadAttrSetdetachstate";
+        case 379: return "scePthreadAttrSetschedparam";
+        case 380: return "scePthreadAttrDestroy";
+        case 381: return "sceAudioOutOpen";
+        case 382: return "sceAudioOutSetVolume";
+        case 383: return "sceNgs2RackDestroy";
+        case 384: return "sceNgs2SystemDestroy";
+        case 385: return "sceNgs2GetWaveformFrameInfo";
+        case 386: return "sceAudioOutOutputs";
+        case 387: return "scePthreadExit";
+        case 397: return "sceKernelLseek";
         case 410: return "sceKernelGetDirectMemorySize";
         case 411: return "sceKernelAllocateDirectMemory";
         case 412: return "sceKernelMapDirectMemory";
@@ -1083,6 +1119,14 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
         }
 
         // ---- libm / Dinkumware math
+        case 139: {  // _FLog(float x, int flag): flag == -1 -> log2f, 1 -> log10f, 0 -> logf
+            const float x = XmmF32(r, 0);
+            if (x <= 0.0f) return RetF32(0.0f);
+            const int32_t flag = static_cast<int32_t>(r.gpr[0]);
+            if (flag == -1) return RetF32(std::log2f(x));
+            if (flag == 1) return RetF32(std::log10f(x));
+            return RetF32(std::logf(x));
+        }
         case 110: {  // _FSin(float x, unsigned int qoff, int n)
             const float x = XmmF32(r, 0);
             float out = 0.0f;
@@ -1222,6 +1266,12 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
         case 55: {  // vsprintf(dst, fmt, va)
             auto* va = reinterpret_cast<VaList*>(r.gpr[2]);
             size_t n = FormatVa(reinterpret_cast<char*>(r.gpr[0]), 0x10000, str(1), va);
+            return n;
+        }
+        case 357: {  // vsnprintf(dst, cap, fmt, va)
+            auto* va = reinterpret_cast<VaList*>(r.gpr[3]);
+            size_t n = FormatVa(reinterpret_cast<char*>(r.gpr[0]),
+                                static_cast<size_t>(r.gpr[1]), str(2), va);
             return n;
         }
         case 115: {  // puts(s)
@@ -1424,7 +1474,8 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             std::fclose(f);
             return slot == 359 ? static_cast<uint64_t>(static_cast<int64_t>(-1)) : 0x80020018ull;
         }
-        case 360: {  // lseek(fd, offset, whence)
+        case 360:    // lseek(fd, offset, whence)
+        case 397: {  // sceKernelLseek(fd, offset, whence)
             const int fd = static_cast<int>(r.gpr[0]);
             if (fd < 3 || fd >= 64 || !g_posixFds[fd])
                 return static_cast<uint64_t>(static_cast<int64_t>(-1));
@@ -1482,14 +1533,24 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             }
             return 0;
         }
+        case 137:  // sceFiosInitialize
         case 140:
         case 141:
         case 143:
+        case 344:  // scePthreadCondattrInit
+        case 346:  // scePthreadCondattrDestroy
+        case 372:  // sceAudioOutInit
         case 373:
         case 374:
         case 375:
+        case 376:
+        case 377:
+        case 378:
+        case 379:
+        case 380:
             return 0;
-        case 142: {  // pthread_create(&thr, &attr, startRoutine, arg)
+        case 142:    // pthread_create(&thr, &attr, startRoutine, arg)
+        case 222: {  // scePthreadCreate(&thr, &attr, startRoutine, arg, name)
             struct GuestThreadArgs {
                 uint64_t entry;
                 uint64_t arg;
@@ -1497,7 +1558,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             auto* ta = new GuestThreadArgs{r.gpr[2], r.gpr[3]};
             DWORD tid = 0;
             HANDLE h = CreateThread(
-                nullptr, 1u << 20,
+                nullptr, 2u << 20,
                 [](LPVOID p) -> DWORD {
                     auto* a = static_cast<GuestThreadArgs*>(p);
                     const uint64_t entry = a->entry;
@@ -1506,11 +1567,131 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                     GetSysvCompar()(entry, reinterpret_cast<const void*>(arg), nullptr);
                     return 0;
                 },
-                ta, 0, &tid);
+                ta, CREATE_SUSPENDED, &tid);
             if (Readable(ptr(0), 8))
                 *reinterpret_cast<uint64_t*>(ptr(0)) = reinterpret_cast<uint64_t>(h);
+            if (h) ResumeThread(h);
             return 0;
         }
+        case 223:  // scePthreadExit
+        case 387:
+            ExitThread(0);
+        case 224: {  // scePthreadJoin(thr, &status)
+            HANDLE h = reinterpret_cast<HANDLE>(r.gpr[0]);
+            if (h) WaitForSingleObject(h, 2000);
+            if (Readable(ptr(1), 8)) *reinterpret_cast<uint64_t*>(ptr(1)) = 0;
+            return 0;
+        }
+        case 345: {  // scePthreadCondInit(&cond, &attr, name)
+            struct TaggedCond {
+                uint64_t magic = 0xC04D564152ULL;
+                CONDITION_VARIABLE cv{};
+            };
+            if (Readable(ptr(0), 8)) {
+                auto* tc = new TaggedCond{};
+                InitializeConditionVariable(&tc->cv);
+                *reinterpret_cast<TaggedCond**>(ptr(0)) = tc;
+            }
+            return 0;
+        }
+        case 347: {  // scePthreadCondDestroy(&cond)
+            struct TaggedCond {
+                uint64_t magic;
+                CONDITION_VARIABLE cv;
+            };
+            if (Readable(ptr(0), 8)) {
+                auto** pp = reinterpret_cast<TaggedCond**>(ptr(0));
+                if (*pp && Readable(*pp, sizeof(TaggedCond)) && (*pp)->magic == 0xC04D564152ULL) {
+                    (*pp)->magic = 0;
+                    delete *pp;
+                    *pp = nullptr;
+                }
+            }
+            return 0;
+        }
+        case 348:    // scePthreadCondSignal(&cond)
+        case 349: {  // scePthreadCondBroadcast(&cond)
+            struct TaggedCond {
+                uint64_t magic;
+                CONDITION_VARIABLE cv;
+            };
+            if (Readable(ptr(0), 8)) {
+                auto* tc = *reinterpret_cast<TaggedCond**>(ptr(0));
+                if (tc && Readable(tc, sizeof(TaggedCond)) && tc->magic == 0xC04D564152ULL)
+                    WakeAllConditionVariable(&tc->cv);
+            }
+            return 0;
+        }
+        case 350:    // scePthreadCondTimedwait(&cond, &mtx, usec)
+        case 351: {  // scePthreadCondWait(&cond, &mtx)
+            if (ret - g_base < 0xF0000) return 0;  // NpToolkit non-blocking fallback
+            struct TaggedCond {
+                uint64_t magic;
+                CONDITION_VARIABLE cv;
+            };
+            if (!Readable(ptr(0), 8) || !Readable(ptr(1), 8)) return 0;
+            auto* tc = *reinterpret_cast<TaggedCond**>(ptr(0));
+            auto* cs = *reinterpret_cast<CRITICAL_SECTION**>(ptr(1));
+            if (!tc || !cs || !Readable(tc, sizeof(TaggedCond)) || tc->magic != 0xC04D564152ULL)
+                return 0;
+            DWORD ms = 50;
+            if (slot == 350) {
+                const uint32_t us = static_cast<uint32_t>(r.gpr[2]);
+                ms = us >= 1000 ? (us / 1000) : 1;
+            }
+            if (!SleepConditionVariableCS(&tc->cv, cs, ms))
+                return slot == 350 ? 0x8002003Cull : 0;
+            return 0;
+        }
+
+        // ---- libSceNgs2 & libSceAudioOut
+        case 367:
+            return static_cast<uint64_t>(static_cast<int64_t>(
+                audio::Ngs2SystemCreate(ptr(0), ptr(1), reinterpret_cast<uint64_t*>(r.gpr[2]))));
+        case 368:
+            return static_cast<uint64_t>(static_cast<int64_t>(
+                audio::Ngs2RackCreate(r.gpr[0], static_cast<uint32_t>(r.gpr[1]), ptr(2), ptr(3),
+                                      reinterpret_cast<uint64_t*>(r.gpr[4]))));
+        case 369:
+            return static_cast<uint64_t>(static_cast<int64_t>(
+                audio::Ngs2RackGetVoiceHandle(r.gpr[0], static_cast<uint32_t>(r.gpr[1]),
+                                              reinterpret_cast<uint64_t*>(r.gpr[2]))));
+        case 363:
+            return static_cast<uint64_t>(static_cast<int64_t>(
+                audio::Ngs2VoiceControl(r.gpr[0], ptr(1))));
+        case 364:
+            return static_cast<uint64_t>(static_cast<int64_t>(
+                audio::Ngs2VoiceGetStateFlags(r.gpr[0], reinterpret_cast<uint32_t*>(r.gpr[1]))));
+        case 365:
+            return static_cast<uint64_t>(static_cast<int64_t>(
+                audio::Ngs2VoiceGetState(r.gpr[0], ptr(1), static_cast<size_t>(r.gpr[2]))));
+        case 366:
+            return static_cast<uint64_t>(static_cast<int64_t>(
+                audio::Ngs2SystemRender(r.gpr[0], ptr(1), static_cast<uint32_t>(r.gpr[2]))));
+        case 383:
+        case 384:
+            return static_cast<uint64_t>(static_cast<int64_t>(audio::Ngs2Destroy(r.gpr[0])));
+        case 385:
+            return static_cast<uint64_t>(static_cast<int64_t>(
+                audio::Ngs2GetWaveformFrameInfo(
+                    ptr(0), reinterpret_cast<uint32_t*>(r.gpr[1]),
+                    reinterpret_cast<uint32_t*>(r.gpr[2]),
+                    reinterpret_cast<uint32_t*>(r.gpr[3]),
+                    reinterpret_cast<uint32_t*>(r.gpr[4]))));
+        case 381:
+            return static_cast<uint64_t>(static_cast<int64_t>(
+                audio::AudioOutOpen(static_cast<int32_t>(r.gpr[0]), static_cast<int32_t>(r.gpr[1]),
+                                    static_cast<int32_t>(r.gpr[2]), static_cast<uint32_t>(r.gpr[3]),
+                                    static_cast<uint32_t>(r.gpr[4]),
+                                    static_cast<uint32_t>(r.gpr[5]))));
+        case 382:
+            return static_cast<uint64_t>(static_cast<int64_t>(
+                audio::AudioOutSetVolume(static_cast<int32_t>(r.gpr[0]),
+                                         static_cast<uint32_t>(r.gpr[1]),
+                                         reinterpret_cast<const int32_t*>(r.gpr[2]))));
+        case 386:
+            return static_cast<uint64_t>(static_cast<int64_t>(
+                audio::AudioOutOutputs(ptr(0), static_cast<uint32_t>(r.gpr[1]))));
         case 144: {  // usleep(usec)
             const uint32_t us = static_cast<uint32_t>(r.gpr[0]);
             if (us >= 1000) Sleep(us / 1000);
@@ -2065,11 +2246,14 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             if (first) {
                 DumpFrameState();
             } else if ((g_submits % 300) == 0) {
-                std::printf("[gnm] frame %llu: %zu draws, %llu writes, %u errors\n",
+                std::printf("[gnm] frame %llu: %zu draws, %llu writes, %u errors | [audio] mixed=%llu voices=%u peak=%.4f\n",
                             static_cast<unsigned long long>(g_submits),
                             g_machine.draws().size(),
                             static_cast<unsigned long long>(g_machine.memoryWrites()),
-                            g_machine.errors());
+                            g_machine.errors(),
+                            static_cast<unsigned long long>(audio::MixedFrames()),
+                            audio::ActiveVoices(),
+                            audio::PeakAmplitude());
 
                 // What the guest asks the platform layer for, per frame.  Slots
                 // that never appear here are not the reason a frame is static;
