@@ -74,6 +74,7 @@ struct Voice {
     bool playing = false;
     bool paused = false;
     bool keyedOff = false;
+    bool hasBlocks = false;
 
     WaveformFormat fmt{};
     void* at9 = nullptr;
@@ -384,6 +385,7 @@ int32_t Ngs2GetWaveformFrameInfo(const void* format, uint32_t* outFrameSize,
         void* h = Atrac9GetHandle();
         uint8_t cfg[4];
         std::memcpy(cfg, &fmt->configData, 4);
+        if (cfg[0] != 0xFE && cfg[3] == 0xFE) std::reverse(cfg, cfg + 4);
         if (h && Atrac9InitDecoder(h, cfg) == 0) {
             Atrac9CodecInfo ci{};
             Atrac9GetCodecInfo(h, &ci);
@@ -420,21 +422,35 @@ int32_t Ngs2VoiceControl(uint64_t voiceHandle, const void* paramList) {
     for (int guard = 0; guard < 64 && HostOk(cur, sizeof(VoiceParamHeader)); ++guard) {
         const auto* hdr = reinterpret_cast<const VoiceParamHeader*>(cur);
         switch (hdr->id) {
-            case 1: {  // MatrixLevelsParam
+            case 1: {  // MatrixLevelsParam ([outCh * nIn + inCh], 8 output channels)
                 if (hdr->size >= 0x18 && HostOk(cur, 0x18)) {
                     const uint32_t nLevels = *reinterpret_cast<const uint32_t*>(cur + 0x0C);
                     const float* lv = *reinterpret_cast<const float* const*>(cur + 0x10);
-                    if (lv && nLevels >= 2 && HostOk(lv, nLevels * sizeof(float))) {
-                        if (nLevels >= 64) {
+                    if (lv && nLevels >= 8 && (nLevels % 8) == 0 &&
+                        HostOk(lv, nLevels * sizeof(float))) {
+                        // Notice 0x100fd0da passes nLevels = 64 with only lv[0..7] populated
+                        // for direct 1-to-8 broadcast when channel-mask routing is used.
+                        const uint32_t rawIn = nLevels / 8;
+                        const uint32_t nIn = (rawIn == 2) ? 2u : 1u;
+                        const uint32_t stride = (rawIn == 2) ? 2u : 1u;
+                        auto downmixL = [&](uint32_t c) {
+                            return lv[0 * stride + c] + 0.7071f * lv[2 * stride + c] +
+                                   0.7071f * lv[4 * stride + c] + 0.7071f * lv[6 * stride + c];
+                        };
+                        auto downmixR = [&](uint32_t c) {
+                            return lv[1 * stride + c] + 0.7071f * lv[2 * stride + c] +
+                                   0.7071f * lv[5 * stride + c] + 0.7071f * lv[7 * stride + c];
+                        };
+                        if (nIn == 2) {
                             v.isStereoMat = true;
-                            v.matLL = lv[0];
-                            v.matLR = lv[1];
-                            v.matRL = lv[8];
-                            v.matRR = lv[9];
+                            v.matLL = downmixL(0);
+                            v.matLR = downmixR(0);
+                            v.matRL = downmixL(1);
+                            v.matRR = downmixR(1);
                         } else {
                             v.isStereoMat = false;
-                            v.matLL = lv[0];
-                            v.matLR = lv[1];
+                            v.matLL = downmixL(0);
+                            v.matLR = downmixR(0);
                         }
                     }
                 }
@@ -461,6 +477,7 @@ int32_t Ngs2VoiceControl(uint64_t voiceHandle, const void* paramList) {
                         v.playing = false;
                         v.paused = false;
                         v.keyedOff = false;
+                        v.hasBlocks = false;
                         v.blocks.clear();
                         v.pcmL.clear();
                         v.pcmR.clear();
@@ -476,6 +493,7 @@ int32_t Ngs2VoiceControl(uint64_t voiceHandle, const void* paramList) {
             case 0x10000000u: {  // SamplerVoiceSetupParam
                 if (hdr->size >= 0x28 && HostOk(cur, 0x28)) {
                     std::memcpy(&v.fmt, cur + 0x08, sizeof(WaveformFormat));
+                    v.hasBlocks = false;
                     v.blocks.clear();
                     v.pcmL.clear();
                     v.pcmR.clear();
@@ -490,6 +508,7 @@ int32_t Ngs2VoiceControl(uint64_t voiceHandle, const void* paramList) {
                         if (!v.at9) v.at9 = Atrac9GetHandle();
                         uint8_t cfg[4];
                         std::memcpy(cfg, &v.fmt.configData, 4);
+                        if (cfg[0] != 0xFE && cfg[3] == 0xFE) std::reverse(cfg, cfg + 4);
                         if (v.at9 && Atrac9InitDecoder(v.at9, cfg) == 0) {
                             Atrac9GetCodecInfo(v.at9, &v.at9Info);
                             v.at9Valid = true;
@@ -519,6 +538,7 @@ int32_t Ngs2VoiceControl(uint64_t voiceHandle, const void* paramList) {
                             if (v.blocks.empty())
                                 v.currentWavePtr = data + qb.dataOffset;
                             v.blocks.push_back(qb);
+                            v.hasBlocks = true;
                         }
                     }
                 }
@@ -606,6 +626,10 @@ int32_t Ngs2SystemRender(uint64_t systemHandle, const void* bufferInfos, uint32_
             if (vIt == g_voices.end()) continue;
             Voice& v = *vIt->second;
             if (!v.playing || v.paused) continue;
+            if (!v.hasBlocks) {
+                ++activeCount;
+                continue;
+            }
 
             const uint32_t srcRate = v.at9Valid && v.at9Info.samplingRate > 0
                                          ? static_cast<uint32_t>(v.at9Info.samplingRate)

@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -31,6 +32,8 @@ uint64_t g_logLimit = 0;   // per-call trace budget; 0 turns it off
 uint64_t g_traceFrom = 0;  // frame to begin tracing from
 uint64_t g_calls = 0;
 bool g_configured = false;
+bool g_verbose = false;
+bool g_uncapped = false;
 bool g_seen[512] = {};
 uint64_t g_slotCalls[512] = {};   // since the last histogram reset
 
@@ -45,6 +48,14 @@ void Configure() {
     }
     if (_dupenv_s(&lim, &n, "NIDHOGG_TRACE_FROM") == 0 && lim) {
         g_traceFrom = std::strtoull(lim, nullptr, 0);
+        std::free(lim);
+    }
+    if (_dupenv_s(&lim, &n, "NIDHOGG_VERBOSE") == 0 && lim) {
+        g_verbose = (*lim != '\0' && *lim != '0');
+        std::free(lim);
+    }
+    if (_dupenv_s(&lim, &n, "NIDHOGG_UNCAPPED") == 0 && lim) {
+        g_uncapped = (*lim != '\0' && *lim != '0');
         std::free(lim);
     }
 }
@@ -542,6 +553,25 @@ const std::string& App0() {
 
 std::string g_saveMountDir;
 std::FILE* g_posixFds[64] = {};
+std::mutex g_fiosMtx;
+struct FiosOp {
+    bool inUse = false;
+    uint64_t requested = 0;
+    uint64_t actual = 0;
+};
+FiosOp g_fiosOps[128] = {};
+
+uint32_t AllocFiosOp(uint64_t req, uint64_t act) {
+    std::scoped_lock lk(g_fiosMtx);
+    for (uint32_t i = 1; i < 128; ++i) {
+        if (!g_fiosOps[i].inUse) {
+            g_fiosOps[i] = {true, req, act};
+            return i;
+        }
+    }
+    g_fiosOps[1] = {true, req, act};
+    return 1;
+}
 
 std::string SaveRoot(const char* dirName) {
     char full[MAX_PATH]{};
@@ -967,7 +997,19 @@ const char* SlotName(uint32_t s) {
         case 385: return "sceNgs2GetWaveformFrameInfo";
         case 386: return "sceAudioOutOutputs";
         case 387: return "scePthreadExit";
+        case 388: return "exp2f";
         case 397: return "sceKernelLseek";
+        case 398: return "sceFiosTimeGetCurrent";
+        case 399: return "sceFiosNanosecondsToTime";
+        case 400: return "sceFiosFHOpen";
+        case 401: return "sceFiosOpWait";
+        case 402: return "sceFiosOpDelete";
+        case 403: return "sceFiosFHPread";
+        case 404: return "sceFiosOpIsDone";
+        case 405: return "sceFiosOpGetActualCount";
+        case 406: return "sceFiosOpGetRequestCount";
+        case 407: return "sceFiosFHClose";
+        case 409: return "sceKernelGetProcessTime";
         case 410: return "sceKernelGetDirectMemorySize";
         case 411: return "sceKernelAllocateDirectMemory";
         case 412: return "sceKernelMapDirectMemory";
@@ -1149,6 +1191,8 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
         }
         case 150:
             return RetF32(std::atan2f(XmmF32(r, 0), XmmF32(r, 1)));
+        case 388:
+            return RetF32(std::exp2f(XmmF32(r, 0)));
         case 154: {
             const float y = XmmF32(r, 1);
             return RetF32(y != 0.0f ? std::fmodf(XmmF32(r, 0), y) : 0.0f);
@@ -1551,6 +1595,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             return 0;
         case 142:    // pthread_create(&thr, &attr, startRoutine, arg)
         case 222: {  // scePthreadCreate(&thr, &attr, startRoutine, arg, name)
+            if (slot == 222 && (ret - g_base) < 0xF0000) return 0;  // Skip NpToolkit PSN threads
             struct GuestThreadArgs {
                 uint64_t entry;
                 uint64_t arg;
@@ -1692,6 +1737,85 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
         case 386:
             return static_cast<uint64_t>(static_cast<int64_t>(
                 audio::AudioOutOutputs(ptr(0), static_cast<uint32_t>(r.gpr[1]))));
+
+        // ---- libSceFios2 async streaming ops & process clock
+        case 398:
+            return NowUsec() * 1000ULL;
+        case 399:
+            return r.gpr[0];
+        case 400: {  // sceFiosFHOpen(attr, &outFH, path, openParams)
+            std::scoped_lock lk(g_fiosMtx);
+            std::string path = HostPath(str(2));
+            std::FILE* f = std::fopen(path.c_str(), "rb");
+            if (!f) {
+                if (Readable(ptr(1), 4)) *reinterpret_cast<int32_t*>(r.gpr[1]) = 0;
+                return 0;
+            }
+            int fd = -1;
+            for (int i = 3; i < 64; ++i) {
+                if (!g_posixFds[i]) { g_posixFds[i] = f; fd = i; break; }
+            }
+            if (fd < 0) {
+                std::fclose(f);
+                if (Readable(ptr(1), 4)) *reinterpret_cast<int32_t*>(r.gpr[1]) = 0;
+                return 0;
+            }
+            if (Readable(ptr(1), 4)) *reinterpret_cast<int32_t*>(r.gpr[1]) = fd;
+            for (uint32_t op = 1; op < 128; ++op) {
+                if (!g_fiosOps[op].inUse) {
+                    g_fiosOps[op] = {true, 0, 0};
+                    return op;
+                }
+            }
+            return 1;
+        }
+        case 401:  // sceFiosOpWait
+            return 0;
+        case 402: {  // sceFiosOpDelete(op)
+            std::scoped_lock lk(g_fiosMtx);
+            const uint32_t op = static_cast<uint32_t>(r.gpr[0]);
+            if (op > 0 && op < 128) g_fiosOps[op].inUse = false;
+            return 0;
+        }
+        case 403: {  // sceFiosFHPread(attr, fh, buf, length, offset)
+            const int fh = static_cast<int>(r.gpr[1]);
+            void* dst = ptr(2);
+            const uint32_t len = static_cast<uint32_t>(r.gpr[3]);
+            const int64_t off = static_cast<int64_t>(r.gpr[4]);
+            if (fh < 3 || fh >= 64 || !g_posixFds[fh] || !Readable(dst, len)) return 0;
+            size_t got = 0;
+            {
+                std::scoped_lock lk(g_fiosMtx);
+                if (_fseeki64(g_posixFds[fh], off, SEEK_SET) == 0)
+                    got = std::fread(dst, 1, len, g_posixFds[fh]);
+            }
+            return AllocFiosOp(len, got);
+        }
+        case 404:  // sceFiosOpIsDone
+            return 1;
+        case 405: {  // sceFiosOpGetActualCount(op)
+            std::scoped_lock lk(g_fiosMtx);
+            const uint32_t op = static_cast<uint32_t>(r.gpr[0]);
+            return (op > 0 && op < 128) ? g_fiosOps[op].actual : 0;
+        }
+        case 406: {  // sceFiosOpGetRequestCount(op)
+            std::scoped_lock lk(g_fiosMtx);
+            const uint32_t op = static_cast<uint32_t>(r.gpr[0]);
+            return (op > 0 && op < 128) ? g_fiosOps[op].requested : 0;
+        }
+        case 407: {  // sceFiosFHClose(attr, fh)
+            const int fh = static_cast<int>(r.gpr[1]);
+            {
+                std::scoped_lock lk(g_fiosMtx);
+                if (fh >= 3 && fh < 64 && g_posixFds[fh]) {
+                    std::fclose(g_posixFds[fh]);
+                    g_posixFds[fh] = nullptr;
+                }
+            }
+            return AllocFiosOp(0, 0);
+        }
+        case 409:  // sceKernelGetProcessTime
+            return NowUsec();
         case 144: {  // usleep(usec)
             const uint32_t us = static_cast<uint32_t>(r.gpr[0]);
             if (us >= 1000) Sleep(us / 1000);
@@ -2009,7 +2133,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             // itself against vblank but has stopped producing new work.  One
             // hash per submit, printed on change, is the shortest way to tell
             // "still loading" from "stuck".
-            {
+            if (g_verbose) {
                 static uint64_t prevHash = 0;
                 static int printed = 0;
                 uint64_t h = 1469598103934665603ull;
@@ -2032,13 +2156,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             (void)ccbAddrs;
             (void)ccbSizes;
 
-            // Does the frame loop actually move?  The first frame's quads are
-            // the whole 320x200 screen with uv (0,0) and the texture they name
-            // is still zeroed, so the picture at t=0 is black no matter how
-            // correct the backend is.  What matters is whether the guest ever
-            // rewrites that data: hash the vertex block and report the texture
-            // the last indexed draw samples from.
-            if (g_submits % 60 == 1) {
+            if (g_verbose && g_submits % 60 == 1) {
                 const auto& ds = g_machine.draws();
                 uint32_t vhash = 2166136261u;
                 if (gnm::HostReadable(0x4011408000ull, 0x240)) {
@@ -2070,7 +2188,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             // once.  The descriptor conventions come from GNM's own tables, but
             // the only way to be sure the decode is right is to print the data
             // the descriptors point at.
-            if (g_submits == 2) {
+            if (g_verbose && g_submits == 2) {
                 const gnm::Draw* d = nullptr;
                 for (const auto& c : g_machine.draws())
                     if (c.kind == gnm::Draw::Kind::Indexed) d = &c;
@@ -2159,7 +2277,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             // image hash over hundreds of frames means the game loop is
             // replanting a cached command buffer and its logic is not running
             // at all, which is a completely different bug from a wrong draw.
-            if ((g_submits % 60) == 0) {
+            if (g_verbose && (g_submits % 60) == 0) {
                 static uint64_t prev = 0;
                 uint64_t h = 1469598103934665603ull;
                 auto mix = [&](uint64_t addr, size_t n) {
@@ -2181,7 +2299,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                 }
             }
 
-            if (g_submits == 1) {                // Where the two shaders are actually executed from, and what the
+            if (g_verbose && g_submits == 1) {                // Where the two shaders are actually executed from, and what the
                 // index buffer points at.  The program registers hold ring
                 // addresses in this title, so the ring is the place to look.
                 auto dump = [](const char* path, uint64_t addr, size_t n) {
@@ -2243,7 +2361,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                 std::fflush(stdout);
             }
 
-            if (first) {
+            if (first && g_verbose) {
                 DumpFrameState();
             } else if ((g_submits % 300) == 0) {
                 std::printf("[gnm] frame %llu: %zu draws, %llu writes, %u errors | [audio] mixed=%llu voices=%u peak=%.4f\n",
@@ -2254,26 +2372,23 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                             static_cast<unsigned long long>(audio::MixedFrames()),
                             audio::ActiveVoices(),
                             audio::PeakAmplitude());
-
-                // What the guest asks the platform layer for, per frame.  Slots
-                // that never appear here are not the reason a frame is static;
-                // slots that appear sixty times a second are where the clock
-                // and the flip live.
-                for (int rank = 0; rank < 64; ++rank) {
-                    uint32_t best = 512, bestCalls = 0;
-                    for (uint32_t s = 0; s < 512; ++s) {
-                        if (g_slotCalls[s] > bestCalls) {
-                            bestCalls = static_cast<uint32_t>(g_slotCalls[s]);
-                            best = s;
+                if (g_verbose) {
+                    for (int rank = 0; rank < 64; ++rank) {
+                        uint32_t best = 512, bestCalls = 0;
+                        for (uint32_t s = 0; s < 512; ++s) {
+                            if (g_slotCalls[s] > bestCalls) {
+                                bestCalls = static_cast<uint32_t>(g_slotCalls[s]);
+                                best = s;
+                            }
                         }
+                        if (best == 512) break;
+                        const char* nm = SlotName(best);
+                        std::printf("    slot %3u  n=%6llu (%llu/frame)  %s\n", best,
+                                    static_cast<unsigned long long>(g_slotCalls[best]),
+                                    static_cast<unsigned long long>(g_slotCalls[best] / 300),
+                                    nm ? nm : "unimplemented");
+                        g_slotCalls[best] = 0;
                     }
-                    if (best == 512) break;
-                    const char* nm = SlotName(best);
-                    std::printf("    slot %3u  n=%6llu (%llu/frame)  %s\n", best,
-                                static_cast<unsigned long long>(g_slotCalls[best]),
-                                static_cast<unsigned long long>(g_slotCalls[best] / 300),
-                                nm ? nm : "unimplemented");
-                    g_slotCalls[best] = 0;
                 }
                 for (uint32_t s = 0; s < 512; ++s) g_slotCalls[s] = 0;
                 std::fflush(stdout);
@@ -2286,6 +2401,29 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             // interpreter: the guest produced a command stream, the stream
             // produced draw state, and the state becomes real GPU work here.
             gnm::RenderFrame(g_videoOut.window, g_machine.draws());
+
+            // Hardware flip-rate pacing (0 = 60 Hz, 1 = 30 Hz, 2 = 20 Hz) so the
+            // fixed-timestep simulation runs at original PS4 speed on high-Hz
+            // displays or when DXGI windowed Present does not block on vblank.
+            if (!g_uncapped) {
+                static bool s_timerInit = false;
+                static uint64_t s_nextFlipUsec = 0;
+                if (!s_timerInit) {
+                    s_timerInit = true;
+                    timeBeginPeriod(1);
+                    s_nextFlipUsec = NowUsec();
+                }
+                const uint64_t periodUsec =
+                    (g_videoOut.flipRate == 1) ? 33333ULL :
+                    (g_videoOut.flipRate == 2) ? 50000ULL : 16667ULL;
+                s_nextFlipUsec += periodUsec;
+                uint64_t now = NowUsec();
+                if (now > s_nextFlipUsec + 100000ULL) s_nextFlipUsec = now;
+                while ((now = NowUsec()) < s_nextFlipUsec) {
+                    if (s_nextFlipUsec - now > 2500ULL) Sleep(1);
+                    else YieldProcessor();
+                }
+            }
             return 0;
         }
 
