@@ -2,6 +2,7 @@
 #include "ngs2.h"
 
 #include "../atrac9/libatrac9.h"
+#include "../core/settings.h"
 #include "../gnm/pm4.h"
 
 #include <windows.h>
@@ -299,10 +300,12 @@ struct WavePort {
     static constexpr int kNumBufs = 6;
     bool inUse = false;
     uint32_t grainSamples = 512;
+    uint32_t sampleRate = 48000;
     uint32_t channels = 8;
     bool isFloat = true;
     float volL = 1.0f;
     float volR = 1.0f;
+    int openedDeviceId = -999;
 
     HWAVEOUT hwo = nullptr;
     HANDLE ev = nullptr;
@@ -312,7 +315,52 @@ struct WavePort {
 };
 
 std::mutex g_audioOutMtx;
+std::atomic<bool> g_shuttingDown{false};
 WavePort g_ports[16];
+
+void CloseWaveDeviceLocked(WavePort& p) {
+    if (p.hwo) {
+        waveOutReset(p.hwo);
+        for (int i = 0; i < WavePort::kNumBufs; ++i)
+            waveOutUnprepareHeader(p.hwo, &p.hdrs[i], sizeof(WAVEHDR));
+        waveOutClose(p.hwo);
+        p.hwo = nullptr;
+    }
+}
+
+void OpenWaveDeviceLocked(WavePort& p, int deviceId) {
+    CloseWaveDeviceLocked(p);
+    p.openedDeviceId = deviceId;
+    p.nextBuf = 0;
+    if (!p.ev) p.ev = CreateEventA(nullptr, FALSE, FALSE, nullptr);
+
+    WAVEFORMATEX wfx{};
+    wfx.wFormatTag = WAVE_FORMAT_PCM;
+    wfx.nChannels = 2;
+    wfx.nSamplesPerSec = p.sampleRate ? p.sampleRate : 48000;
+    wfx.wBitsPerSample = 16;
+    wfx.nBlockAlign = 4;
+    wfx.nAvgBytesPerSec = wfx.nSamplesPerSec * wfx.nBlockAlign;
+
+    const UINT dev = (deviceId < 0) ? WAVE_MAPPER : static_cast<UINT>(deviceId);
+    MMRESULT mr = waveOutOpen(&p.hwo, dev, &wfx, reinterpret_cast<DWORD_PTR>(p.ev), 0,
+                              CALLBACK_EVENT);
+    if (mr != MMSYSERR_NOERROR && dev != WAVE_MAPPER) {
+        mr = waveOutOpen(&p.hwo, WAVE_MAPPER, &wfx, reinterpret_cast<DWORD_PTR>(p.ev), 0,
+                         CALLBACK_EVENT);
+    }
+    if (mr == MMSYSERR_NOERROR) {
+        for (int i = 0; i < WavePort::kNumBufs; ++i) {
+            p.bufs[i].assign(static_cast<size_t>(p.grainSamples * 2), 0);
+            std::memset(&p.hdrs[i], 0, sizeof(WAVEHDR));
+            p.hdrs[i].lpData = reinterpret_cast<LPSTR>(p.bufs[i].data());
+            p.hdrs[i].dwBufferLength = p.grainSamples * 4;
+            waveOutPrepareHeader(p.hwo, &p.hdrs[i], sizeof(WAVEHDR));
+        }
+    } else {
+        p.hwo = nullptr;
+    }
+}
 
 }  // namespace
 
@@ -613,6 +661,11 @@ int32_t Ngs2SystemRender(uint64_t systemHandle, const void* bufferInfos, uint32_
     const uint32_t grain = sys.grainSamples;
     const double outRate = static_cast<double>(sys.sampleRate ? sys.sampleRate : 48000u);
 
+    const auto& cfg = core::CurrentSettings();
+    const float masterGain = cfg.mute ? 0.0f : std::clamp(cfg.masterVolume, 0.0f, 1.0f);
+    const float musicGain = masterGain * std::clamp(cfg.musicVolume, 0.0f, 1.0f);
+    const float sfxGain = masterGain * std::clamp(cfg.sfxVolume, 0.0f, 1.0f);
+
     std::vector<float> mixL(grain, 0.0f);
     std::vector<float> mixR(grain, 0.0f);
     uint32_t activeCount = 0;
@@ -630,6 +683,10 @@ int32_t Ngs2SystemRender(uint64_t systemHandle, const void* bufferInfos, uint32_
                 ++activeCount;
                 continue;
             }
+
+            const bool isMusic = (v.fmt.numChannels >= 2) ||
+                                 (v.at9Valid && v.at9Info.channels >= 2);
+            const float catGain = isMusic ? musicGain : sfxGain;
 
             const uint32_t srcRate = v.at9Valid && v.at9Info.samplingRate > 0
                                          ? static_cast<uint32_t>(v.at9Info.samplingRate)
@@ -667,12 +724,13 @@ int32_t Ngs2SystemRender(uint64_t systemHandle, const void* bufferInfos, uint32_
                 const float inR = v.pcmR[idx0] + (v.pcmR[idx1] - v.pcmR[idx0]) * frac;
 
                 float outL, outR;
+                const float vGain = v.portVol * catGain;
                 if (v.isStereoMat) {
-                    outL = (inL * v.matLL + inR * v.matRL) * v.portVol;
-                    outR = (inL * v.matLR + inR * v.matRR) * v.portVol;
+                    outL = (inL * v.matLL + inR * v.matRL) * vGain;
+                    outR = (inL * v.matLR + inR * v.matRR) * vGain;
                 } else {
-                    outL = inL * v.matLL * v.portVol;
-                    outR = inL * v.matLR * v.portVol;
+                    outL = inL * v.matLL * vGain;
+                    outR = inL * v.matLR * vGain;
                 }
                 mixL[s] += outL;
                 mixR[s] += outR;
@@ -742,6 +800,7 @@ int32_t AudioOutOpen(int32_t /*userId*/, int32_t /*type*/, int32_t /*index*/, ui
     WavePort& p = g_ports[slot];
     p.inUse = true;
     p.grainSamples = (len >= 64 && len <= 4096) ? len : 512;
+    p.sampleRate = freq ? freq : 48000;
     const uint32_t fmt = param & 0xffu;
     if (fmt == 0) { p.channels = 1; p.isFloat = false; }
     else if (fmt == 1) { p.channels = 2; p.isFloat = false; }
@@ -750,27 +809,7 @@ int32_t AudioOutOpen(int32_t /*userId*/, int32_t /*type*/, int32_t /*index*/, ui
     else if (fmt == 4) { p.channels = 2; p.isFloat = true; }
     else { p.channels = 8; p.isFloat = true; }
 
-    p.ev = CreateEventA(nullptr, FALSE, FALSE, nullptr);
-    WAVEFORMATEX wfx{};
-    wfx.wFormatTag = WAVE_FORMAT_PCM;
-    wfx.nChannels = 2;
-    wfx.nSamplesPerSec = freq ? freq : 48000;
-    wfx.wBitsPerSample = 16;
-    wfx.nBlockAlign = 4;
-    wfx.nAvgBytesPerSec = wfx.nSamplesPerSec * wfx.nBlockAlign;
-
-    if (waveOutOpen(&p.hwo, WAVE_MAPPER, &wfx, reinterpret_cast<DWORD_PTR>(p.ev), 0,
-                    CALLBACK_EVENT) == MMSYSERR_NOERROR) {
-        for (int i = 0; i < WavePort::kNumBufs; ++i) {
-            p.bufs[i].assign(static_cast<size_t>(p.grainSamples * 2), 0);
-            std::memset(&p.hdrs[i], 0, sizeof(WAVEHDR));
-            p.hdrs[i].lpData = reinterpret_cast<LPSTR>(p.bufs[i].data());
-            p.hdrs[i].dwBufferLength = p.grainSamples * 4;
-            waveOutPrepareHeader(p.hwo, &p.hdrs[i], sizeof(WAVEHDR));
-        }
-    } else {
-        p.hwo = nullptr;
-    }
+    OpenWaveDeviceLocked(p, core::CurrentSettings().audioDeviceId);
     return slot;
 }
 
@@ -802,6 +841,12 @@ int32_t AudioOutOutputs(const void* params, uint32_t count) {
     if (!count || count > 16 || !HostOk(params, count * sizeof(OutParam))) return 0;
     const auto* list = static_cast<const OutParam*>(params);
 
+    if (g_shuttingDown.load(std::memory_order_relaxed)) {
+        Sleep(5);
+        return 0;
+    }
+
+    const int wantDev = core::CurrentSettings().audioDeviceId;
     WavePort* primary = nullptr;
     uint32_t grain = 512;
     {
@@ -811,6 +856,9 @@ int32_t AudioOutOutputs(const void* params, uint32_t count) {
             if (h > 0 && h < 16 && g_ports[h].inUse) {
                 primary = &g_ports[h];
                 grain = primary->grainSamples;
+                if (primary->openedDeviceId != wantDev) {
+                    OpenWaveDeviceLocked(*primary, wantDev);
+                }
                 break;
             }
         }
@@ -867,7 +915,11 @@ int32_t AudioOutOutputs(const void* params, uint32_t count) {
         dst[s * 2 + 0] = static_cast<int16_t>(std::clamp(sumL[s], -1.0f, 1.0f) * 32767.0f);
         dst[s * 2 + 1] = static_cast<int16_t>(std::clamp(sumR[s], -1.0f, 1.0f) * 32767.0f);
     }
-    waveOutWrite(primary->hwo, &hdr, sizeof(WAVEHDR));
+    MMRESULT wr = waveOutWrite(primary->hwo, &hdr, sizeof(WAVEHDR));
+    if (wr == MMSYSERR_NODRIVER || wr == WAVERR_UNPREPARED) {
+        std::scoped_lock lk(g_audioOutMtx);
+        OpenWaveDeviceLocked(*primary, -1);
+    }
     return static_cast<int32_t>(grain);
 }
 
@@ -875,19 +927,27 @@ int32_t AudioOutClose(int32_t handle) {
     std::scoped_lock lk(g_audioOutMtx);
     if (handle <= 0 || handle >= 16 || !g_ports[handle].inUse) return 0;
     WavePort& p = g_ports[handle];
-    if (p.hwo) {
-        waveOutReset(p.hwo);
-        for (int i = 0; i < WavePort::kNumBufs; ++i)
-            waveOutUnprepareHeader(p.hwo, &p.hdrs[i], sizeof(WAVEHDR));
-        waveOutClose(p.hwo);
-        p.hwo = nullptr;
-    }
+    CloseWaveDeviceLocked(p);
     if (p.ev) {
         CloseHandle(p.ev);
         p.ev = nullptr;
     }
     p.inUse = false;
     return 0;
+}
+
+void ShutdownAudio() {
+    g_shuttingDown.store(true, std::memory_order_relaxed);
+    std::scoped_lock lk(g_audioOutMtx);
+    for (int i = 1; i < 16; ++i) {
+        if (!g_ports[i].inUse) continue;
+        CloseWaveDeviceLocked(g_ports[i]);
+        if (g_ports[i].ev) {
+            CloseHandle(g_ports[i].ev);
+            g_ports[i].ev = nullptr;
+        }
+        g_ports[i].inUse = false;
+    }
 }
 
 uint64_t MixedFrames() { return g_mixedFrames.load(std::memory_order_relaxed); }
