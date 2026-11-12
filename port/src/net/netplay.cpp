@@ -14,6 +14,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#include <mmsystem.h>
 #include <winhttp.h>
 
 #include <algorithm>
@@ -40,6 +41,7 @@ constexpr uint8_t kPktPunchAck = 3;
 constexpr uint8_t kPktSyncBarrier = 4;
 constexpr uint8_t kPktInput = 5;
 constexpr uint8_t kPktDisconnect = 6;
+constexpr uint8_t kPktBootAgreement = 7;
 constexpr uint8_t kPktRelayEnvelope = 0x52;  // 'R' envelope to/from UDP relay server
 
 #pragma pack(push, 1)
@@ -59,6 +61,12 @@ struct SyncBarrierPayload {
     uint32_t matchSeed = 0;
     uint64_t sendTimeUsec = 0;
     uint64_t echoTimeUsec = 0;
+};
+
+struct BootAgreementPayload {
+    uint8_t delay = 0;
+    uint8_t flags = 0; // 1=proposal, 2=host committed, 4=guest ack, 8=start
+    uint16_t reserved = 0;
 };
 
 struct InputPayload {
@@ -286,6 +294,7 @@ bool HttpRequestJson(const std::string& method, const std::string& path, const s
 struct NetState {
     std::mutex mtx;
     bool initialized = false;
+    bool timerPeriodActive = false;
     SOCKET udpSock = INVALID_SOCKET;
     uint16_t localUdpPort = 0;
     std::string localLanIp = "127.0.0.1";
@@ -314,6 +323,21 @@ struct NetState {
     bool hasRelayAddr = false;
     bool websocketRelay = false;
     WebSocketRelay websocket;
+    bool preferUdpRelay = false;
+    bool forceWss = false;
+    bool hasRelayCookie = false;
+    bool relayRegistered = false;
+    uint8_t relayCookie[16]{};
+    uint64_t lastRelayAckUsec = 0;
+    uint64_t lastRelayProbeUsec = 0;
+    uint64_t relayProbeNonce = 0;
+    uint64_t relayProbeSentUsec = 0;
+    std::vector<double> rttSamples, jitterSamples, frameSamples, waitSamples, inputLatencySamples;
+    std::unordered_map<uint64_t, uint64_t> capturedInputUsec;
+    uint64_t previousGameStepUsec = 0;
+    uint64_t measuredFrames = 0;
+    uint64_t measuredFrameUsec = 0;
+    uint64_t waitedUsec = 0;
 
     sockaddr_in peerPublicAddr{};
     bool hasPeerPublic = false;
@@ -352,6 +376,13 @@ struct NetState {
     bool restartPending = false;
     bool handingOff = false;
     bool bootNavigating = false;
+    bool bootAgreementDone = false;
+    bool bootCommitted = false;
+    bool bootAcked = false;
+    bool bootStartSeen = false;
+    bool autoDelay = true;
+    uint8_t peerDelayProposal = 0;
+    int configuredDelay = 2;
     uint64_t stageSelectionStart = UINT64_MAX;
 };
 
@@ -516,6 +547,22 @@ void QueueUdpSendLocked(const sockaddr_in& dst, const uint8_t* data, size_t len)
     }
 }
 
+bool UdpRelayHealthyLocked() {
+    return g_net.preferUdpRelay && !g_net.forceWss && g_net.relayRegistered &&
+        MonoUsec() - g_net.lastRelayAckUsec < 1500000ULL;
+}
+
+void SendUdpRelayLocked(const std::vector<uint8_t>& sealed) {
+    if (!g_net.hasRelayAddr) return;
+    std::vector<uint8_t> envelope(26 + sealed.size());
+    envelope[0] = kPktRelayEnvelope;
+    std::memcpy(envelope.data() + 1, &g_net.sessionId, 8);
+    envelope[9] = g_net.snap.isHost ? 1 : 2;
+    std::memcpy(envelope.data() + 10, g_net.relayCookie, 16);
+    std::memcpy(envelope.data() + 26, sealed.data(), sealed.size());
+    QueueUdpSendLocked(g_net.relayAddr, envelope.data(), envelope.size());
+}
+
 void SendSealedPeerPacketLocked(uint8_t pktType, const void* payload, size_t payloadLen) {
     if (!g_net.hasSessionKey || g_net.sessionId == 0) return;
     WireAad aad{};
@@ -531,6 +578,10 @@ void SendSealedPeerPacketLocked(uint8_t pktType, const void* payload, size_t pay
         return;
 
     auto sendViaRelay = [&]() {
+        if (g_net.preferUdpRelay && !g_net.forceWss && g_net.hasRelayAddr) {
+            SendUdpRelayLocked(sealed);
+            if (UdpRelayHealthyLocked()) return;
+        }
         if (g_net.websocketRelay) {
             if (g_net.websocket.Send(sealed)) ++g_net.snap.packetsSent;
             return;
@@ -567,8 +618,11 @@ void SendSealedPeerPacketLocked(uint8_t pktType, const void* payload, size_t pay
 }
 
 void SendRegisterEndpointToRelayLocked() {
-    if (g_net.websocketRelay) return;
+    if (!g_net.preferUdpRelay || g_net.forceWss) return;
     if (!g_net.hasRelayAddr || !g_net.hasSessionKey || g_net.sessionId == 0) return;
+    const uint64_t now = MonoUsec();
+    if (now - g_net.lastRelayProbeUsec < 500000ULL) return;
+    g_net.lastRelayProbeUsec = now;
     WireAad aad{};
     aad.magic = kWireMagic;
     aad.type = kPktRegisterEndpoint;
@@ -576,9 +630,11 @@ void SendRegisterEndpointToRelayLocked() {
     aad.sessionId = g_net.sessionId;
     const uint64_t ts = MonoUsec();
     std::vector<uint8_t> sealed;
-    if (SealPacket(g_net.sessionKey, g_net.nextNonce++, reinterpret_cast<const uint8_t*>(&aad),
+    const uint64_t nonce = g_net.nextNonce++ | (g_net.snap.isHost ? 0ULL : (1ULL << 63));
+    g_net.relayProbeNonce = nonce; g_net.relayProbeSentUsec = now;
+    if (SealPacket(g_net.sessionKey, nonce, reinterpret_cast<const uint8_t*>(&aad),
                    sizeof(aad), reinterpret_cast<const uint8_t*>(&ts), sizeof(ts), sealed)) {
-        QueueUdpSendLocked(g_net.relayAddr, sealed.data(), sealed.size());
+        SendUdpRelayLocked(sealed);
     }
 }
 
@@ -588,11 +644,13 @@ void UpdateRttLocked(uint64_t echoedSendTimeUsec) {
     if (now < echoedSendTimeUsec) return;
     const double sampleMs = static_cast<double>(now - echoedSendTimeUsec) / 1000.0;
     if (sampleMs > 5000.0) return;
+    if (g_net.rttSamples.size() < 8192) g_net.rttSamples.push_back(sampleMs);
     if (g_net.snap.rttMs <= 0.01) {
         g_net.snap.rttMs = sampleMs;
         g_net.snap.jitterMs = 0.0;
     } else {
         const double delta = std::fabs(sampleMs - g_net.snap.rttMs);
+        if (g_net.jitterSamples.size() < 8192) g_net.jitterSamples.push_back(delta);
         g_net.snap.jitterMs = g_net.snap.jitterMs * 0.85 + delta * 0.15;
         g_net.snap.rttMs = g_net.snap.rttMs * 0.85 + sampleMs * 0.15;
     }
@@ -621,7 +679,7 @@ void VerifyHashesForFrameLocked(uint64_t f) {
     } else if ((f % 120) == 0) {
         LOG_INFO("[netplay] frame=%llu mode=%s rtt=%.1fms jitter=%.1fms hash=%016llx sync=OK",
                  static_cast<unsigned long long>(f),
-                 g_net.snap.transport == TransportMode::DirectP2P ? "DirectP2P" : "Relay",
+                 g_net.snap.transport == TransportMode::DirectP2P ? "DirectP2P" : g_net.snap.transport == TransportMode::UdpRelay ? "UDPRelay" : "WSSRelay",
                  g_net.snap.rttMs, g_net.snap.jitterMs,
                  static_cast<unsigned long long>(lit->second));
     }
@@ -632,23 +690,43 @@ void VerifyHashesForFrameLocked(uint64_t f) {
 void PumpUdpRxLocked() {
     if (g_net.udpSock == INVALID_SOCKET || !g_net.hasSessionKey) return;
     FlushTxQueueLocked();
+    SendRegisterEndpointToRelayLocked();
 
     uint8_t buf[2048];
     for (int iter = 0; iter < 64; ++iter) {
         sockaddr_in from{};
         int fromLen = sizeof(from);
         std::vector<uint8_t> wsPacket;
-        const bool viaWebSocket = g_net.websocketRelay && g_net.websocket.Receive(wsPacket);
-        int n;
+        int n = recvfrom(g_net.udpSock, reinterpret_cast<char*>(buf), sizeof(buf), 0,
+                         reinterpret_cast<sockaddr*>(&from), &fromLen);
+        const bool viaWebSocket = n <= 0 && g_net.websocketRelay && g_net.websocket.Receive(wsPacket);
         if (viaWebSocket) {
             n = static_cast<int>(wsPacket.size());
             if (n > sizeof(buf)) continue;
             std::memcpy(buf, wsPacket.data(), n);
-        } else n = recvfrom(g_net.udpSock, reinterpret_cast<char*>(buf), sizeof(buf), 0,
-                         reinterpret_cast<sockaddr*>(&from), &fromLen);
+        }
         if (n <= 0) break;
 
-        bool cameFromRelay = viaWebSocket;
+        const bool relayDatagram = !viaWebSocket && g_net.hasRelayAddr &&
+            from.sin_addr.s_addr == g_net.relayAddr.sin_addr.s_addr && from.sin_port == g_net.relayAddr.sin_port;
+        if (relayDatagram && (n == 26 || n == 34) && (buf[0] == 0x53 || buf[0] == 0x55)) {
+            uint64_t session = 0; std::memcpy(&session, buf + 1, 8);
+            if (session != g_net.sessionId || buf[9] != (g_net.snap.isHost ? 1 : 2)) continue;
+            if (buf[0] == 0x53 && n == 26) {
+                std::memcpy(g_net.relayCookie, buf + 10, 16); g_net.hasRelayCookie = true;
+                g_net.lastRelayProbeUsec = 0; SendRegisterEndpointToRelayLocked();
+            } else if (buf[0] == 0x55 && n == 34 && g_net.hasRelayCookie &&
+                       std::memcmp(g_net.relayCookie, buf + 10, 16) == 0) {
+                uint64_t nonce = 0; std::memcpy(&nonce, buf + 26, 8);
+                if (nonce == g_net.relayProbeNonce) {
+                    g_net.snap.relayRttMs = (MonoUsec() - g_net.relayProbeSentUsec) / 1000.0;
+                    if (!g_net.relayRegistered) LOG_INFO("[netplay] authenticated UDP relay ready (server RTT=%.1fms)", g_net.snap.relayRttMs);
+                    g_net.relayRegistered = true; g_net.lastRelayAckUsec = MonoUsec();
+                }
+            }
+            continue;
+        }
+        bool cameFromRelay = viaWebSocket || relayDatagram;
         const uint8_t* pkt = buf;
         size_t pktLen = static_cast<size_t>(n);
         if (pktLen > 10 && pkt[0] == kPktRelayEnvelope) {
@@ -688,7 +766,8 @@ void PumpUdpRxLocked() {
             g_net.activePeerAddr = from;
             g_net.snap.transport = TransportMode::DirectP2P;
         } else if (g_net.snap.transport != TransportMode::DirectP2P) {
-            g_net.snap.transport = TransportMode::RelayFallback;
+            g_net.snap.transport = relayDatagram ? TransportMode::UdpRelay :
+                UdpRelayHealthyLocked() ? TransportMode::UdpRelay : TransportMode::RelayFallback;
         }
 
         switch (aad.type) {
@@ -712,7 +791,8 @@ void PumpUdpRxLocked() {
                     g_net.snap.phase = SessionPhase::SyncingMenu;
                     g_net.snap.statusText = "Connected — synchronizing stage entry...";
                     LOG_INFO("[netplay] transport established (%s, rtt=%.1fms)",
-                             g_net.snap.transport == TransportMode::DirectP2P ? "DirectP2P" : "Relay",
+                             g_net.snap.transport == TransportMode::DirectP2P ? "DirectP2P" :
+                             g_net.snap.transport == TransportMode::UdpRelay ? "UDPRelay" : "WSSRelay",
                              g_net.snap.rttMs);
                 }
                 break;
@@ -728,7 +808,7 @@ void PumpUdpRxLocked() {
                 }
                 if (!g_net.snap.isHost) {
                     g_net.snap.stageIndex = sb.stageIndex;
-                    g_net.snap.inputDelayFrames = std::clamp<int>(sb.inputDelay, 1, 8);
+                    g_net.snap.inputDelayFrames = std::clamp<int>(sb.inputDelay, 1, 12);
                     g_net.matchSeed = sb.matchSeed;
                 }
                 if (sb.atLevelSelect) g_net.peerAtBarrier = true;
@@ -739,6 +819,8 @@ void PumpUdpRxLocked() {
                 if (plain.size() < sizeof(InputPayload)) break;
                 InputPayload ip{};
                 std::memcpy(&ip, plain.data(), sizeof(ip));
+                if (g_net.resumed && g_net.bootCommitted && !g_net.snap.isHost)
+                    g_net.bootStartSeen = true; // A first input is an implicit start acknowledgement.
                 g_net.lastPeerTimestampUsec = ip.sendTimeUsec;
                 UpdateRttLocked(ip.echoTimeUsec);
 
@@ -757,6 +839,20 @@ void PumpUdpRxLocked() {
                     g_net.remoteStateHashes[ip.stateHashFrame] = ip.stateHash;
                     VerifyHashesForFrameLocked(ip.stateHashFrame);
                 }
+                break;
+            }
+            case kPktBootAgreement: {
+                if (plain.size() != sizeof(BootAgreementPayload) || !g_net.resumed || g_net.bootAgreementDone) break;
+                BootAgreementPayload agreement{}; std::memcpy(&agreement, plain.data(), sizeof(agreement));
+                if (agreement.delay < 1 || agreement.delay > 12) break;
+                if (agreement.flags & 1) g_net.peerDelayProposal = agreement.delay;
+                if (!g_net.snap.isHost && (agreement.flags & 2)) {
+                    g_net.snap.inputDelayFrames = agreement.delay; g_net.bootCommitted = true;
+                }
+                if (g_net.snap.isHost && g_net.bootCommitted && (agreement.flags & 4) &&
+                    agreement.delay == g_net.snap.inputDelayFrames) g_net.bootAcked = true;
+                if (!g_net.snap.isHost && g_net.bootCommitted && (agreement.flags & 8) &&
+                    agreement.delay == g_net.snap.inputDelayFrames) g_net.bootStartSeen = true;
                 break;
             }
             case kPktDisconnect: {
@@ -791,13 +887,15 @@ void SendInputPacketForFrameLocked(uint64_t targetFrame, bool includeHash, uint6
     SendSealedPeerPacketLocked(kPktInput, &ip, sizeof(ip));
 }
 
+#include "boot_negotiation.inc"
+
 bool NetplayStepCallbackImpl(uint64_t simFrame, uint32_t localButtons,
                              uint32_t& outP1Buttons, uint32_t& outP2Buttons,
                              uint32_t& ioRandState) {
     std::unique_lock<std::mutex> lk(g_net.mtx);
     PumpUdpRxLocked();
     if (g_net.snap.phase == SessionPhase::InMatch && g_net.websocketRelay &&
-        !g_net.websocket.Connected() && !g_net.websocket.Error().empty() && !g_net.directEstablished) {
+        !g_net.websocket.Connected() && !g_net.websocket.Error().empty() && !g_net.directEstablished && !UdpRelayHealthyLocked()) {
         g_net.snap.phase = SessionPhase::Disconnected;
         g_net.snap.statusText = g_net.websocket.Error();
     }
@@ -817,6 +915,9 @@ bool NetplayStepCallbackImpl(uint64_t simFrame, uint32_t localButtons,
         }
         Sleep(10); lk.lock();
     }
+
+    if (g_net.resumed && !g_net.bootAgreementDone && g_net.snap.phase == SessionPhase::InMatch &&
+        !NegotiateBootDelayLocked(lk)) return false;
 
     if (g_net.snap.phase == SessionPhase::ConnectingTransport) {
         const uint64_t now = MonoUsec();
@@ -864,7 +965,7 @@ bool NetplayStepCallbackImpl(uint64_t simFrame, uint32_t localButtons,
             g_net.remoteInputs.clear();
             g_net.localStateHashes.clear();
             g_net.remoteStateHashes.clear();
-            const int delay = std::clamp(g_net.snap.inputDelayFrames, 1, 8);
+            const int delay = std::clamp(g_net.snap.inputDelayFrames, 1, 12);
             for (int d = 0; d < delay; ++d) {
                 g_net.localInputs[static_cast<uint64_t>(d)] = 0u;
                 g_net.remoteInputs[static_cast<uint64_t>(d)] = 0u;
@@ -872,7 +973,7 @@ bool NetplayStepCallbackImpl(uint64_t simFrame, uint32_t localButtons,
             ioRandState = g_net.matchSeed;
             LOG_INFO("[netplay] BARRIER SYNCED -> entering InMatch (seed=0x%08x, stage=%d, delay=%df, mode=%s)",
                      g_net.matchSeed, g_net.snap.stageIndex, delay,
-                     g_net.snap.transport == TransportMode::DirectP2P ? "DirectP2P" : "Relay");
+                     g_net.snap.transport == TransportMode::DirectP2P ? "DirectP2P" : g_net.snap.transport == TransportMode::UdpRelay ? "UDPRelay" : "WSSRelay");
         } else {
             outP1Buttons = navBtn;
             outP2Buttons = 0;
@@ -885,10 +986,20 @@ bool NetplayStepCallbackImpl(uint64_t simFrame, uint32_t localButtons,
     }
 
     const uint64_t f = g_net.matchFrame;
+    const uint64_t stepNow = MonoUsec();
+    if (g_net.gameStartSubmit != UINT64_MAX) {
+        if (g_net.previousGameStepUsec) {
+            const uint64_t interval = stepNow - g_net.previousGameStepUsec;
+            ++g_net.measuredFrames; g_net.measuredFrameUsec += interval;
+            if (g_net.frameSamples.size() < 8192) g_net.frameSamples.push_back(interval / 1000.0);
+            g_net.snap.simulationFps = g_net.measuredFrames * 1000000.0 / std::max<uint64_t>(1, g_net.measuredFrameUsec);
+        }
+        g_net.previousGameStepUsec = stepNow;
+    }
     ioRandState = g_net.matchSeed ^ static_cast<uint32_t>(f * 0x9e3779b9ULL);
     if (f == 0 || f == 30 || (f % 300) == 0)
         LOG_INFO("[netplay] input frame=%llu submit=%llu room=%s", f, simFrame, ps4::CurrentRoom().c_str());
-    const uint32_t delay = static_cast<uint32_t>(std::clamp(g_net.snap.inputDelayFrames, 1, 8));
+    const uint32_t delay = static_cast<uint32_t>(std::clamp(g_net.snap.inputDelayFrames, 1, 12));
 
     // Deterministic stage-selection macro on frames 0..150 inside rLevelSelect so
     // both peers enter the exact chosen stage on the exact same simulation frame.
@@ -934,6 +1045,7 @@ bool NetplayStepCallbackImpl(uint64_t simFrame, uint32_t localButtons,
 
     const uint64_t futureFrame = f + delay;
     g_net.localInputs[futureFrame] = effectiveLocal;
+    g_net.capturedInputUsec[futureFrame] = MonoUsec();
 
     bool sendHash = false;
     uint64_t curHash = 0;
@@ -947,7 +1059,8 @@ bool NetplayStepCallbackImpl(uint64_t simFrame, uint32_t localButtons,
     SendInputPacketForFrameLocked(futureFrame, sendHash, f, curHash);
     FlushTxQueueLocked();
 
-    // Wait for remote input for frame `f`, pumping UDP RX & retransmitting every 4 ms.
+    // Redundant input history covers isolated loss. Bound retries to 50 Hz so a
+    // slow route does not build a queue of obsolete TCP/WebSocket duplicates.
     const uint64_t waitStart = MonoUsec();
     uint64_t lastRetx = waitStart;
     uint64_t lastWaitingPresent = waitStart;
@@ -966,7 +1079,7 @@ bool NetplayStepCallbackImpl(uint64_t simFrame, uint32_t localButtons,
                      static_cast<unsigned long long>(f));
             return false;
         }
-        if (now - lastRetx >= 4000ULL) {
+        if (now - lastRetx >= 20000ULL) {
             g_net.stalled = now - waitStart > 80000ULL;
             SendInputPacketForFrameLocked(futureFrame, sendHash, f, curHash);
             FlushTxQueueLocked();
@@ -985,9 +1098,22 @@ bool NetplayStepCallbackImpl(uint64_t simFrame, uint32_t localButtons,
         lk.lock();
     }
     g_net.stalled = false;
+    const uint64_t waited = MonoUsec() - waitStart;
+    if (g_net.gameStartSubmit != UINT64_MAX) {
+        g_net.waitedUsec += waited;
+        if (waited > 1000) ++g_net.snap.waitedFrames;
+        if (g_net.waitSamples.size() < 8192) g_net.waitSamples.push_back(waited / 1000.0);
+        g_net.snap.inputWaitMs = waited / 1000.0;
+    }
 
     const uint32_t myInput = g_net.localInputs[f];
     const uint32_t peerInput = g_net.remoteInputs[f];
+    auto captured = g_net.capturedInputUsec.find(f);
+    if (captured != g_net.capturedInputUsec.end()) {
+        if (g_net.gameStartSubmit != UINT64_MAX && g_net.inputLatencySamples.size() < 8192)
+            g_net.inputLatencySamples.push_back((MonoUsec() - captured->second) / 1000.0);
+        g_net.capturedInputUsec.erase(captured);
+    }
     if (g_net.snap.isHost) {
         outP1Buttons = myInput;
         outP2Buttons = peerInput;
@@ -1029,7 +1155,11 @@ void ApplyRoomStateFromJsonLocked(const std::string& resp) {
 
     int64_t pCount = 1, stageIdx = 0, relayPort = 27881;
     int64_t agreedDelay = 3;
-    if (JsonGetInt(resp, "inputDelayFrames", agreedDelay)) g_net.snap.inputDelayFrames = std::clamp<int>(static_cast<int>(agreedDelay), 1, 8);
+    if (JsonGetInt(resp, "inputDelayFrames", agreedDelay)) {
+        g_net.configuredDelay = std::clamp<int>(static_cast<int>(agreedDelay), 1, 12);
+        if (!g_net.bootAgreementDone) g_net.snap.inputDelayFrames = g_net.configuredDelay;
+    }
+    JsonGetBool(resp, "autoInputDelay", g_net.autoDelay);
     if (JsonGetInt(resp, "playerCount", pCount)) g_net.snap.playerCount = static_cast<int>(pCount);
     if (JsonGetInt(resp, "stageIndex", stageIdx)) g_net.snap.stageIndex = static_cast<int>(stageIdx);
     if (JsonGetInt(resp, "relayUdpPort", relayPort) && relayPort > 0 && relayPort <= 65535)
@@ -1045,7 +1175,9 @@ void ApplyRoomStateFromJsonLocked(const std::string& resp) {
         if (HexToBytes(keyHex, g_net.sessionKey, 32)) g_net.hasSessionKey = true;
     }
     std::string relayTransport;
-    if (JsonGetStr(resp, "relayTransport", relayTransport) && relayTransport == "websocket") {
+    if (JsonGetStr(resp, "relayTransport", relayTransport) &&
+        (relayTransport == "websocket" || relayTransport == "udp")) {
+        g_net.preferUdpRelay = relayTransport == "udp";
         if (!g_net.websocketRelay) {
             g_net.websocketRelay = true;
             g_net.websocket.Start(core::CurrentSettings().lobbyServerUrl, g_net.snap.roomId, g_net.authToken);
@@ -1057,7 +1189,10 @@ void ApplyRoomStateFromJsonLocked(const std::string& resp) {
     sockaddr_in raddr{};
     raddr.sin_family = AF_INET;
     raddr.sin_port = htons(g_net.relayUdpPort);
-    if (inet_pton(AF_INET, u.hostUtf8.c_str(), &raddr.sin_addr) == 1) {
+    std::string relayPublicIp;
+    JsonGetStr(resp, "relayPublicIp", relayPublicIp);
+    const std::string relayHost = relayPublicIp.empty() ? u.hostUtf8 : relayPublicIp;
+    if (inet_pton(AF_INET, relayHost.c_str(), &raddr.sin_addr) == 1) {
         g_net.relayAddr = raddr;
         g_net.hasRelayAddr = true;
     }
@@ -1115,7 +1250,7 @@ void ApplyRoomStateFromJsonLocked(const std::string& resp) {
         g_net.snap.phase = SessionPhase::ConnectingTransport;
         g_net.snap.transport = g_net.forceRelay ? TransportMode::RelayFallback
                                                 : TransportMode::PunchingP2P;
-        g_net.snap.inputDelayFrames = std::clamp(core::CurrentSettings().inputDelayFrames, 1, 8);
+        g_net.snap.inputDelayFrames = std::clamp(core::CurrentSettings().inputDelayFrames, 1, 12);
         g_net.snap.desyncDetected = false;
         g_net.snap.stateChecks = 0;
         g_net.directEstablished = false;
@@ -1149,6 +1284,7 @@ void CheckEnvSimConfigLocked() {
     g_net.simOneWayLatencyMs = std::max(0, rttMs / 2);
     g_net.simJitterMs = std::max(0, envInt("NIDHOGG_NET_SIM_JITTER_MS", 0));
     g_net.simLossPct = std::clamp(envInt("NIDHOGG_NET_SIM_LOSS_PCT", 0), 0, 90);
+    g_net.forceWss = envInt("NIDHOGG_FORCE_WSS", 0) != 0;
     g_net.forceRelay = envInt("NIDHOGG_FORCE_RELAY", 0) != 0;
     g_net.autoExitOnDisconnect = envInt("NIDHOGG_NET_AUTO_EXIT", 0) != 0;
     g_net.qaCombat = envInt("NIDHOGG_NET_QA_COMBAT", 0) != 0;
@@ -1161,6 +1297,7 @@ void InitNetplay() {
     if (g_net.initialized) return;
     WSADATA wsa{};
     WSAStartup(MAKEWORD(2, 2), &wsa);
+    g_net.timerPeriodActive = timeBeginPeriod(1) == TIMERR_NOERROR;
     CheckEnvSimConfigLocked();
     g_net.initialized = true;
 }
@@ -1214,6 +1351,19 @@ void ShutdownNetplay() {
     if (g_heartbeat.valid()) g_heartbeat.wait();
     LOG_INFO("[netplay] summary frames=%llu checks=%llu desync=%d",
         g_net.snap.matchFrame, g_net.snap.stateChecks, g_net.snap.desyncDetected ? 1 : 0);
+    auto percentile = [](std::vector<double> samples, double p) {
+        if (samples.empty()) return 0.0;
+        std::sort(samples.begin(), samples.end());
+        return samples[static_cast<size_t>((samples.size() - 1) * p)];
+    };
+    LOG_INFO("[netplay-metrics] fps=%.2f frameP50=%.2fms frameP95=%.2fms waitP95=%.2fms waitedFrames=%llu rttP50=%.2fms rttP95=%.2fms jitterP95=%.2fms relayRtt=%.2fms sent=%llu received=%llu",
+        g_net.snap.simulationFps, percentile(g_net.frameSamples, .5), percentile(g_net.frameSamples, .95),
+        percentile(g_net.waitSamples, .95), g_net.snap.waitedFrames,
+        percentile(g_net.rttSamples, .5), percentile(g_net.rttSamples, .95),
+        percentile(g_net.jitterSamples, .95), g_net.snap.relayRttMs, g_net.snap.packetsSent, g_net.snap.packetsReceived);
+    LOG_INFO("[netplay-input] sampleToSimulationP50=%.2fms sampleToSimulationP95=%.2fms delayFrames=%d samples=%llu",
+        percentile(g_net.inputLatencySamples, .5), percentile(g_net.inputLatencySamples, .95),
+        g_net.snap.inputDelayFrames, static_cast<unsigned long long>(g_net.inputLatencySamples.size()));
     if (!g_net.handingOff) LeaveRoom();
     else g_net.websocket.Stop();
     std::scoped_lock lk(g_net.mtx);
@@ -1222,6 +1372,7 @@ void ShutdownNetplay() {
         g_net.udpSock = INVALID_SOCKET;
     }
     if (g_net.initialized) {
+        if (g_net.timerPeriodActive) { timeEndPeriod(1); g_net.timerPeriodActive = false; }
         WSACleanup();
         g_net.initialized = false;
     }
@@ -1304,6 +1455,7 @@ bool CreateRoom(const std::string& roomName, bool isPublic, int stageIndex, std:
          << "\"isPublic\":" << (isPublic ? "true" : "false") << ","
          << "\"stageIndex\":" << stageIndex << ","
          << "\"inputDelayFrames\":" << cfg.inputDelayFrames << ","
+         << "\"autoInputDelay\":" << (cfg.autoInputDelay ? "true" : "false") << ","
          << "\"lanIp\":\"" << JsonEsc(lanIp) << "\","
          << "\"lanPort\":" << udpPort << "}";
 
@@ -1630,6 +1782,11 @@ void LeaveRoom() {
         g_net.peerNonceHigh = 0; g_net.peerNonceMask = 0;
         g_net.websocket.Stop();
         g_net.websocketRelay = false;
+        g_net.preferUdpRelay = false; g_net.hasRelayCookie = false;
+        g_net.relayRegistered = false; g_net.lastRelayAckUsec = 0;
+        g_net.lastRelayProbeUsec = 0; std::memset(g_net.relayCookie, 0, sizeof(g_net.relayCookie));
+        g_net.bootAgreementDone = false; g_net.bootCommitted = false;
+        g_net.bootAcked = false; g_net.bootStartSeen = false; g_net.peerDelayProposal = 0;
         g_net.directEstablished = false;
         g_net.hasPeerPublic = false;
         g_net.hasPeerLan = false;

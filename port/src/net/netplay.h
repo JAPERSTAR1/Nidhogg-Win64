@@ -6,7 +6,7 @@
 
 namespace ps4::net {
 
-inline constexpr const char* kProtocolVersion = "nidhogg-win64-2.0";
+inline constexpr const char* kProtocolVersion = "nidhogg-win64-2.1";
 
 enum class SessionPhase : int {
     Offline = 0,
@@ -23,6 +23,7 @@ enum class TransportMode : int {
     PunchingP2P = 1,
     DirectP2P = 2,
     RelayFallback = 3,
+    UdpRelay = 4,
 };
 
 struct PublicRoomEntry {
@@ -60,6 +61,10 @@ struct NetStatsSnapshot {
 
     double rttMs = 0.0;
     double jitterMs = 0.0;
+    double relayRttMs = 0.0;
+    double simulationFps = 0.0;
+    double inputWaitMs = 0.0;
+    uint64_t waitedFrames = 0;
     uint64_t matchFrame = 0;
     uint64_t packetsSent = 0;
     uint64_t packetsReceived = 0;

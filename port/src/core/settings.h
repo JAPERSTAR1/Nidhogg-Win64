@@ -97,7 +97,8 @@ struct Settings {
     std::string playerName = "Fencer";
     std::string region = "us-east";
     std::string lobbyServerUrl = "https://lobby.japer.me";
-    int inputDelayFrames = 2;  // 1 .. 8
+    int inputDelayFrames = 2;  // 1 .. 12; minimum when automatic calibration is enabled.
+    bool autoInputDelay = true; // Negotiate latency/jitter allowance before frame zero.
 
     // General / Diagnostics
     bool launchDirectly = false;

@@ -1022,6 +1022,7 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
         char netBuf[192];
         const char* tmode =
             (netSnap.transport == net::TransportMode::DirectP2P) ? "P2P-AES" :
+            (netSnap.transport == net::TransportMode::UdpRelay) ? "UDP-RELAY" :
             (netSnap.transport == net::TransportMode::RelayFallback) ? "RELAY-AES" : "NEGOTIATING";
         const char* syncTxt = netSnap.desyncDetected ? "DESYNC!" : "SYNC OK";
         std::snprintf(netBuf, sizeof(netBuf), "ONLINE [%s] P%d | RTT %.1fms | D:%df | %s #%llu",
@@ -1259,7 +1260,8 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
                                 cfg.playerName + (g_ui.editingText == EditTarget::PlayerName ? "_" : ""),
                                 true});
                 rows.push_back({"Preferred Region", cfg.region});
-                rows.push_back({"Lockstep Input Delay", std::to_string(cfg.inputDelayFrames) + " frames"});
+                rows.push_back({"Input Delay (Click Auto/Manual)",
+                    (cfg.autoInputDelay ? "Auto, minimum " : "Manual: ") + std::to_string(cfg.inputDelayFrames) + " frames"});
                 rows.push_back({"Lobby Server URL",
                                 cfg.lobbyServerUrl + (g_ui.editingText == EditTarget::ServerUrl ? "_" : ""),
                                 true});

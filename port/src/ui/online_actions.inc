@@ -104,7 +104,10 @@ void HandleOnlineAction(int row, int dir, bool activated, bool& save) {
                 for (int i = 0; i < 4; ++i) if (cfg.region == regions[i]) index = i;
                 cfg.region = regions[(index + (dir ? dir : 1) + 4) % 4]; save = true; break;
             }
-            case 2: cfg.inputDelayFrames = std::clamp(cfg.inputDelayFrames + (dir ? dir : 1), 1, 8); save = true; break;
+            case 2:
+                if (activated && !dir) cfg.autoInputDelay = !cfg.autoInputDelay;
+                else cfg.inputDelayFrames = std::clamp(cfg.inputDelayFrames + dir, 1, 12);
+                save = true; break;
             case 3: if (activated) g_ui.editingText = g_ui.editingText == EditTarget::ServerUrl ? EditTarget::None : EditTarget::ServerUrl; break;
             case 4: if (activated) { g_ui.editingText = EditTarget::None; g_ui.onlinePage = OnlineSubPage::Home; g_ui.selectedRow = 6; } break;
         }

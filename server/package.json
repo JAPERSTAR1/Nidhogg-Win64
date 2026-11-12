@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test test.mjs"
+    "test": "node --test test.mjs udp-relay.test.mjs"
   },
   "dependencies": {
     "ws": "8.22.2"

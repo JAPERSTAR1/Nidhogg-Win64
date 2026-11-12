@@ -3,8 +3,9 @@ import { randomBytes, createHmac, timingSafeEqual } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import { pathToFileURL } from 'node:url';
 import { isIP } from 'node:net';
+import { createUdpRelay } from './udp-relay.mjs';
 
-export const VERSION = 'nidhogg-win64-2.0';
+export const VERSION = 'nidhogg-win64-2.1';
 const hex = n => randomBytes(n).toString('hex');
 class ApiError extends Error { constructor(status, message) { super(message); this.status = status; } }
 const requireThat = (condition, status, message) => { if (!condition) throw new ApiError(status, message); };
@@ -15,8 +16,10 @@ function name(value, fallback) {
   return s;
 }
 
-export function createLobby({ ttlMs = 20000, maxRooms = 128, now = Date.now } = {}) {
+export function createLobby({ ttlMs = 20000, maxRooms = 128, now = Date.now,
+  udpPort = null, udpBind = '0.0.0.0', relayPublicIp = '' } = {}) {
   const rooms = new Map(), buckets = new Map();
+  const udp = udpPort === null ? null : createUdpRelay({ port: udpPort, bind: udpBind, rooms, now });
   const wss = new WebSocketServer({ noServer: true, maxPayload: 2048, perMessageDeflate: false });
   function endpoint(p, b) {
     for (const [ipKey, portKey] of [['publicIp', 'publicPort'], ['lanIp', 'lanPort']]) {
@@ -59,7 +62,9 @@ export function createLobby({ ttlMs = 20000, maxRooms = 128, now = Date.now } = 
       guestConnected: role === 1 ? !!r.guest : true, playerCount: r.guest ? 2 : 1,
       maxPlayers: 2, hostReady: r.host.ready, guestReady: r.guest?.ready ?? false,
       status: r.status, stageIndex: r.stage, sessionId: r.session, sessionKey: r.key,
-      matchSeed: r.seed, inputDelayFrames: r.delay, relayTransport: 'websocket',
+      matchSeed: r.seed, inputDelayFrames: r.delay, autoInputDelay: r.autoDelay,
+      relayTransport: udp ? 'udp' : 'websocket', relayUdpPort: udp?.address()?.port ?? 0,
+      relayPublicIp,
       peerPublicIp: peer?.publicIp ?? '', peerPublicPort: peer?.publicPort ?? 0,
       peerLanIp: p.source === peer?.source ? peer?.lanIp ?? '' : '',
       peerLanPort: p.source === peer?.source ? peer?.lanPort ?? 0 : 0,
@@ -75,7 +80,8 @@ export function createLobby({ ttlMs = 20000, maxRooms = 128, now = Date.now } = 
   }
   function route(method, url, b, ip) {
     sweep(); rate(ip, url.pathname.endsWith('create') || url.pathname.endsWith('join_code') ? 10 : 1);
-    if (method === 'GET' && url.pathname === '/health') return { ok: true, protocol: VERSION, transport: 'websocket', rooms: rooms.size };
+    if (method === 'GET' && url.pathname === '/health') return { ok: true, protocol: VERSION, transport: udp ? 'udp+wss' : 'websocket', rooms: rooms.size,
+      uptimeSeconds: Math.floor(process.uptime()), udp: udp?.counters ?? null };
     if (method === 'GET' && url.pathname === '/api/rooms') {
       return { rooms: [...rooms.values()].filter(r => r.public &&
         (url.searchParams.get('available') !== '1' || (!r.guest && r.status === 'waiting')) &&
@@ -93,7 +99,8 @@ export function createLobby({ ttlMs = 20000, maxRooms = 128, now = Date.now } = 
         while ([...rooms.values()].some(r => r.code === code));
         const r = { id: hex(12), code, name: name(b.roomName, 'Arena'), region: name(b.region, 'all'),
           public: b.isPublic, stage: b.stageIndex,
-          delay: Number.isInteger(b.inputDelayFrames) ? Math.max(1, Math.min(8, b.inputDelayFrames)) : 3,
+          delay: Number.isInteger(b.inputDelayFrames) ? Math.max(1, Math.min(12, b.inputDelayFrames)) : 2,
+          autoDelay: b.autoInputDelay !== false,
           host: player(name(b.hostName, 'Fencer')), guest: null,
           session: randomBytes(8).readBigUInt64LE().toString(), key: hex(32), seed: randomBytes(4).readUInt32LE() || 1, status: 'waiting' };
         r.host.source = ip; endpoint(r.host, b);
@@ -150,7 +157,8 @@ export function createLobby({ ttlMs = 20000, maxRooms = 128, now = Date.now } = 
       requireThat(b && typeof b === 'object' && !Array.isArray(b), 400, 'Expected object');
       // Only trust Cloudflare's overwritten client-IP header from the local tunnel.
       const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
-      const ip = local && isIP(req.headers['cf-connecting-ip']) ? req.headers['cf-connecting-ip'] : req.socket.remoteAddress;
+      const forwarded = process.env.TRUST_PROXY === 'caddy' ? req.headers['x-real-ip'] : req.headers['cf-connecting-ip'];
+      const ip = local && isIP(forwarded) ? forwarded : req.socket.remoteAddress;
       const result = route(req.method, url, b, ip);
       res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(result));
     } catch (e) {
@@ -194,13 +202,16 @@ export function createLobby({ ttlMs = 20000, maxRooms = 128, now = Date.now } = 
     sweep();
     for (const ws of wss.clients) { if (!ws.isAlive) ws.terminate(); else { ws.isAlive = false; ws.ping(); } }
   }, 5000); timer.unref();
-  return { server, rooms, sweep, close: async () => {
+  return { server, rooms, sweep, udp, udpReady: udp?.ready ?? Promise.resolve(), close: async () => {
     clearInterval(timer); for (const ws of wss.clients) ws.terminate();
     server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
+    if (udp) await udp.close();
   } };
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const lobby = createLobby();
+  const lobby = createLobby({ udpPort: process.env.UDP_PORT ? Number(process.env.UDP_PORT) : null,
+    relayPublicIp: process.env.RELAY_PUBLIC_IP ?? '' });
+  await lobby.udpReady;
   lobby.server.listen(Number(process.env.PORT ?? 27880), process.env.BIND ?? '127.0.0.1', () => console.log(`Nidhogg lobby listening on ${JSON.stringify(lobby.server.address())}`));
   for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, async () => { await lobby.close(); process.exit(0); });
 }

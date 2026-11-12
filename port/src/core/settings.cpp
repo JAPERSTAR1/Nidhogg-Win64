@@ -418,7 +418,8 @@ bool LoadSettings(Settings& out, const std::string& path) {
     JsonReadStr(j, "playerName", s.playerName);
     JsonReadStr(j, "region", s.region);
     JsonReadStr(j, "lobbyServerUrl", s.lobbyServerUrl);
-    JsonReadInt(j, "inputDelayFrames", s.inputDelayFrames, 1, 8);
+    JsonReadInt(j, "inputDelayFrames", s.inputDelayFrames, 1, 12);
+    JsonReadBool(j, "autoInputDelay", s.autoInputDelay);
 
     JsonReadBool(j, "launchDirectly", s.launchDirectly);
     JsonReadBool(j, "showFps", s.showFps);
@@ -485,6 +486,7 @@ bool SaveSettings(const Settings& s, const std::string& path) {
       << "  \"region\": \"" << JsonEscape(s.region) << "\",\n"
       << "  \"lobbyServerUrl\": \"" << JsonEscape(s.lobbyServerUrl) << "\",\n"
       << "  \"inputDelayFrames\": " << s.inputDelayFrames << ",\n"
+      << "  \"autoInputDelay\": " << (s.autoInputDelay ? "true" : "false") << ",\n"
       << "  \"launchDirectly\": " << (s.launchDirectly ? "true" : "false") << ",\n"
       << "  \"showFps\": " << (s.showFps ? "true" : "false") << ",\n"
       << "  \"showFrameGraph\": " << (s.showFrameGraph ? "true" : "false") << ",\n"
