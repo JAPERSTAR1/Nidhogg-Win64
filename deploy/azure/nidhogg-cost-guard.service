@@ -1,0 +1,13 @@
+[Unit]
+Description=Nidhogg credit budget and expiry guard
+After=network-online.target
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/nidhogg/cost-guard.env
+ExecStart=/usr/bin/python3 /opt/nidhogg-ops/cost-guard.py
+User=root
+StateDirectory=nidhogg-guard
+StateDirectoryMode=0700
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true

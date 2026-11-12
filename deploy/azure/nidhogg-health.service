@@ -1,0 +1,11 @@
+[Unit]
+Description=Nidhogg local health and recovery check
+After=nidhogg.service
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/nidhogg-ops/health-check.py
+User=root
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/nidhogg

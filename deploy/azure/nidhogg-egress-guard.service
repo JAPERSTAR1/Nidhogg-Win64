@@ -1,0 +1,13 @@
+[Unit]
+Description=Nidhogg local credit estimate and outbound traffic guard
+After=network-online.target
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/nidhogg/cost-guard.env
+ExecStart=/usr/bin/python3 /opt/nidhogg-ops/cost-guard.py --local-only
+User=root
+StateDirectory=nidhogg-guard
+StateDirectoryMode=0700
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true

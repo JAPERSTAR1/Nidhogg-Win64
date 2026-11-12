@@ -1,0 +1,6 @@
+lobby.japer.me {
+    encode gzip
+    reverse_proxy 127.0.0.1:27880 {
+        header_up X-Real-IP {remote_host}
+    }
+}

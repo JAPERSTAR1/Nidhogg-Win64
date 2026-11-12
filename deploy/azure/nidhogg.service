@@ -1,0 +1,26 @@
+[Unit]
+Description=Nidhogg authenticated lobby and UDP/WSS relay
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=10
+[Service]
+User=nidhogg-server
+Group=nidhogg-server
+WorkingDirectory=/opt/nidhogg-server
+EnvironmentFile=/etc/nidhogg/server.env
+ExecStart=/usr/local/bin/node /opt/nidhogg-server/server.mjs
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/nidhogg
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0077
+MemoryMax=256M
+TasksMax=64
+LimitNOFILE=2048
+[Install]
+WantedBy=multi-user.target

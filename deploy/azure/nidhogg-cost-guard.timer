@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily Nidhogg cost check and fixed credit-protection deadline
+[Timer]
+OnBootSec=5min
+OnCalendar=*-*-* 00:05:00 UTC
+# Operator adds the actual absolute stop time in a systemd drop-in.
+Persistent=true
+[Install]
+WantedBy=timers.target

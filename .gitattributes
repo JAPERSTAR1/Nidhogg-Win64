@@ -12,3 +12,4 @@
 *.cmd text eol=crlf
 *.png binary
 *.ico binary
+deploy/azure/* text eol=lf
