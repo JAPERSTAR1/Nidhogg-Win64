@@ -245,7 +245,9 @@ bool HttpRequestJson(const std::string& method, const std::string& path, const s
         WinHttpCloseHandle(hReq);
         WinHttpCloseHandle(hConnect);
         WinHttpCloseHandle(hSession);
-        outErr = "Lobby server unreachable (" + core::CurrentSettings().lobbyServerUrl +
+        if (error == ERROR_WINHTTP_NAME_NOT_RESOLVED)
+            outErr = "DNS could not find " + u.hostUtf8 + ". Check your connection or retry after DNS updates. (WinHTTP 12007)";
+        else outErr = "Lobby server unreachable (" + core::CurrentSettings().lobbyServerUrl +
             "; WinHTTP " + std::to_string(error) + ")";
         return false;
     }
