@@ -1,0 +1,883 @@
+{
+  "recorded_at": "2026-11-12T14:41:37.886000+00:00",
+  "scope": "Two native Windows guest processes on one physical PC and one internet connection, through public Azure; not two independent physical networks.",
+  "endpoint": "https://lobby.japer.me",
+  "region": "uaenorth",
+  "protocol": "nidhogg-win64-2.1",
+  "second_physical_pc": "Unavailable; independent-network gameplay BLOCKED",
+  "tests": {
+    "azure-baseline-home-wss-retry": {
+      "host": {
+        "exit": 0,
+        "barrier": true,
+        "desync": false,
+        "timeout": false,
+        "wins": [],
+        "hashes": {
+          "480": "801220cc4f2da0cf",
+          "600": "e215454dd0b6803a",
+          "720": "93dd7fb547edf8c1",
+          "840": "39567ae486823359",
+          "960": "228460b20795e006",
+          "1080": "664f867b2149fddc",
+          "1200": "1a75ec55b5dde4cf",
+          "1320": "29ffc0f5ac01f243",
+          "1440": "844d5d9d5dce3aa2",
+          "1560": "d6ab5cad6c5ad409"
+        },
+        "stopped": false,
+        "summary": [
+          "frames=1600 checks=41 desync=0"
+        ],
+        "input_timing": [],
+        "transport_modes": [
+          "Relay"
+        ]
+      },
+      "guest": {
+        "exit": 0,
+        "barrier": true,
+        "desync": false,
+        "timeout": false,
+        "wins": [],
+        "hashes": {
+          "480": "801220cc4f2da0cf",
+          "600": "e215454dd0b6803a",
+          "720": "93dd7fb547edf8c1",
+          "840": "39567ae486823359",
+          "960": "228460b20795e006",
+          "1080": "664f867b2149fddc",
+          "1200": "1a75ec55b5dde4cf",
+          "1320": "29ffc0f5ac01f243",
+          "1440": "844d5d9d5dce3aa2",
+          "1560": "d6ab5cad6c5ad409"
+        },
+        "stopped": false,
+        "summary": [
+          "frames=1600 checks=41 desync=0"
+        ],
+        "input_timing": [],
+        "transport_modes": [
+          "Relay"
+        ]
+      }
+    },
+    "azure-phase-trim-udp": {
+      "host": {
+        "exit": 0,
+        "barrier": true,
+        "desync": false,
+        "timeout": false,
+        "wins": [
+          "yellowPlayer"
+        ],
+        "hashes": {
+          "480": "aa917e7e6e11d9f3",
+          "600": "eb70b09f8b01fd88",
+          "720": "4280515bb13c0936",
+          "840": "c885d4d7faeb7068",
+          "960": "0973ed917b564879",
+          "1080": "79f12ef0db29a7ad",
+          "1200": "94763158821fcbfc",
+          "1320": "ad324fcd5793fac4",
+          "1440": "cffccbae79473fd8",
+          "1560": "703c7c60448ec885",
+          "1680": "2312c39af7b57e7b",
+          "1800": "634f3705f76cf2fe",
+          "1920": "53da7dbf5b808311",
+          "2040": "cb40706f3ee41a8e",
+          "2160": "771a28c51bec1279",
+          "2280": "61306349e652f0ce",
+          "2400": "6e4ecd335e739f4f",
+          "2520": "55a3dc471e3dbab6",
+          "2640": "541a0c69d65715ce",
+          "2760": "b6ed570cb570b219"
+        },
+        "stopped": false,
+        "metrics": [
+          "fps=55.14 frameP50=16.67ms frameP95=22.31ms waitP95=0.00ms waitedFrames=13 rttP50=66.67ms rttP95=88.96ms jitterP95=20.44ms relayRtt=33.34ms sent=2971 received=2855"
+        ],
+        "agreedDelay": [
+          "3"
+        ],
+        "summary": [
+          "frames=2800 checks=81 desync=0"
+        ],
+        "input_timing": [
+          "sampleToSimulationP50=50.04ms sampleToSimulationP95=68.62ms delayFrames=3 samples=2477"
+        ],
+        "transport_modes": [
+          "UDPRelay"
+        ]
+      },
+      "guest": {
+        "exit": 0,
+        "barrier": true,
+        "desync": false,
+        "timeout": false,
+        "wins": [
+          "yellowPlayer"
+        ],
+        "hashes": {
+          "480": "aa917e7e6e11d9f3",
+          "600": "eb70b09f8b01fd88",
+          "720": "4280515bb13c0936",
+          "840": "c885d4d7faeb7068",
+          "960": "0973ed917b564879",
+          "1080": "79f12ef0db29a7ad",
+          "1200": "94763158821fcbfc",
+          "1320": "ad324fcd5793fac4",
+          "1440": "cffccbae79473fd8",
+          "1560": "703c7c60448ec885",
+          "1680": "2312c39af7b57e7b",
+          "1800": "634f3705f76cf2fe",
+          "1920": "53da7dbf5b808311",
+          "2040": "cb40706f3ee41a8e",
+          "2160": "771a28c51bec1279",
+          "2280": "61306349e652f0ce",
+          "2400": "6e4ecd335e739f4f",
+          "2520": "55a3dc471e3dbab6",
+          "2640": "541a0c69d65715ce",
+          "2760": "b6ed570cb570b219"
+        },
+        "stopped": false,
+        "metrics": [
+          "fps=55.14 frameP50=16.67ms frameP95=23.34ms waitP95=0.00ms waitedFrames=15 rttP50=66.67ms rttP95=88.78ms jitterP95=15.39ms relayRtt=33.34ms sent=2966 received=2857"
+        ],
+        "agreedDelay": [
+          "3"
+        ],
+        "summary": [
+          "frames=2800 checks=81 desync=0"
+        ],
+        "input_timing": [
+          "sampleToSimulationP50=50.03ms sampleToSimulationP95=70.97ms delayFrames=3 samples=2477"
+        ],
+        "transport_modes": [
+          "UDPRelay"
+        ]
+      }
+    },
+    "azure-final-loss-jitter": {
+      "host": {
+        "exit": 0,
+        "barrier": true,
+        "desync": false,
+        "timeout": false,
+        "wins": [
+          "yellowPlayer"
+        ],
+        "hashes": {
+          "480": "305ed6d5bbc767d2",
+          "600": "e3363ac180e3a7dc",
+          "720": "fafba4b68e997aad",
+          "840": "2319d54ae0f4e8eb",
+          "960": "aeb2fca32a1c5b54",
+          "1080": "12705789dcc335fa",
+          "1200": "d69615a359a107b7",
+          "1320": "2d73c74dd9fa3a9e",
+          "1440": "020b19ffe40bc197",
+          "1560": "22826f96a527a567",
+          "1680": "0a34836e9750c1dd",
+          "1800": "80735d217595f13a",
+          "1920": "731d6f8983309f5f",
+          "2040": "2d72645a8f0fa8fd",
+          "2160": "5304dad777850046",
+          "2280": "593ec417a6bebd30",
+          "2400": "4bc9c585fed242b6",
+          "2520": "d07e57ce31f9f8c4",
+          "2640": "5b6462515cd134a2",
+          "2760": "cd8b35df7b5644fb"
+        },
+        "stopped": false,
+        "metrics": [
+          "fps=54.84 frameP50=16.67ms frameP95=23.75ms waitP95=0.00ms waitedFrames=117 rttP50=99.99ms rttP95=126.45ms jitterP95=28.20ms relayRtt=33.36ms sent=2815 received=2699"
+        ],
+        "agreedDelay": [
+          "5"
+        ],
+        "summary": [
+          "frames=2800 checks=75 desync=0"
+        ],
+        "input_timing": [
+          "sampleToSimulationP50=83.35ms sampleToSimulationP95=127.77ms delayFrames=5 samples=2473"
+        ],
+        "transport_modes": [
+          "UDPRelay"
+        ]
+      },
+      "guest": {
+        "exit": 0,
+        "barrier": true,
+        "desync": false,
+        "timeout": false,
+        "wins": [
+          "yellowPlayer"
+        ],
+        "hashes": {
+          "480": "305ed6d5bbc767d2",
+          "600": "e3363ac180e3a7dc",
+          "720": "fafba4b68e997aad",
+          "840": "2319d54ae0f4e8eb",
+          "960": "aeb2fca32a1c5b54",
+          "1080": "12705789dcc335fa",
+          "1200": "d69615a359a107b7",
+          "1320": "2d73c74dd9fa3a9e",
+          "1440": "020b19ffe40bc197",
+          "1560": "22826f96a527a567",
+          "1680": "0a34836e9750c1dd",
+          "1800": "80735d217595f13a",
+          "1920": "731d6f8983309f5f",
+          "2040": "2d72645a8f0fa8fd",
+          "2160": "5304dad777850046",
+          "2280": "593ec417a6bebd30",
+          "2400": "4bc9c585fed242b6",
+          "2520": "d07e57ce31f9f8c4",
+          "2640": "5b6462515cd134a2",
+          "2760": "cd8b35df7b5644fb"
+        },
+        "stopped": false,
+        "metrics": [
+          "fps=54.84 frameP50=16.68ms frameP95=23.17ms waitP95=0.00ms waitedFrames=51 rttP50=99.99ms rttP95=135.65ms jitterP95=30.50ms relayRtt=49.95ms sent=2807 received=2706"
+        ],
+        "agreedDelay": [
+          "5"
+        ],
+        "summary": [
+          "frames=2800 checks=77 desync=0"
+        ],
+        "input_timing": [
+          "sampleToSimulationP50=83.36ms sampleToSimulationP95=117.18ms delayFrames=5 samples=2473"
+        ],
+        "transport_modes": [
+          "UDPRelay"
+        ]
+      }
+    },
+    "azure-final-soak": {
+      "host": {
+        "exit": 0,
+        "barrier": true,
+        "desync": false,
+        "timeout": false,
+        "wins": [
+          "yellowPlayer",
+          "yellowPlayer",
+          "yellowPlayer",
+          "yellowPlayer",
+          "yellowPlayer"
+        ],
+        "hashes": {
+          "480": "f3827e1dea914ccb",
+          "600": "0803c0b02a0354d3",
+          "720": "dbf1632e6869f16e",
+          "840": "bfc76aab503630a8",
+          "960": "6e4d5734e8aa28b8",
+          "1080": "fc8a999c3274bea4",
+          "1200": "cb2590ef91866242",
+          "1320": "817232243ae202a3",
+          "1440": "1f4259dffc0f5bb5",
+          "1560": "05a2b4b10bf8c23f",
+          "1680": "63417e7093458a25",
+          "1800": "21a28b7b947b0fff",
+          "1920": "58a640b8f9fc3c5c",
+          "2040": "1fc41e45752a09bc",
+          "2160": "d36cb4be344a702b",
+          "2280": "122dcef7cef2d5fe",
+          "2400": "204148aef7e45c5e",
+          "2520": "b0c10cd53fc5242c",
+          "2640": "cd5a092a5ac9f0f4",
+          "2760": "27c420fe65b800be",
+          "2880": "1a372e47bda3b63c",
+          "3000": "49eec4c8ba6a0b7e",
+          "3120": "805f4e6432baff32",
+          "3240": "daf61d0eb7afab72",
+          "3360": "c11565c5f9318a81",
+          "3480": "db9c57b59670a34f",
+          "3600": "ad795bb4d298369d",
+          "3720": "31cdaf61a468a2fb",
+          "3840": "413d1fda80bf4f35",
+          "3960": "1b05d0fe3548a1fd",
+          "4080": "8ce5d2be00cfe233",
+          "4200": "9532819989007ff8",
+          "4320": "908394f853e3193d",
+          "4440": "9134329094171fb9",
+          "4560": "c6d95916e8ca9e28",
+          "4680": "f22a4f8df51c7d83",
+          "4800": "fdaeb2414de24804",
+          "4920": "cb94b7e270e6f530",
+          "5040": "98c345a0587a2101",
+          "5160": "d1e46ed2eb5ff329",
+          "5280": "efefe54802e002a9",
+          "5400": "f7ecd8b8d968bc33",
+          "5520": "9aa0d69cf05dc728",
+          "5640": "1ed668b55dcadea5",
+          "5760": "68e96fc76cd82d86",
+          "5880": "31c32758a76b9ae0",
+          "6000": "02caae0444c3a742",
+          "6120": "5db430dc6286fb64",
+          "6240": "e456a8155bedf3a0",
+          "6360": "4713ff39c2b96fde",
+          "6480": "fab73f67b30458b8",
+          "6600": "9ed3e8d2d4ae3cee",
+          "6720": "cbe3e91a7e2de0c4",
+          "6840": "683d2cd36a57dfa3",
+          "6960": "0bce1d632edfaee0",
+          "7080": "9ef38f18c27bb5fa",
+          "7200": "7bd8cf25ff24c8a9",
+          "7320": "d3bdf577707b79d6",
+          "7440": "d08c32ea182ad33a",
+          "7560": "adda54893ad774e2",
+          "7680": "a04b1fa64516e79b",
+          "7800": "151fb5504549317c",
+          "7920": "a72bba076ef663b6",
+          "8040": "cb2ba2c5a361ad90",
+          "8160": "978618683e20a5b1",
+          "8280": "5899bac54b11f0a8",
+          "8400": "a4d401c0159fa9aa",
+          "8520": "4028acd41bc488ef",
+          "8640": "8e84a211003b4ff1",
+          "8760": "4c06b7cdd1703995",
+          "8880": "e3cffabf6a3079b0",
+          "9000": "ea7bb21723f13b49",
+          "9120": "9cef8b89afd6f857",
+          "9240": "8567291a9547d1d7",
+          "9360": "f02fb679d55d6127",
+          "9480": "6d3060cb09a1b743",
+          "9600": "0b66f0299e423e1c",
+          "9720": "b095a3372416c3b6",
+          "9840": "04fc41e456140b19",
+          "9960": "ef2bf3463892c2b2",
+          "10080": "04bc7ec44bbc89f9",
+          "10200": "9d12dafa2376e292",
+          "10320": "f354cc84a66123cb",
+          "10440": "180288e7fa152b11",
+          "10560": "9f02b4c6a87ceaa9",
+          "10680": "bcbdbc8ae632aa73",
+          "10800": "77567cddae3df857",
+          "10920": "74dc1a6373860e96",
+          "11040": "88f2105b96efbfa3",
+          "11160": "3b079faa0f7a63d4",
+          "11280": "461e3e0a681d7802",
+          "11400": "a0a5538729e1c580",
+          "11520": "c9cd1bcc1d0e69aa",
+          "11640": "11d80765969b6355",
+          "11760": "cd295f2dcc8f6d7c",
+          "11880": "7048618ebe90ae84"
+        },
+        "stopped": false,
+        "metrics": [
+          "fps=53.06 frameP50=16.67ms frameP95=25.77ms waitP95=0.00ms waitedFrames=93 rttP50=66.67ms rttP95=95.35ms jitterP95=19.30ms relayRtt=47.66ms sent=12515 received=12057"
+        ],
+        "agreedDelay": [
+          "3"
+        ],
+        "summary": [
+          "frames=12000 checks=387 desync=0"
+        ],
+        "input_timing": [
+          "sampleToSimulationP50=50.04ms sampleToSimulationP95=80.08ms delayFrames=3 samples=8192"
+        ],
+        "transport_modes": [
+          "UDPRelay"
+        ]
+      },
+      "guest": {
+        "exit": 0,
+        "barrier": true,
+        "desync": false,
+        "timeout": false,
+        "wins": [
+          "yellowPlayer",
+          "yellowPlayer",
+          "yellowPlayer",
+          "yellowPlayer",
+          "yellowPlayer"
+        ],
+        "hashes": {
+          "480": "f3827e1dea914ccb",
+          "600": "0803c0b02a0354d3",
+          "720": "dbf1632e6869f16e",
+          "840": "bfc76aab503630a8",
+          "960": "6e4d5734e8aa28b8",
+          "1080": "fc8a999c3274bea4",
+          "1200": "cb2590ef91866242",
+          "1320": "817232243ae202a3",
+          "1440": "1f4259dffc0f5bb5",
+          "1560": "05a2b4b10bf8c23f",
+          "1680": "63417e7093458a25",
+          "1800": "21a28b7b947b0fff",
+          "1920": "58a640b8f9fc3c5c",
+          "2040": "1fc41e45752a09bc",
+          "2160": "d36cb4be344a702b",
+          "2280": "122dcef7cef2d5fe",
+          "2400": "204148aef7e45c5e",
+          "2520": "b0c10cd53fc5242c",
+          "2640": "cd5a092a5ac9f0f4",
+          "2760": "27c420fe65b800be",
+          "2880": "1a372e47bda3b63c",
+          "3000": "49eec4c8ba6a0b7e",
+          "3120": "805f4e6432baff32",
+          "3240": "daf61d0eb7afab72",
+          "3360": "c11565c5f9318a81",
+          "3480": "db9c57b59670a34f",
+          "3600": "ad795bb4d298369d",
+          "3720": "31cdaf61a468a2fb",
+          "3840": "413d1fda80bf4f35",
+          "3960": "1b05d0fe3548a1fd",
+          "4080": "8ce5d2be00cfe233",
+          "4200": "9532819989007ff8",
+          "4320": "908394f853e3193d",
+          "4440": "9134329094171fb9",
+          "4560": "c6d95916e8ca9e28",
+          "4680": "f22a4f8df51c7d83",
+          "4800": "fdaeb2414de24804",
+          "4920": "cb94b7e270e6f530",
+          "5040": "98c345a0587a2101",
+          "5160": "d1e46ed2eb5ff329",
+          "5280": "efefe54802e002a9",
+          "5400": "f7ecd8b8d968bc33",
+          "5520": "9aa0d69cf05dc728",
+          "5640": "1ed668b55dcadea5",
+          "5760": "68e96fc76cd82d86",
+          "5880": "31c32758a76b9ae0",
+          "6000": "02caae0444c3a742",
+          "6120": "5db430dc6286fb64",
+          "6240": "e456a8155bedf3a0",
+          "6360": "4713ff39c2b96fde",
+          "6480": "fab73f67b30458b8",
+          "6600": "9ed3e8d2d4ae3cee",
+          "6720": "cbe3e91a7e2de0c4",
+          "6840": "683d2cd36a57dfa3",
+          "6960": "0bce1d632edfaee0",
+          "7080": "9ef38f18c27bb5fa",
+          "7200": "7bd8cf25ff24c8a9",
+          "7320": "d3bdf577707b79d6",
+          "7440": "d08c32ea182ad33a",
+          "7560": "adda54893ad774e2",
+          "7680": "a04b1fa64516e79b",
+          "7800": "151fb5504549317c",
+          "7920": "a72bba076ef663b6",
+          "8040": "cb2ba2c5a361ad90",
+          "8160": "978618683e20a5b1",
+          "8280": "5899bac54b11f0a8",
+          "8400": "a4d401c0159fa9aa",
+          "8520": "4028acd41bc488ef",
+          "8640": "8e84a211003b4ff1",
+          "8760": "4c06b7cdd1703995",
+          "8880": "e3cffabf6a3079b0",
+          "9000": "ea7bb21723f13b49",
+          "9120": "9cef8b89afd6f857",
+          "9240": "8567291a9547d1d7",
+          "9360": "f02fb679d55d6127",
+          "9480": "6d3060cb09a1b743",
+          "9600": "0b66f0299e423e1c",
+          "9720": "b095a3372416c3b6",
+          "9840": "04fc41e456140b19",
+          "9960": "ef2bf3463892c2b2",
+          "10080": "04bc7ec44bbc89f9",
+          "10200": "9d12dafa2376e292",
+          "10320": "f354cc84a66123cb",
+          "10440": "180288e7fa152b11",
+          "10560": "9f02b4c6a87ceaa9",
+          "10680": "bcbdbc8ae632aa73",
+          "10800": "77567cddae3df857",
+          "10920": "74dc1a6373860e96",
+          "11040": "88f2105b96efbfa3",
+          "11160": "3b079faa0f7a63d4",
+          "11280": "461e3e0a681d7802",
+          "11400": "a0a5538729e1c580",
+          "11520": "c9cd1bcc1d0e69aa",
+          "11640": "11d80765969b6355",
+          "11760": "cd295f2dcc8f6d7c",
+          "11880": "7048618ebe90ae84"
+        },
+        "stopped": false,
+        "metrics": [
+          "fps=53.07 frameP50=16.67ms frameP95=26.43ms waitP95=2.54ms waitedFrames=1069 rttP50=66.67ms rttP95=83.60ms jitterP95=16.42ms relayRtt=50.31ms sent=12512 received=12055"
+        ],
+        "agreedDelay": [
+          "3"
+        ],
+        "summary": [
+          "frames=12000 checks=387 desync=0"
+        ],
+        "input_timing": [
+          "sampleToSimulationP50=50.03ms sampleToSimulationP95=81.14ms delayFrames=3 samples=8192"
+        ],
+        "transport_modes": [
+          "UDPRelay"
+        ]
+      }
+    },
+    "azure-final-wss": {
+      "host": {
+        "exit": 0,
+        "barrier": true,
+        "desync": false,
+        "timeout": false,
+        "wins": [
+          "yellowPlayer"
+        ],
+        "hashes": {
+          "480": "f3ea5122856ec245",
+          "600": "eff6034f8be10538",
+          "720": "2264af0e2166c2fc",
+          "840": "35273bbd151a9b83",
+          "960": "5bca18c26e28f709",
+          "1080": "6adf209fb17a2a52",
+          "1200": "1d0aa7e5d6439c90",
+          "1320": "78bbffba713805a1",
+          "1440": "380464ff7119ab0b",
+          "1560": "0db0350d2dc00183",
+          "1680": "e1de57a6d7d901da",
+          "1800": "b1f1fc58d3895f52",
+          "1920": "545595d5912a7201",
+          "2040": "6fd9e2afb6a27630",
+          "2160": "7f168b489043cabd",
+          "2280": "a29289de5c3a3098",
+          "2400": "990144b173e44864",
+          "2520": "e4f872f6ce744d8d",
+          "2640": "196590165ac201e5",
+          "2760": "452e5d54ba4432cf"
+        },
+        "stopped": false,
+        "metrics": [
+          "fps=54.57 frameP50=16.67ms frameP95=23.86ms waitP95=0.00ms waitedFrames=11 rttP50=66.67ms rttP95=92.65ms jitterP95=20.74ms relayRtt=0.00ms sent=2867 received=2854"
+        ],
+        "agreedDelay": [
+          "3"
+        ],
+        "summary": [
+          "frames=2800 checks=81 desync=0"
+        ],
+        "input_timing": [
+          "sampleToSimulationP50=50.01ms sampleToSimulationP95=72.27ms delayFrames=3 samples=2477"
+        ],
+        "transport_modes": [
+          "WSSRelay"
+        ]
+      },
+      "guest": {
+        "exit": 0,
+        "barrier": true,
+        "desync": false,
+        "timeout": false,
+        "wins": [
+          "yellowPlayer"
+        ],
+        "hashes": {
+          "480": "f3ea5122856ec245",
+          "600": "eff6034f8be10538",
+          "720": "2264af0e2166c2fc",
+          "840": "35273bbd151a9b83",
+          "960": "5bca18c26e28f709",
+          "1080": "6adf209fb17a2a52",
+          "1200": "1d0aa7e5d6439c90",
+          "1320": "78bbffba713805a1",
+          "1440": "380464ff7119ab0b",
+          "1560": "0db0350d2dc00183",
+          "1680": "e1de57a6d7d901da",
+          "1800": "b1f1fc58d3895f52",
+          "1920": "545595d5912a7201",
+          "2040": "6fd9e2afb6a27630",
+          "2160": "7f168b489043cabd",
+          "2280": "a29289de5c3a3098",
+          "2400": "990144b173e44864",
+          "2520": "e4f872f6ce744d8d",
+          "2640": "196590165ac201e5",
+          "2760": "452e5d54ba4432cf"
+        },
+        "stopped": false,
+        "metrics": [
+          "fps=54.57 frameP50=16.67ms frameP95=24.97ms waitP95=2.81ms waitedFrames=274 rttP50=66.67ms rttP95=83.34ms jitterP95=16.06ms relayRtt=0.00ms sent=2856 received=2863"
+        ],
+        "agreedDelay": [
+          "3"
+        ],
+        "summary": [
+          "frames=2800 checks=81 desync=0"
+        ],
+        "input_timing": [
+          "sampleToSimulationP50=50.01ms sampleToSimulationP95=79.66ms delayFrames=3 samples=2477"
+        ],
+        "transport_modes": [
+          "WSSRelay"
+        ]
+      }
+    },
+    "azure-final-direct-local": {
+      "host": {
+        "exit": 0,
+        "barrier": true,
+        "desync": false,
+        "timeout": false,
+        "wins": [],
+        "hashes": {
+          "480": "b8d221eab5511e7b",
+          "600": "32f8b0fb1c566685",
+          "720": "d9b9e77fe14306e8",
+          "840": "94e055c5e33c91fc",
+          "960": "c60ab5c7959ba6ab",
+          "1080": "861e74db1abafd0e",
+          "1200": "a6385d613d86c910",
+          "1320": "73f92a2872f2c84c"
+        },
+        "stopped": false,
+        "metrics": [
+          "fps=60.01 frameP50=16.67ms frameP95=16.69ms waitP95=0.00ms waitedFrames=0 rttP50=16.66ms rttP95=16.73ms jitterP95=1.82ms relayRtt=16.67ms sent=1516 received=1452"
+        ],
+        "agreedDelay": [
+          "2"
+        ],
+        "summary": [
+          "frames=1400 checks=34 desync=0"
+        ],
+        "input_timing": [
+          "sampleToSimulationP50=33.35ms sampleToSimulationP95=33.44ms delayFrames=2 samples=1079"
+        ],
+        "transport_modes": [
+          "DirectP2P"
+        ]
+      },
+      "guest": {
+        "exit": 0,
+        "barrier": true,
+        "desync": false,
+        "timeout": false,
+        "wins": [],
+        "hashes": {
+          "480": "b8d221eab5511e7b",
+          "600": "32f8b0fb1c566685",
+          "720": "d9b9e77fe14306e8",
+          "840": "94e055c5e33c91fc",
+          "960": "c60ab5c7959ba6ab",
+          "1080": "861e74db1abafd0e",
+          "1200": "a6385d613d86c910",
+          "1320": "73f92a2872f2c84c"
+        },
+        "stopped": false,
+        "metrics": [
+          "fps=60.02 frameP50=16.67ms frameP95=16.69ms waitP95=0.00ms waitedFrames=0 rttP50=16.66ms rttP95=16.69ms jitterP95=2.12ms relayRtt=16.67ms sent=1504 received=1456"
+        ],
+        "agreedDelay": [
+          "2"
+        ],
+        "summary": [
+          "frames=1400 checks=34 desync=0"
+        ],
+        "input_timing": [
+          "sampleToSimulationP50=33.36ms sampleToSimulationP95=33.43ms delayFrames=2 samples=1079"
+        ],
+        "transport_modes": [
+          "DirectP2P"
+        ]
+      }
+    },
+    "azure-final-disconnect": {
+      "host": {
+        "exit": 0,
+        "barrier": true,
+        "desync": false,
+        "timeout": false,
+        "wins": [],
+        "hashes": {
+          "480": "7974a0526a8f1249",
+          "600": "179c2e14a0792c19",
+          "720": "1213599405b76dc6",
+          "840": "ff0476e8a4447957"
+        },
+        "stopped": true,
+        "metrics": [
+          "fps=60.02 frameP50=16.67ms frameP95=16.73ms waitP95=0.00ms waitedFrames=0 rttP50=66.66ms rttP95=66.72ms jitterP95=2.84ms relayRtt=33.35ms sent=1001 received=953"
+        ],
+        "agreedDelay": [
+          "3"
+        ],
+        "summary": [
+          "frames=902 checks=17 desync=0"
+        ],
+        "input_timing": [
+          "sampleToSimulationP50=50.03ms sampleToSimulationP95=50.19ms delayFrames=3 samples=579"
+        ],
+        "transport_modes": [
+          "UDPRelay"
+        ]
+      },
+      "guest": {
+        "exit": 0,
+        "barrier": true,
+        "desync": false,
+        "timeout": false,
+        "wins": [],
+        "hashes": {
+          "480": "7974a0526a8f1249",
+          "600": "179c2e14a0792c19",
+          "720": "1213599405b76dc6",
+          "840": "ff0476e8a4447957"
+        },
+        "stopped": false,
+        "metrics": [
+          "fps=60.01 frameP50=16.67ms frameP95=16.73ms waitP95=0.00ms waitedFrames=0 rttP50=66.66ms rttP95=66.73ms jitterP95=2.83ms relayRtt=33.35ms sent=992 received=955"
+        ],
+        "agreedDelay": [
+          "3"
+        ],
+        "summary": [
+          "frames=900 checks=17 desync=0"
+        ],
+        "input_timing": [
+          "sampleToSimulationP50=50.03ms sampleToSimulationP95=50.18ms delayFrames=3 samples=577"
+        ],
+        "transport_modes": [
+          "UDPRelay"
+        ]
+      }
+    },
+    "azure-after-reboot-ready": {
+      "host": {
+        "exit": 0,
+        "barrier": true,
+        "desync": false,
+        "timeout": false,
+        "wins": [],
+        "hashes": {
+          "480": "b6e9650ec9e1ce18",
+          "600": "5394d9c1ebc71b1c",
+          "720": "9054c8a11aea185e",
+          "840": "a1a8274cb7955b8c",
+          "960": "0ede1fb53bf62383",
+          "1080": "9e421e64417b78ef",
+          "1200": "0ae0ba9b7ec22a74",
+          "1320": "8368e9e93a72dbda",
+          "1440": "3379d5a5b22b694c"
+        },
+        "stopped": false,
+        "metrics": [
+          "fps=60.00 frameP50=16.67ms frameP95=16.70ms waitP95=0.00ms waitedFrames=0 rttP50=66.66ms rttP95=66.70ms jitterP95=3.00ms relayRtt=33.34ms sent=1619 received=1551"
+        ],
+        "agreedDelay": [
+          "3"
+        ],
+        "summary": [
+          "frames=1500 checks=37 desync=0"
+        ],
+        "input_timing": [
+          "sampleToSimulationP50=50.04ms sampleToSimulationP95=50.14ms delayFrames=3 samples=1177"
+        ],
+        "transport_modes": [
+          "UDPRelay"
+        ]
+      },
+      "guest": {
+        "exit": 0,
+        "barrier": true,
+        "desync": false,
+        "timeout": false,
+        "wins": [],
+        "hashes": {
+          "480": "b6e9650ec9e1ce18",
+          "600": "5394d9c1ebc71b1c",
+          "720": "9054c8a11aea185e",
+          "840": "a1a8274cb7955b8c",
+          "960": "0ede1fb53bf62383",
+          "1080": "9e421e64417b78ef",
+          "1200": "0ae0ba9b7ec22a74",
+          "1320": "8368e9e93a72dbda",
+          "1440": "3379d5a5b22b694c"
+        },
+        "stopped": false,
+        "metrics": [
+          "fps=60.00 frameP50=16.67ms frameP95=16.70ms waitP95=0.00ms waitedFrames=0 rttP50=66.66ms rttP95=66.71ms jitterP95=3.04ms relayRtt=33.34ms sent=1613 received=1555"
+        ],
+        "agreedDelay": [
+          "3"
+        ],
+        "summary": [
+          "frames=1500 checks=37 desync=0"
+        ],
+        "input_timing": [
+          "sampleToSimulationP50=50.03ms sampleToSimulationP95=50.13ms delayFrames=3 samples=1177"
+        ],
+        "transport_modes": [
+          "UDPRelay"
+        ]
+      }
+    }
+  },
+  "region_probes": {
+    "uaenorth": {
+      "region": "uaenorth",
+      "ip": "40.119.184.25",
+      "sent": 1200,
+      "received": 1200,
+      "loss_percent": 0.0,
+      "rtt_ms": {
+        "min": 27.73660000093514,
+        "p50": 28.81919999344973,
+        "p95": 29.81759999966016,
+        "p99": 30.8218999998644
+      },
+      "jitter_ms": {
+        "p50": 0.9582999991835095,
+        "p95": 1.9587000060710125
+      },
+      "scope": "UDP echo from operator Windows internet link; not a two-player match"
+    },
+    "francecentral": {
+      "region": "francecentral",
+      "ip": "20.19.209.10",
+      "sent": 1200,
+      "received": 1200,
+      "loss_percent": 0.0,
+      "rtt_ms": {
+        "min": 93.30190000036964,
+        "p50": 94.36660000210395,
+        "p95": 94.45850000338396,
+        "p99": 94.98080000048503
+      },
+      "jitter_ms": {
+        "p50": 0.08430000161752105,
+        "p95": 1.0454000002937391
+      },
+      "scope": "UDP echo from operator Windows internet link; not a two-player match"
+    },
+    "italynorth": {
+      "region": "italynorth",
+      "ip": "172.213.27.165",
+      "sent": 1200,
+      "received": 1200,
+      "loss_percent": 0.0,
+      "rtt_ms": {
+        "min": 93.28969999478431,
+        "p50": 94.36149999964982,
+        "p95": 94.4528000036371,
+        "p99": 94.87700000318
+      },
+      "jitter_ms": {
+        "p50": 0.6420999998226762,
+        "p95": 1.0481999997864477
+      },
+      "scope": "UDP echo from operator Windows internet link; not a two-player match"
+    }
+  },
+  "failures_retained": [
+    "Initial home WSS join timeout, before successful retry",
+    "Initial post-reboot room attempt started before VM boot finished; ready retry passed"
+  ],
+  "offline_regression": {
+    "nidhogg_host.exe subsystem": true,
+    "Nidhogg.exe subsystem": true,
+    "local-versus clean exit": true,
+    "local-versus renderer": true,
+    "local-versus audio mixed": true,
+    "local-versus screenshot": true,
+    "local versus completion": true,
+    "arcade clean exit": true,
+    "arcade renderer": true,
+    "arcade audio mixed": true,
+    "arcade screenshot": true,
+    "arcade entry": true
+  },
+  "gui_executable_sha256": "d1f36a409f45d4a4e15b91dc4dfcf73c5b28ee421c7033a9f13f15848c517a32"
+}

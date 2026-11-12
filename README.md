@@ -8,17 +8,18 @@ This is a community engineering project, unaffiliated with the game's creators
 or Sony. Original game executables and assets are not included in this repository
 or its asset-free runtime packages. Supply your own CUSA00920 files.
 
-**Online play is experimental.** Two local guest processes completed matching
-games through a public HTTPS/WebSocket tunnel. Separate Windows PCs on independent
-internet connections have not been verified. Relay RTT measured 250–360 ms on
-the tested route; direct UDP is preferred. See the
-[verification record](docs/NETWORK-VERIFICATION.md) for evidence and limitations.
+**Online play is experimental.** The 1.1 candidate uses Azure UAE North UDP relay
+with WSS fallback, automatic delay negotiation and clock-aligned input sampling.
+Two native processes completed real matches through the public endpoint; two
+physical PCs on separate connections remain unverified. Server RTT measured
+29 ms on the operator connection. See [current measurements](docs/AZURE-VERIFICATION.md)
+and [deployment/cost limits](docs/AZURE-DEPLOYMENT.md).
 
 ## Play on Windows
 
-1. Download [Nidhogg-Windows-v1.0.0-x64.zip](https://github.com/JAPERSTAR1/Nidhogg-Win64-Port/releases/tag/v1.0.0)
-   and extract the complete ZIP, or build the runtime below. This release targets
-   offline/local play; online play remains experimental.
+1. Download [Nidhogg-Windows-v1.1.0-rc.1-x64.zip](https://github.com/JAPERSTAR1/Nidhogg-Win64-Port/releases/tag/v1.1.0-rc.1)
+   and extract the complete ZIP, or build the runtime below. The previous v1.0.0 remains available for offline/local play;
+   both online players must use the new client.
 2. Run `Nidhogg.exe` and select your CUSA00920 folder containing `eboot.bin` and
    `Data/`. A sibling `CUSA00920/` folder is also discovered automatically.
 3. Use **F1** for display, audio, controls and online settings. Keyboard and
@@ -26,8 +27,8 @@ the tested route; direct UDP is preferred. See the
 4. Open **Online Multiplayer → Host/Join → Ready → Start**. Private rooms have
    six-character codes. Each online player uses their own Player 1 bindings.
 
-The default endpoint is `https://lobby.japer.me`. The operator computer must stay
-on for matchmaking and relay. Players need no VPN, Node.js or tunnel software.
+The default endpoint is `https://lobby.japer.me`. The Azure server operates independently
+of the operator PC, subject to its promotional-credit shutdown limits. Players need no VPN, Node.js or tunnel software.
 An unavailable endpoint does not prevent offline play.
 
 ## Build
@@ -80,20 +81,20 @@ source releases.
 | `port/src/audio/`, `atrac9/` | Windows audio and codec integration |
 | `port/src/core/`, `ui/` | Settings, diagnostics and native overlays |
 | `port/src/net/` | Input synchronization, packet authentication, UDP/STUN and WSS |
-| `server/`, `deploy/` | Lobby/relay backend and tunnel configuration template |
+| `server/`, `deploy/` | Lobby/relay backend, Azure services and monitoring |
 | `analysis/`, `tools/` | Reverse-engineering records and investigation utilities |
 | `tests/` | Backend-independent native gameplay regression harnesses |
 
 ## Documentation
 
 - [Multiplayer architecture and deployment](docs/MULTIPLAYER.md)
-- [Verification status and outstanding limitations](docs/NETWORK-VERIFICATION.md)
+- [Verification status and outstanding limitations](docs/AZURE-VERIFICATION.md)
 - [Runtime architecture](docs/ARCHITECTURE.md)
 - [Reconstructed history and original snapshot provenance](docs/HISTORY.md)
 - [Initial research archive](docs/archive/INITIAL-RESEARCH.md)
 - [Contributing](CONTRIBUTING.md), [security reporting](SECURITY.md),
   [third-party notices](THIRD_PARTY_NOTICES.md), [changelog](CHANGELOG.md)
 
-The reconstructed branch contains 632 commits with an explicitly synthetic
+The v1.0.0 reconstructed segment contains 632 commits with an explicitly synthetic
 author/committer date schedule. Those dates do not establish nine months of actual work.
 Original commit histories are retained on archive branches and in local bundles.

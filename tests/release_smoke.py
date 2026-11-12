@@ -18,19 +18,19 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--package', type=Path, default=ROOT / 'dist/Nidhogg-Windows-v1.0.0-x64.zip')
+    parser.add_argument('--package', type=Path, default=ROOT / 'dist/Nidhogg-Windows-v1.1.0-rc.1-x64.zip')
     parser.add_argument('--assets', type=Path, default=Path(os.environ.get('NIDHOGG_ASSETS', ROOT / 'CUSA00920')))
     args = parser.parse_args()
     assets = args.assets.resolve()
     assert (assets / 'eboot.bin').is_file() and (assets / 'Data').is_dir(), 'Supply --assets CUSA00920'
     original_hash = hashlib.sha256((assets / 'eboot.bin').read_bytes()).hexdigest()
-    output = ROOT / 'tests/results' / ('release-v1.0.0-' + datetime.now().strftime('%Y%m%d-%H%M%S-%f'))
+    output = ROOT / 'tests/results' / (args.package.stem + '-' + datetime.now().strftime('%Y%m%d-%H%M%S-%f'))
     extracted = output / 'package'
     extracted.mkdir(parents=True)
     expected = {'Nidhogg.exe', 'Nidhogg.png', 'Play Online.cmd', 'READ-ME.txt',
                 'READ-ME-AR.txt', 'RELEASE-NOTES.md', 'RELEASE-VERIFICATION.md', 'release-manifest.json',
                 'MULTIPLAYER.md', 'NETWORK-VERIFICATION.md', 'THIRD_PARTY_NOTICES.md',
-                'LibAtrac9-LICENSE.txt'}
+                'LibAtrac9-LICENSE.txt', 'AZURE-VERIFICATION.md', 'AZURE-DEPLOYMENT.md'}
     with zipfile.ZipFile(args.package) as z:
         assert set(z.namelist()) == expected, 'Unexpected package entries'
         assert z.testzip() is None, 'Corrupt ZIP'
@@ -114,7 +114,7 @@ def main():
               'executable_sha256': exe_hash, 'source_commit': manifest['sourceCommit'],
               'checks': checks, 'games': results, 'passed': all(checks.values())}
     (output / 'report.json').write_text(json.dumps(report, indent=2), encoding='utf8')
-    latest = ROOT / 'tests/results/release-v1.0.0-latest.json'
+    latest = ROOT / ('tests/results/' + args.package.stem + '-latest.json')
     latest.write_text(json.dumps({'report': str(output / 'report.json')}, indent=2), encoding='utf8')
     print(json.dumps({'report': str(output / 'report.json'), 'passed': sum(checks.values()),
                       'total': len(checks), 'failures': [k for k,v in checks.items() if not v]}, indent=2))

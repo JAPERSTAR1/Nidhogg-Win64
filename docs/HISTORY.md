@@ -1,7 +1,8 @@
 # Reconstructed project history
 
 This branch is a **source reconstruction**, created on 2026-11-12.
-Its **632 commits** have synthetic author dates distributed irregularly from
+The v1.0.0 tag contains **632 reconstructed commits**; subsequent development
+adds ordinary commits with actual timestamps. The reconstructed segment has synthetic author dates distributed irregularly from
 2026-02-12 to 2026-11-12 at the owner's request.
 They do **not** demonstrate nine months of actual development or contributions.
 Both author and committer dates are synthetic after the requested metadata

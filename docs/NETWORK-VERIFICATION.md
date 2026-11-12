@@ -1,3 +1,5 @@
+> Historical Cloudflare/home-hosted results. Current Azure deployment and measurements are in [AZURE-VERIFICATION.md](AZURE-VERIFICATION.md).
+
 # Verification record — 2026-11-12
 
 The v1.0.0 offline/local release has a separate [packaged-binary verification

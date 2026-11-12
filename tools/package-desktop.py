@@ -46,6 +46,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--assets', type=Path, default=Path(r'C:\Users\puy12\Downloads\g\CUSA00920'))
     parser.add_argument('--desktop', type=Path, default=desktop_folder())
+    parser.add_argument('--windows-only', action='store_true', help='Do not create another original-asset backup')
     args = parser.parse_args()
     source = args.assets.resolve()
     if not (source / 'eboot.bin').is_file() or not (source / 'Data').is_dir():
@@ -53,7 +54,7 @@ def main():
     executable = ROOT / 'port/out/Nidhogg.exe'
     if not executable.is_file(): raise RuntimeError('Build port/build.ps1 first')
     original_before = manifest(source)
-    names = ['Nidhogg Windows - Ready to Play', 'Nidhogg Original - CUSA00920']
+    names = ['Nidhogg Windows 1.1 Azure - Ready to Play', 'Nidhogg Original - CUSA00920']
     suffix = ''
     if any((args.desktop / name).exists() or (args.desktop / (name + '.zip')).exists() for name in names):
         suffix = ' - ' + datetime.now(timezone(timedelta(hours=3))).strftime('%Y%m%d-%H%M%S')
@@ -86,12 +87,14 @@ def main():
         'كل لاعب يستخدم أزرار اللاعب الأول على جهازه.\n'
         'الخادم: https://lobby.japer.me\n'
         'قد يتأخر ظهور العنوان الجديد عند بعض مزودي DNS.\n'
-        'الخادم يعتمد على بقاء جهاز المشغّل متصلًا بالإنترنت.\n'
+        'الخادم يعمل على Azure بشكل مستقل عن جهاز المشغّل ضمن حدود الرصيد.\n'
+        'يجب تحديث نسخة اللاعبين إلى 1.1. للأونلاين حالة تجريبية.\n'
+        'السيرفر مضبوط على إيقاف تلقائي قرب 20 نوفمبر لحماية الرصيد.\n'
         'لا يحتاج اللاعب إلى VPN أو Node.js أو cloudflared.\n\n'
         'الإعدادات والحفظ ستكون داخل هذا المجلد؛ لا تتضمن الحزمة بيانات حفظ شخصية.\n',
         encoding='utf-8-sig')
-    shutil.copytree(source, original)
-    copied_original = manifest(original)
+    if not args.windows_only: shutil.copytree(source, original)
+    copied_original = manifest(original) if not args.windows_only else original_before
     copied_runtime = manifest(runtime)
     expected_runtime = {name: value for name, value in original_before.items()
                         if name == 'eboot.bin' or name.startswith('Data/')}
@@ -99,8 +102,8 @@ def main():
         raise RuntimeError('Copied assets do not match their source')
     if manifest(source) != original_before:
         raise RuntimeError('Original source changed during packaging')
-    archives = [archive(playable), archive(original)]
-    report = {'windows_folder': str(playable), 'original_folder': str(original),
+    archives = [archive(playable)] + ([] if args.windows_only else [archive(original)])
+    report = {'windows_folder': str(playable), 'original_folder': None if args.windows_only else str(original),
               'original_files': len(original_before), 'runtime_asset_files': len(copied_runtime),
               'copied_assets_match': True, 'original_source_unchanged': True,
               'executable_sha256': sha256(playable / 'Nidhogg.exe'),

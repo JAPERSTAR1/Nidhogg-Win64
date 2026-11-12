@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.0-rc.1 — 2026-11-12
+
+- Azure UAE North authenticated UDP relay, with HTTPS/WSS fallback.
+- Automatic delay agreement, shared start and bounded frame-phase correction.
+- RTT/jitter/wait/input timing diagnostics and loss/reordering tests.
+- Hardened systemd deployment, recovery and promotional-credit guards.
+- Independent-network player validation remains outstanding.
+
+
 Changes below summarize recovered snapshots. They are not release dates inferred
 from the synthetic author-date schedule; see docs/HISTORY.md.
 
