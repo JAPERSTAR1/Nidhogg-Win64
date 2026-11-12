@@ -16,8 +16,9 @@ the tested route; direct UDP is preferred. See the
 
 ## Play on Windows
 
-1. Build the runtime below, or obtain an asset-free Windows runtime package from
-   a release that actually includes one.
+1. Download [Nidhogg-Windows-v1.0.0-x64.zip](https://github.com/JAPERSTAR1/Nidhogg-Win64-Port/releases/tag/v1.0.0)
+   and extract the complete ZIP, or build the runtime below. This release targets
+   offline/local play; online play remains experimental.
 2. Run `Nidhogg.exe` and select your CUSA00920 folder containing `eboot.bin` and
    `Data/`. A sibling `CUSA00920/` folder is also discovered automatically.
 3. Use **F1** for display, audio, controls and online settings. Keyboard and
@@ -94,5 +95,5 @@ source releases.
   [third-party notices](THIRD_PARTY_NOTICES.md), [changelog](CHANGELOG.md)
 
 The reconstructed branch contains 632 commits with an explicitly synthetic
-author-date schedule. Those dates do not establish nine months of actual work.
+author/committer date schedule. Those dates do not establish nine months of actual work.
 Original commit histories are retained on archive branches and in local bundles.

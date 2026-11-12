@@ -1,0 +1,633 @@
+sequence,synthetic_author_date,synthetic_committer_date,source_stage,subject
+1,2026-02-12T10:17:23+03:00,2026-02-12T10:17:23+03:00,Repository scaffolding,build: introduce ignore rules for User-specific files
+2,2026-02-13T15:04:57+03:00,2026-02-13T15:04:57+03:00,Repository scaffolding,build: recover ignore rules for Files built by Visual Studio
+3,2026-02-13T19:09:55+03:00,2026-02-13T19:09:55+03:00,Repository scaffolding,build: recover ignore rules for Web workbench (sass)
+4,2026-02-17T17:48:53+03:00,2026-02-17T17:48:53+03:00,Repository scaffolding,build: recover ignore rules for SQL Server files
+5,2026-02-18T09:32:28+03:00,2026-02-18T09:32:28+03:00,SELF analysis and initial Windows host,build: recover ignore rules for Python / temporary
+6,2026-02-19T07:03:35+03:00,2026-02-19T07:03:35+03:00,SELF analysis and initial Windows host,build: recover ignore rules for Game assets and audio
+7,2026-02-19T19:01:50+03:00,2026-02-19T19:01:50+03:00,SELF analysis and initial Windows host,build: recover ignore rules for Original PS4 executables and libraries
+8,2026-02-19T21:04:33+03:00,2026-02-19T21:04:33+03:00,SELF analysis and initial Windows host,docs: introduce README.md guidance on nidhogg-port
+9,2026-02-19T21:25:13+03:00,2026-02-19T21:25:13+03:00,SELF analysis and initial Windows host,research: introduce guest address mapping investigation notes
+10,2026-02-19T21:42:01+03:00,2026-02-19T21:42:01+03:00,SELF analysis and initial Windows host,research: introduce recovered guest function and call inventory
+11,2026-02-20T10:15:49+03:00,2026-02-20T10:15:49+03:00,SELF analysis and initial Windows host,research: introduce guest import call-site references
+12,2026-02-20T10:52:41+03:00,2026-02-20T10:52:41+03:00,SELF analysis and initial Windows host,research: introduce guest import slot inventory
+13,2026-02-20T15:24:34+03:00,2026-02-20T15:24:34+03:00,SELF analysis and initial Windows host,research: introduce guest function roots and call graph evidence
+14,2026-02-20T15:25:46+03:00,2026-02-20T15:25:46+03:00,SELF analysis and initial Windows host,research: introduce import slot string-reference evidence
+15,2026-02-20T18:45:12+03:00,2026-02-20T18:45:12+03:00,SELF analysis and initial Windows host,research: introduce original guest string-reference inventory
+16,2026-02-20T18:51:50+03:00,2026-02-20T18:51:50+03:00,SELF analysis and initial Windows host,graphics: recover DecodeBuffer in d3d11.cpp
+17,2026-02-20T20:56:45+03:00,2026-02-20T20:56:45+03:00,SELF analysis and initial Windows host,graphics: recover Readable in d3d11.cpp
+18,2026-02-20T21:18:26+03:00,2026-02-20T21:18:26+03:00,SELF analysis and initial Windows host,graphics: recover CreateTexture in d3d11.cpp
+19,2026-02-20T21:58:49+03:00,2026-02-20T21:58:49+03:00,SELF analysis and initial Windows host,graphics: recover MapClamp in d3d11.cpp
+20,2026-02-20T22:58:01+03:00,2026-02-20T22:58:01+03:00,SELF analysis and initial Windows host,graphics: recover CompileShaders in d3d11.cpp
+21,2026-02-20T23:33:57+03:00,2026-02-20T23:33:57+03:00,SELF analysis and initial Windows host,graphics: recover EnsureRenderer in d3d11.cpp
+22,2026-02-22T11:42:10+03:00,2026-02-22T11:42:10+03:00,SELF analysis and initial Windows host,graphics: recover LoadMatrix in d3d11.cpp
+23,2026-02-22T11:49:23+03:00,2026-02-22T11:49:23+03:00,SELF analysis and initial Windows host,graphics: recover RenderFrame in d3d11.cpp
+24,2026-02-22T11:56:08+03:00,2026-02-22T11:56:08+03:00,SELF analysis and initial Windows host,graphics: recover RenderFrame in d3d11.cpp (section 2)
+25,2026-02-22T12:29:03+03:00,2026-02-22T12:29:03+03:00,SELF analysis and initial Windows host,graphics: recover RenderFrame in d3d11.cpp (section 3)
+26,2026-02-22T21:02:54+03:00,2026-02-22T21:02:54+03:00,SELF analysis and initial Windows host,graphics: introduce OpName in pm4.cpp
+27,2026-02-25T07:21:16+03:00,2026-02-25T07:21:16+03:00,SELF analysis and initial Windows host,graphics: recover Machine::Packet in pm4.cpp
+28,2026-02-25T07:37:14+03:00,2026-02-25T07:37:14+03:00,SELF analysis and initial Windows host,graphics: recover Machine::SetRegs in pm4.cpp
+29,2026-02-25T07:56:37+03:00,2026-02-25T07:56:37+03:00,SELF analysis and initial Windows host,graphics: introduce draws in pm4.h
+30,2026-02-25T12:05:24+03:00,2026-02-25T12:05:24+03:00,SELF analysis and initial Windows host,hle: introduce Configure in hle.cpp
+31,2026-02-25T12:12:24+03:00,2026-02-25T12:12:24+03:00,SELF analysis and initial Windows host,hle: recover FormatVa in hle.cpp
+32,2026-02-25T13:24:35+03:00,2026-02-25T13:24:35+03:00,SELF analysis and initial Windows host,hle: recover MakeVa in hle.cpp
+33,2026-02-25T15:41:26+03:00,2026-02-25T15:41:26+03:00,SELF analysis and initial Windows host,hle: recover GuestQsort in hle.cpp
+34,2026-02-25T21:17:36+03:00,2026-02-25T21:17:36+03:00,SELF analysis and initial Windows host,hle: recover PngDecodeRgba in hle.cpp
+35,2026-02-25T21:45:22+03:00,2026-02-25T21:45:22+03:00,SELF analysis and initial Windows host,hle: recover DirectAllocate in hle.cpp
+36,2026-02-26T07:11:25+03:00,2026-02-26T07:11:25+03:00,SELF analysis and initial Windows host,hle: recover MakeParentDirs in hle.cpp
+37,2026-02-26T08:49:18+03:00,2026-02-26T08:49:18+03:00,SELF analysis and initial Windows host,hle: recover Readable in hle.cpp
+38,2026-02-26T09:23:09+03:00,2026-02-26T09:23:09+03:00,SELF analysis and initial Windows host,hle: recover SlotName in hle.cpp
+39,2026-02-26T10:09:48+03:00,2026-02-26T10:09:48+03:00,SELF analysis and initial Windows host,hle: recover HleCall in hle.cpp
+40,2026-02-26T12:04:09+03:00,2026-02-26T12:04:09+03:00,SELF analysis and initial Windows host,hle: recover HleCall in hle.cpp (section 2)
+41,2026-02-26T14:55:33+03:00,2026-02-26T14:55:33+03:00,SELF analysis and initial Windows host,hle: recover HleCall in hle.cpp (section 3)
+42,2026-02-26T17:03:16+03:00,2026-02-26T17:03:16+03:00,SELF analysis and initial Windows host,hle: recover HleCall in hle.cpp (section 4)
+43,2026-02-26T17:55:23+03:00,2026-02-26T17:55:23+03:00,SELF analysis and initial Windows host,hle: recover HleCall in hle.cpp (section 5)
+44,2026-02-26T18:13:40+03:00,2026-02-26T18:13:40+03:00,SELF analysis and initial Windows host,hle: recover HleCall in hle.cpp (section 6)
+45,2026-02-26T18:50:21+03:00,2026-02-26T18:50:21+03:00,SELF analysis and initial Windows host,hle: recover HleCall in hle.cpp (section 7)
+46,2026-02-26T21:48:49+03:00,2026-02-26T21:48:49+03:00,SELF analysis and initial Windows host,hle: recover HleCall in hle.cpp (section 8)
+47,2026-02-26T23:03:45+03:00,2026-02-26T23:03:45+03:00,SELF analysis and initial Windows host,hle: recover HleCall in hle.cpp (section 9)
+48,2026-02-27T09:12:18+03:00,2026-02-27T09:12:18+03:00,SELF analysis and initial Windows host,hle: recover HleCall in hle.cpp (section 10)
+49,2026-02-27T11:00:06+03:00,2026-02-27T11:00:06+03:00,SELF analysis and initial Windows host,hle: recover HleCall in hle.cpp (section 11)
+50,2026-02-27T11:35:04+03:00,2026-02-27T11:35:04+03:00,SELF analysis and initial Windows host,hle: recover HleCall in hle.cpp (section 12)
+51,2026-02-27T14:56:51+03:00,2026-02-27T14:56:51+03:00,SELF analysis and initial Windows host,hle: recover HostReadable in hle.cpp
+52,2026-02-27T23:49:05+03:00,2026-02-27T23:49:05+03:00,SELF analysis and initial Windows host,hle: introduce ImportRegs in hle.h
+53,2026-02-28T07:50:41+03:00,2026-02-28T07:50:41+03:00,SELF analysis and initial Windows host,runtime: introduce rd16 in image.cpp
+54,2026-02-28T09:44:14+03:00,2026-02-28T09:44:14+03:00,SELF analysis and initial Windows host,runtime: recover Image::load in image.cpp
+55,2026-02-28T11:26:08+03:00,2026-02-28T11:26:08+03:00,SELF analysis and initial Windows host,runtime: introduce base in image.h
+56,2026-02-28T14:53:53+03:00,2026-02-28T14:53:53+03:00,SELF analysis and initial Windows host,runtime: introduce DumpMainStack in main.cpp
+57,2026-02-28T15:19:39+03:00,2026-02-28T15:19:39+03:00,SELF analysis and initial Windows host,runtime: recover DumpSamples in main.cpp
+58,2026-02-28T16:03:19+03:00,2026-02-28T16:03:19+03:00,SELF analysis and initial Windows host,runtime: recover SamplerThread in main.cpp
+59,2026-02-28T18:58:20+03:00,2026-02-28T18:58:20+03:00,SELF analysis and initial Windows host,abi: introduce Thunks::install in thunks.cpp
+60,2026-02-28T19:15:27+03:00,2026-02-28T19:15:27+03:00,SELF analysis and initial Windows host,abi: recover Thunks::install in thunks.cpp
+61,2026-02-28T19:21:36+03:00,2026-02-28T19:21:36+03:00,SELF analysis and initial Windows host,research: introduce ROOT in _diag.py
+62,2026-02-28T19:24:53+03:00,2026-02-28T19:24:53+03:00,SELF analysis and initial Windows host,research: introduce ROOT in _scan.py
+63,2026-02-28T21:43:47+03:00,2026-02-28T21:43:47+03:00,SELF analysis and initial Windows host,research: introduce import in analyze.py
+64,2026-02-28T22:17:47+03:00,2026-02-28T22:17:47+03:00,SELF analysis and initial Windows host,research: recover slots in analyze.py
+65,2026-02-28T22:52:08+03:00,2026-02-28T22:52:08+03:00,SELF analysis and initial Windows host,research: introduce import in functions.py
+66,2026-02-28T23:16:20+03:00,2026-02-28T23:16:20+03:00,SELF analysis and initial Windows host,research: recover guest function discovery
+67,2026-03-01T10:26:08+03:00,2026-03-01T10:26:08+03:00,SELF analysis and initial Windows host,research: introduce import in gcn.py
+68,2026-03-01T16:37:56+03:00,2026-03-01T16:37:56+03:00,SELF analysis and initial Windows host,research: recover vopc_name in gcn.py
+69,2026-03-01T17:51:34+03:00,2026-03-01T17:51:34+03:00,SELF analysis and initial Windows host,research: recover sreg in gcn.py
+70,2026-03-01T22:59:10+03:00,2026-03-01T22:59:10+03:00,SELF analysis and initial Windows host,research: recover disasm in gcn.py
+71,2026-03-06T10:08:36+03:00,2026-03-06T10:08:36+03:00,SELF analysis and initial Windows host,research: introduce read in gstr.py
+72,2026-03-06T14:00:06+03:00,2026-03-06T14:00:06+03:00,SELF analysis and initial Windows host,research: introduce main in nids.py
+73,2026-03-07T11:55:50+03:00,2026-03-07T11:55:50+03:00,SELF analysis and initial Windows host,research: introduce import in pexport.py
+74,2026-03-07T12:35:27+03:00,2026-03-07T12:35:27+03:00,SELF analysis and initial Windows host,research: introduce from in ps4_self.py
+75,2026-03-07T13:36:05+03:00,2026-03-07T13:36:05+03:00,SELF analysis and initial Windows host,research: recover SELF to ELF extraction
+76,2026-03-07T13:59:02+03:00,2026-03-07T13:59:02+03:00,SELF analysis and initial Windows host,research: introduce string_at in slotmap.py
+77,2026-03-07T15:48:15+03:00,2026-03-07T15:48:15+03:00,SELF analysis and initial Windows host,research: introduce import in trace.py
+78,2026-03-07T22:14:37+03:00,2026-03-07T22:14:37+03:00,SELF analysis and initial Windows host,research: recover op in trace.py
+79,2026-03-08T17:28:05+03:00,2026-03-08T17:28:05+03:00,SELF analysis and initial Windows host,research: introduce main in xdis.py
+80,2026-03-08T22:08:01+03:00,2026-03-08T22:08:01+03:00,Guest execution and compatibility development,build: recover ignore rules for User-specific files
+81,2026-03-09T08:31:34+03:00,2026-03-09T08:31:34+03:00,Guest execution and compatibility development,build: recover ignore rules for Files built by Visual Studio (section 2)
+82,2026-03-09T12:10:01+03:00,2026-03-09T12:10:01+03:00,Guest execution and compatibility development,build: recover ignore rules for Web workbench (sass) (section 2)
+83,2026-03-09T13:56:20+03:00,2026-03-09T13:56:20+03:00,Guest execution and compatibility development,build: recover ignore rules for SQL Server files (section 2)
+84,2026-03-09T14:32:46+03:00,2026-03-09T14:32:46+03:00,Guest execution and compatibility development,build: recover ignore rules for MFractors (Xamarin productivity tool) working folder
+85,2026-03-11T09:06:43+03:00,2026-03-11T09:06:43+03:00,Guest execution and compatibility development,hle: recover HleCall in hle.cpp (section 13)
+86,2026-03-11T16:20:40+03:00,2026-03-11T16:20:40+03:00,Guest execution and compatibility development,hle: recover HleCall in hle.cpp (section 14)
+87,2026-03-11T17:32:32+03:00,2026-03-11T17:32:32+03:00,Guest execution and compatibility development,hle: recover SlotName in hle.cpp (section 2)
+88,2026-03-11T23:30:10+03:00,2026-03-11T23:30:10+03:00,NGS2 and ATRAC9 audio,codec: introduce ApplyBandExtension in band_extension.c
+89,2026-03-12T09:35:57+03:00,2026-03-12T09:35:57+03:00,NGS2 and ATRAC9 audio,codec: recover ApplyBandExtensionChannel in band_extension.c
+90,2026-03-12T12:52:05+03:00,2026-03-12T12:52:05+03:00,NGS2 and ATRAC9 audio,codec: recover ScaleBexQuantUnits in band_extension.c
+91,2026-03-12T14:26:34+03:00,2026-03-12T14:26:34+03:00,NGS2 and ATRAC9 audio,codec: recover BexMode0Bands3 in band_extension.c
+92,2026-03-12T15:27:11+03:00,2026-03-12T15:27:11+03:00,NGS2 and ATRAC9 audio,codec: recover BexMode2Scale in band_extension.c
+93,2026-03-12T16:53:49+03:00,2026-03-12T16:53:49+03:00,NGS2 and ATRAC9 audio,codec: introduce CreateGradient in bit_allocation.c
+94,2026-03-12T17:27:12+03:00,2026-03-12T17:27:12+03:00,NGS2 and ATRAC9 audio,codec: recover CalculatePrecisions in bit_allocation.c
+95,2026-03-12T22:34:47+03:00,2026-03-12T22:34:47+03:00,NGS2 and ATRAC9 audio,codec: introduce InitBitReaderCxt in bit_reader.c
+96,2026-03-12T23:53:13+03:00,2026-03-12T23:53:13+03:00,NGS2 and ATRAC9 audio,codec: recover AlignPosition in bit_reader.c
+97,2026-03-13T08:10:54+03:00,2026-03-13T08:10:54+03:00,NGS2 and ATRAC9 audio,codec: introduce InitDecoder in decinit.c
+98,2026-03-13T11:22:39+03:00,2026-03-13T11:22:39+03:00,NGS2 and ATRAC9 audio,codec: recover ReadConfigData in decinit.c
+99,2026-03-13T16:47:32+03:00,2026-03-13T16:47:32+03:00,NGS2 and ATRAC9 audio,codec: recover GenerateTrigTables in decinit.c
+100,2026-03-15T12:37:48+03:00,2026-03-15T12:37:48+03:00,NGS2 and ATRAC9 audio,codec: introduce Decode in decoder.c
+101,2026-03-15T13:14:51+03:00,2026-03-15T13:14:51+03:00,NGS2 and ATRAC9 audio,codec: recover ImdctBlock in decoder.c
+102,2026-03-16T07:34:09+03:00,2026-03-16T07:34:09+03:00,NGS2 and ATRAC9 audio,codec: introduce ReadHuffmanValue in huffCodes.c
+103,2026-03-17T08:36:54+03:00,2026-03-17T08:36:54+03:00,NGS2 and ATRAC9 audio,codec: recover InitHuffmanCodebook in huffCodes.c
+104,2026-03-17T17:31:58+03:00,2026-03-17T17:31:58+03:00,NGS2 and ATRAC9 audio,codec: recover ScaleFactorsB4Codes in huffCodes.c
+105,2026-03-17T19:23:41+03:00,2026-03-17T19:23:41+03:00,NGS2 and ATRAC9 audio,codec: recover SpectrumA24Bits in huffCodes.c
+106,2026-03-17T20:09:02+03:00,2026-03-17T20:09:02+03:00,NGS2 and ATRAC9 audio,codec: recover SpectrumA33Bits in huffCodes.c
+107,2026-03-17T22:26:24+03:00,2026-03-17T22:26:24+03:00,NGS2 and ATRAC9 audio,codec: recover SpectrumA42Codes in huffCodes.c
+108,2026-03-17T23:13:58+03:00,2026-03-17T23:13:58+03:00,NGS2 and ATRAC9 audio,codec: recover SpectrumA44Codes in huffCodes.c
+109,2026-03-17T23:27:47+03:00,2026-03-17T23:27:47+03:00,NGS2 and ATRAC9 audio,codec: recover SpectrumA62Codes in huffCodes.c
+110,2026-03-18T14:34:00+03:00,2026-03-18T14:34:00+03:00,NGS2 and ATRAC9 audio,codec: recover SpectrumA73Codes in huffCodes.c
+111,2026-03-18T17:16:56+03:00,2026-03-18T17:16:56+03:00,NGS2 and ATRAC9 audio,codec: recover SpectrumB23Bits in huffCodes.c
+112,2026-03-18T17:42:15+03:00,2026-03-18T17:42:15+03:00,NGS2 and ATRAC9 audio,codec: recover SpectrumB32Codes in huffCodes.c
+113,2026-03-18T23:07:07+03:00,2026-03-18T23:07:07+03:00,NGS2 and ATRAC9 audio,codec: recover SpectrumB43Bits in huffCodes.c
+114,2026-03-18T23:17:43+03:00,2026-03-18T23:17:43+03:00,NGS2 and ATRAC9 audio,codec: recover SpectrumB52Codes in huffCodes.c
+115,2026-03-19T07:28:04+03:00,2026-03-19T07:28:04+03:00,NGS2 and ATRAC9 audio,codec: recover SpectrumB74Codes in huffCodes.c
+116,2026-03-19T09:25:27+03:00,2026-03-19T09:25:27+03:00,NGS2 and ATRAC9 audio,codec: recover Huffman codebook data
+117,2026-03-19T13:55:21+03:00,2026-03-19T13:55:21+03:00,NGS2 and ATRAC9 audio,codec: introduce RunImdct in imdct.c
+118,2026-03-19T19:36:05+03:00,2026-03-19T19:36:05+03:00,NGS2 and ATRAC9 audio,codec: recover Dct4 in imdct.c
+119,2026-03-21T08:04:41+03:00,2026-03-21T08:04:41+03:00,NGS2 and ATRAC9 audio,codec: introduce Atrac9GetHandle in libatrac9.c
+120,2026-03-21T13:29:13+03:00,2026-03-21T13:29:13+03:00,NGS2 and ATRAC9 audio,codec: introduce DequantizeSpectra in quantization.c
+121,2026-03-21T14:02:54+03:00,2026-03-21T14:02:54+03:00,NGS2 and ATRAC9 audio,codec: introduce ReadScaleFactors in scale_factors.c
+122,2026-03-21T15:39:10+03:00,2026-03-21T15:39:10+03:00,NGS2 and ATRAC9 audio,codec: recover ReadClcOffset in scale_factors.c
+123,2026-03-21T16:04:54+03:00,2026-03-21T16:04:54+03:00,NGS2 and ATRAC9 audio,codec: recover ReadVlcDeltaOffsetWithBaseline in scale_factors.c
+124,2026-03-21T16:33:03+03:00,2026-03-21T16:33:03+03:00,NGS2 and ATRAC9 audio,codec: introduce Frame in structures.h
+125,2026-03-21T16:50:42+03:00,2026-03-21T16:50:42+03:00,NGS2 and ATRAC9 audio,codec: recover BlockType in structures.h
+126,2026-03-21T17:54:25+03:00,2026-03-21T17:54:25+03:00,NGS2 and ATRAC9 audio,codec: introduce MdctWindow in tables.c
+127,2026-03-21T23:38:11+03:00,2026-03-21T23:38:11+03:00,NGS2 and ATRAC9 audio,codec: introduce UnpackFrame in unpack.c
+128,2026-03-21T23:40:35+03:00,2026-03-21T23:40:35+03:00,NGS2 and ATRAC9 audio,codec: recover UnpackBlock in unpack.c
+129,2026-03-23T15:30:46+03:00,2026-03-23T15:30:46+03:00,NGS2 and ATRAC9 audio,codec: recover ReadGradientParams in unpack.c
+130,2026-03-23T19:19:34+03:00,2026-03-23T19:19:34+03:00,NGS2 and ATRAC9 audio,codec: recover ReadExtensionParams in unpack.c
+131,2026-03-24T10:23:45+03:00,2026-03-24T10:23:45+03:00,NGS2 and ATRAC9 audio,codec: recover ReadSpectra in unpack.c
+132,2026-03-24T20:54:13+03:00,2026-03-24T20:54:13+03:00,NGS2 and ATRAC9 audio,codec: recover CalculateLfePrecision in unpack.c
+133,2026-03-25T12:18:39+03:00,2026-03-25T12:18:39+03:00,NGS2 and ATRAC9 audio,codec: introduce Max in utility.c
+134,2026-03-25T15:03:28+03:00,2026-03-25T15:03:28+03:00,NGS2 and ATRAC9 audio,audio: introduce WaveformFormat in ngs2.cpp
+135,2026-03-25T20:36:16+03:00,2026-03-25T20:36:16+03:00,NGS2 and ATRAC9 audio,audio: recover HostOk in ngs2.cpp
+136,2026-03-31T22:33:36+03:00,2026-03-31T22:33:36+03:00,NGS2 and ATRAC9 audio,audio: recover DecodeNextChunk in ngs2.cpp
+137,2026-04-04T07:24:14+03:00,2026-04-04T07:24:14+03:00,NGS2 and ATRAC9 audio,audio: recover Ngs2SystemCreate in ngs2.cpp
+138,2026-04-04T11:13:47+03:00,2026-04-04T11:13:47+03:00,NGS2 and ATRAC9 audio,audio: recover Ngs2VoiceControl in ngs2.cpp
+139,2026-04-04T12:49:16+03:00,2026-04-04T12:49:16+03:00,NGS2 and ATRAC9 audio,audio: recover Ngs2VoiceGetStateFlags in ngs2.cpp
+140,2026-04-04T16:49:23+03:00,2026-04-04T16:49:23+03:00,NGS2 and ATRAC9 audio,audio: recover Ngs2SystemRender in ngs2.cpp
+141,2026-04-04T17:53:35+03:00,2026-04-04T17:53:35+03:00,NGS2 and ATRAC9 audio,audio: recover AudioOutSetVolume in ngs2.cpp
+142,2026-04-04T20:05:09+03:00,2026-04-04T20:05:09+03:00,NGS2 and ATRAC9 audio,audio: recover AudioOutClose in ngs2.cpp
+143,2026-04-04T20:13:17+03:00,2026-04-04T20:13:17+03:00,NGS2 and ATRAC9 audio,audio: introduce kHz in ngs2.h
+144,2026-04-08T09:21:20+03:00,2026-04-08T09:21:20+03:00,NGS2 and ATRAC9 audio,hle: recover HleCall in hle.cpp (section 15)
+145,2026-04-08T20:11:54+03:00,2026-04-08T20:11:54+03:00,NGS2 and ATRAC9 audio,hle: recover HleCall in hle.cpp (section 16)
+146,2026-04-09T10:16:01+03:00,2026-04-09T10:16:01+03:00,NGS2 and ATRAC9 audio,hle: recover HleCall in hle.cpp (section 17)
+147,2026-04-09T11:04:35+03:00,2026-04-09T11:04:35+03:00,NGS2 and ATRAC9 audio,hle: recover HleCall in hle.cpp (section 18)
+148,2026-04-09T15:08:18+03:00,2026-04-09T15:08:18+03:00,NGS2 and ATRAC9 audio,hle: recover HleCall in hle.cpp (section 19)
+149,2026-04-09T15:45:46+03:00,2026-04-09T15:45:46+03:00,NGS2 and ATRAC9 audio,hle: recover HleCall in hle.cpp (section 20)
+150,2026-04-09T17:02:59+03:00,2026-04-09T17:02:59+03:00,NGS2 and ATRAC9 audio,hle: recover HleCall in hle.cpp (section 21)
+151,2026-04-09T18:08:08+03:00,2026-04-09T18:08:08+03:00,NGS2 and ATRAC9 audio,hle: recover SlotName in hle.cpp (section 3)
+152,2026-04-09T21:44:10+03:00,2026-04-09T21:44:10+03:00,NGS2 and ATRAC9 audio,hle: recover SlotName in hle.cpp (section 4)
+153,2026-04-09T23:58:09+03:00,2026-04-09T23:58:09+03:00,NGS2 and ATRAC9 audio,hle: recover SlotName in hle.cpp (section 5)
+154,2026-04-10T09:29:32+03:00,2026-04-10T09:29:32+03:00,Original beta checkpoint,audio: recover Ngs2VoiceControl in ngs2.cpp (section 2)
+155,2026-04-10T10:46:10+03:00,2026-04-10T10:46:10+03:00,Original beta checkpoint,audio: recover Ngs2VoiceControl in ngs2.cpp (section 3)
+156,2026-04-10T15:23:39+03:00,2026-04-10T15:23:39+03:00,Original beta checkpoint,audio: recover Ngs2VoiceControl in ngs2.cpp (section 4)
+157,2026-04-14T09:50:29+03:00,2026-04-14T09:50:29+03:00,Original beta checkpoint,audio: recover Ngs2VoiceControl in ngs2.cpp (section 5)
+158,2026-04-15T18:03:34+03:00,2026-04-15T18:03:34+03:00,Original beta checkpoint,audio: recover Ngs2GetWaveformFrameInfo in ngs2.cpp
+159,2026-04-15T23:47:59+03:00,2026-04-15T23:47:59+03:00,Original beta checkpoint,hle: recover HleCall in hle.cpp (section 22)
+160,2026-04-17T15:00:15+03:00,2026-04-17T15:00:15+03:00,Original beta checkpoint,hle: recover HleCall in hle.cpp (section 23)
+161,2026-04-17T16:14:26+03:00,2026-04-17T16:14:26+03:00,Original beta checkpoint,hle: recover HleCall in hle.cpp (section 24)
+162,2026-04-17T16:26:29+03:00,2026-04-17T16:26:29+03:00,Original beta checkpoint,hle: recover HleCall in hle.cpp (section 25)
+163,2026-04-17T16:40:28+03:00,2026-04-17T16:40:28+03:00,Original beta checkpoint,hle: recover HleCall in hle.cpp (section 26)
+164,2026-04-17T17:23:47+03:00,2026-04-17T17:23:47+03:00,Original beta checkpoint,hle: recover HleCall in hle.cpp (section 27)
+165,2026-04-17T22:25:53+03:00,2026-04-17T22:25:53+03:00,Original beta checkpoint,hle: recover HleCall in hle.cpp (section 28)
+166,2026-04-18T19:38:02+03:00,2026-04-18T19:38:02+03:00,Original beta checkpoint,hle: recover SlotName in hle.cpp (section 6)
+167,2026-04-19T07:47:11+03:00,2026-04-19T07:47:11+03:00,Original beta checkpoint,hle: recover Configure in hle.cpp
+168,2026-04-19T23:02:49+03:00,2026-04-19T23:02:49+03:00,Original beta checkpoint,hle: recover g_verbose in hle.cpp
+169,2026-04-19T23:15:39+03:00,2026-04-19T23:15:39+03:00,Legacy offline runtime checkpoint,"build: recover MSVC compilation, resource embedding and GUI/console linking"
+170,2026-04-29T17:36:25+03:00,2026-04-29T17:36:25+03:00,Legacy offline runtime checkpoint,audio: recover AudioOutClose in ngs2.cpp (section 2)
+171,2026-04-29T21:39:37+03:00,2026-04-29T21:39:37+03:00,Legacy offline runtime checkpoint,audio: recover AudioOutOutputs in ngs2.cpp
+172,2026-05-01T09:57:00+03:00,2026-05-01T09:57:00+03:00,Legacy offline runtime checkpoint,audio: recover AudioOutOpen in ngs2.cpp
+173,2026-05-01T18:26:36+03:00,2026-05-01T18:26:36+03:00,Legacy offline runtime checkpoint,audio: recover Ngs2SystemRender in ngs2.cpp (section 2)
+174,2026-05-02T10:18:41+03:00,2026-05-02T10:18:41+03:00,Legacy offline runtime checkpoint,audio: recover Ngs2SystemRender in ngs2.cpp (section 3)
+175,2026-05-02T12:25:28+03:00,2026-05-02T12:25:28+03:00,Legacy offline runtime checkpoint,audio: recover Ngs2SystemRender in ngs2.cpp (section 4)
+176,2026-05-02T18:17:33+03:00,2026-05-02T18:17:33+03:00,Legacy offline runtime checkpoint,audio: recover g_shuttingDown in ngs2.cpp
+177,2026-05-03T10:41:39+03:00,2026-05-03T10:41:39+03:00,Legacy offline runtime checkpoint,audio: recover sampleRate in ngs2.cpp
+178,2026-05-03T10:54:46+03:00,2026-05-03T10:54:46+03:00,Legacy offline runtime checkpoint,audio: recover NGS2 audio integration interfaces
+179,2026-05-03T12:34:45+03:00,2026-05-03T12:34:45+03:00,Legacy offline runtime checkpoint,diagnostics: introduce ToWide in logger.cpp
+180,2026-05-03T17:30:19+03:00,2026-05-03T17:30:19+03:00,Legacy offline runtime checkpoint,settings: introduce IsDirectoryWritable in settings.cpp
+181,2026-05-03T18:48:48+03:00,2026-05-03T18:48:48+03:00,Legacy offline runtime checkpoint,settings: recover JsonFindRaw in settings.cpp
+182,2026-05-04T07:02:02+03:00,2026-05-04T07:02:02+03:00,Legacy offline runtime checkpoint,settings: recover ExeDir in settings.cpp
+183,2026-05-04T07:10:02+03:00,2026-05-04T07:10:02+03:00,Legacy offline runtime checkpoint,settings: recover ApplyQualityPreset in settings.cpp
+184,2026-05-04T07:13:14+03:00,2026-05-04T07:13:14+03:00,Legacy offline runtime checkpoint,settings: recover SaveSettings in settings.cpp
+185,2026-05-04T07:17:42+03:00,2026-05-04T07:17:42+03:00,Legacy offline runtime checkpoint,settings: recover ResetSettingsToDefaults in settings.cpp
+186,2026-05-04T08:11:25+03:00,2026-05-04T08:11:25+03:00,Legacy offline runtime checkpoint,settings: recover DetectKeyConflicts in settings.cpp
+187,2026-05-04T08:20:44+03:00,2026-05-04T08:20:44+03:00,Legacy offline runtime checkpoint,settings: recover AutoDiscoverAssets in settings.cpp
+188,2026-05-04T08:29:21+03:00,2026-05-04T08:29:21+03:00,Legacy offline runtime checkpoint,settings: introduce DisplayMode in settings.h
+189,2026-05-04T09:01:29+03:00,2026-05-04T09:01:29+03:00,Legacy offline runtime checkpoint,settings: recover Settings in settings.h
+190,2026-05-04T09:03:58+03:00,2026-05-04T09:03:58+03:00,Legacy offline runtime checkpoint,graphics: recover ShutdownRenderer in d3d11.cpp
+191,2026-05-04T09:26:19+03:00,2026-05-04T09:26:19+03:00,Legacy offline runtime checkpoint,graphics: recover RenderFrame in d3d11.cpp (section 4)
+192,2026-05-04T11:14:26+03:00,2026-05-04T11:14:26+03:00,Legacy offline runtime checkpoint,graphics: recover OnWindowMessage in d3d11.cpp
+193,2026-05-04T14:40:16+03:00,2026-05-04T14:40:16+03:00,Legacy offline runtime checkpoint,graphics: recover PresentCachedFrame in d3d11.cpp
+194,2026-05-04T15:01:26+03:00,2026-05-04T15:01:26+03:00,Legacy offline runtime checkpoint,graphics: recover RenderFrame in d3d11.cpp (section 5)
+195,2026-05-04T15:05:02+03:00,2026-05-04T15:05:02+03:00,Legacy offline runtime checkpoint,graphics: recover RenderFrame in d3d11.cpp (section 6)
+196,2026-05-04T15:28:44+03:00,2026-05-04T15:28:44+03:00,Legacy offline runtime checkpoint,graphics: recover RenderFrame in d3d11.cpp (section 7)
+197,2026-05-04T15:33:32+03:00,2026-05-04T15:33:32+03:00,Legacy offline runtime checkpoint,graphics: recover RenderFrame in d3d11.cpp (section 8)
+198,2026-05-04T16:00:55+03:00,2026-05-04T16:00:55+03:00,Legacy offline runtime checkpoint,graphics: recover RenderFrame in d3d11.cpp (section 9)
+199,2026-05-04T16:28:10+03:00,2026-05-04T16:28:10+03:00,Legacy offline runtime checkpoint,graphics: recover RenderFrame in d3d11.cpp (section 10)
+200,2026-05-04T16:42:22+03:00,2026-05-04T16:42:22+03:00,Legacy offline runtime checkpoint,graphics: recover RenderFrame in d3d11.cpp (section 11)
+201,2026-05-04T16:57:38+03:00,2026-05-04T16:57:38+03:00,Legacy offline runtime checkpoint,graphics: recover MaybeCaptureScreenshot in d3d11.cpp
+202,2026-05-04T17:49:26+03:00,2026-05-04T17:49:26+03:00,Legacy offline runtime checkpoint,graphics: recover CompositeAndPresent in d3d11.cpp
+203,2026-05-04T18:16:46+03:00,2026-05-04T18:16:46+03:00,Legacy offline runtime checkpoint,graphics: recover UploadAndDraw in d3d11.cpp
+204,2026-05-04T18:46:39+03:00,2026-05-04T18:46:39+03:00,Legacy offline runtime checkpoint,graphics: recover BuildGeometry in d3d11.cpp
+205,2026-05-04T19:04:10+03:00,2026-05-04T19:04:10+03:00,Legacy offline runtime checkpoint,graphics: recover EnsureRenderer in d3d11.cpp (section 2)
+206,2026-05-04T20:47:01+03:00,2026-05-04T20:47:01+03:00,Legacy offline runtime checkpoint,graphics: recover CreateDevice in d3d11.cpp
+207,2026-05-04T21:22:45+03:00,2026-05-04T21:22:45+03:00,Legacy offline runtime checkpoint,graphics: recover CreateDevice in d3d11.cpp (section 2)
+208,2026-05-04T21:35:01+03:00,2026-05-04T21:35:01+03:00,Legacy offline runtime checkpoint,graphics: recover CreateDevice in d3d11.cpp (section 3)
+209,2026-05-04T22:18:56+03:00,2026-05-04T22:18:56+03:00,Legacy offline runtime checkpoint,graphics: recover CreateDevice in d3d11.cpp (section 4)
+210,2026-05-04T22:54:06+03:00,2026-05-04T22:54:06+03:00,Legacy offline runtime checkpoint,graphics: recover CreateDevice in d3d11.cpp (section 5)
+211,2026-05-04T23:50:45+03:00,2026-05-04T23:50:45+03:00,Legacy offline runtime checkpoint,graphics: recover EnsureSize in d3d11.cpp
+212,2026-05-05T23:31:30+03:00,2026-05-05T23:31:30+03:00,Legacy offline runtime checkpoint,graphics: recover CompileShaders in d3d11.cpp (section 2)
+213,2026-05-10T08:07:17+03:00,2026-05-10T08:07:17+03:00,Legacy offline runtime checkpoint,graphics: recover CompileShaders in d3d11.cpp (section 3)
+214,2026-05-10T11:03:59+03:00,2026-05-10T11:03:59+03:00,Legacy offline runtime checkpoint,graphics: recover CompileShaders in d3d11.cpp (section 4)
+215,2026-05-10T12:00:43+03:00,2026-05-10T12:00:43+03:00,Legacy offline runtime checkpoint,graphics: recover LookupSampler in d3d11.cpp
+216,2026-05-10T14:15:05+03:00,2026-05-10T14:15:05+03:00,Legacy offline runtime checkpoint,graphics: recover LookupSampler in d3d11.cpp (section 2)
+217,2026-05-10T23:51:08+03:00,2026-05-10T23:51:08+03:00,Legacy offline runtime checkpoint,graphics: recover EnsureMasterRt in d3d11.cpp
+218,2026-05-14T08:58:23+03:00,2026-05-14T08:58:23+03:00,Legacy offline runtime checkpoint,graphics: recover TexelBytes in d3d11.cpp
+219,2026-05-14T19:22:12+03:00,2026-05-14T19:22:12+03:00,Legacy offline runtime checkpoint,graphics: recover QpcUsec in d3d11.cpp
+220,2026-05-14T22:21:21+03:00,2026-05-14T22:21:21+03:00,Legacy offline runtime checkpoint,graphics: recover masterTex in d3d11.cpp
+221,2026-05-16T08:51:28+03:00,2026-05-16T08:51:28+03:00,Legacy offline runtime checkpoint,graphics: recover allowTearing in d3d11.cpp
+222,2026-05-16T10:14:25+03:00,2026-05-16T10:14:25+03:00,Legacy offline runtime checkpoint,graphics: recover register in d3d11.cpp
+223,2026-05-16T14:31:15+03:00,2026-05-16T14:31:15+03:00,Legacy offline runtime checkpoint,"graphics: recover Direct3D 11 resources, shaders and presentation"
+224,2026-05-20T09:52:08+03:00,2026-05-20T09:52:08+03:00,Legacy offline runtime checkpoint,"graphics: recover Direct3D 11 resources, shaders and presentation (section 2)"
+225,2026-05-20T16:44:18+03:00,2026-05-20T16:44:18+03:00,Legacy offline runtime checkpoint,graphics: recover kGuestShaderSource in d3d11.cpp
+226,2026-05-20T16:51:12+03:00,2026-05-20T16:51:12+03:00,Legacy offline runtime checkpoint,"graphics: recover Direct3D 11 resources, shaders and presentation (section 3)"
+227,2026-05-20T23:19:24+03:00,2026-05-20T23:19:24+03:00,Legacy offline runtime checkpoint,graphics: recover kVsFetch in d3d11.cpp
+228,2026-05-23T16:10:16+03:00,2026-05-23T16:10:16+03:00,Legacy offline runtime checkpoint,"graphics: recover Direct3D 11 resources, shaders and presentation (section 4)"
+229,2026-05-23T16:45:28+03:00,2026-05-23T16:45:28+03:00,Legacy offline runtime checkpoint,"graphics: recover Direct3D 11 resources, shaders and presentation (section 5)"
+230,2026-05-25T07:04:06+03:00,2026-05-25T07:04:06+03:00,Legacy offline runtime checkpoint,graphics: recover Direct3D 11 renderer interfaces
+231,2026-05-25T08:17:30+03:00,2026-05-25T08:17:30+03:00,Legacy offline runtime checkpoint,graphics: recover Direct3D 11 renderer interfaces (section 2)
+232,2026-05-25T08:44:41+03:00,2026-05-25T08:44:41+03:00,Legacy offline runtime checkpoint,graphics: recover Direct3D 11 renderer interfaces (section 3)
+233,2026-05-25T10:06:07+03:00,2026-05-25T10:06:07+03:00,Legacy offline runtime checkpoint,hle: recover HleCall in hle.cpp (section 29)
+234,2026-05-25T11:29:17+03:00,2026-05-25T11:29:17+03:00,Legacy offline runtime checkpoint,hle: recover HleCall in hle.cpp (section 30)
+235,2026-05-25T13:13:26+03:00,2026-05-25T13:13:26+03:00,Legacy offline runtime checkpoint,hle: recover HleCall in hle.cpp (section 31)
+236,2026-05-25T13:40:10+03:00,2026-05-25T13:40:10+03:00,Legacy offline runtime checkpoint,hle: recover HleCall in hle.cpp (section 32)
+237,2026-05-25T14:06:14+03:00,2026-05-25T14:06:14+03:00,Legacy offline runtime checkpoint,hle: recover HleCall in hle.cpp (section 33)
+238,2026-05-25T14:41:42+03:00,2026-05-25T14:41:42+03:00,Legacy offline runtime checkpoint,hle: recover HleCall in hle.cpp (section 34)
+239,2026-05-25T16:34:11+03:00,2026-05-25T16:34:11+03:00,Legacy offline runtime checkpoint,hle: recover HleCall in hle.cpp (section 35)
+240,2026-05-25T16:38:53+03:00,2026-05-25T16:38:53+03:00,Legacy offline runtime checkpoint,hle: recover HleCall in hle.cpp (section 36)
+241,2026-05-25T16:48:38+03:00,2026-05-25T16:48:38+03:00,Legacy offline runtime checkpoint,hle: recover HleCall in hle.cpp (section 37)
+242,2026-05-25T18:27:50+03:00,2026-05-25T18:27:50+03:00,Legacy offline runtime checkpoint,hle: recover HleCall in hle.cpp (section 38)
+243,2026-05-25T18:37:45+03:00,2026-05-25T18:37:45+03:00,Legacy offline runtime checkpoint,hle: recover HleCall in hle.cpp (section 39)
+244,2026-05-25T19:10:17+03:00,2026-05-25T19:10:17+03:00,Legacy offline runtime checkpoint,hle: recover HleCall in hle.cpp (section 40)
+245,2026-05-25T19:25:14+03:00,2026-05-25T19:25:14+03:00,Legacy offline runtime checkpoint,hle: recover HleCall in hle.cpp (section 41)
+246,2026-05-25T21:53:29+03:00,2026-05-25T21:53:29+03:00,Legacy offline runtime checkpoint,hle: recover HleCall in hle.cpp (section 42)
+247,2026-05-25T23:36:11+03:00,2026-05-25T23:36:11+03:00,Legacy offline runtime checkpoint,hle: recover HleCall in hle.cpp (section 43)
+248,2026-05-27T12:28:18+03:00,2026-05-27T12:28:18+03:00,Legacy offline runtime checkpoint,hle: recover HleCall in hle.cpp (section 44)
+249,2026-05-29T08:39:16+03:00,2026-05-29T08:39:16+03:00,Legacy offline runtime checkpoint,hle: recover HleCall in hle.cpp (section 45)
+250,2026-05-29T10:59:52+03:00,2026-05-29T10:59:52+03:00,Legacy offline runtime checkpoint,hle: recover HleCall in hle.cpp (section 46)
+251,2026-05-29T11:51:01+03:00,2026-05-29T11:51:01+03:00,Legacy offline runtime checkpoint,hle: recover HleSetApp0 in hle.cpp
+252,2026-05-29T13:33:32+03:00,2026-05-29T13:33:32+03:00,Legacy offline runtime checkpoint,hle: recover GameWindow in hle.cpp
+253,2026-05-29T14:48:16+03:00,2026-05-29T14:48:16+03:00,Legacy offline runtime checkpoint,hle: recover ParseAutoPressEnv in hle.cpp
+254,2026-05-29T16:36:16+03:00,2026-05-29T16:36:16+03:00,Legacy offline runtime checkpoint,hle: recover CreatePortWindow in hle.cpp
+255,2026-05-29T18:18:48+03:00,2026-05-29T18:18:48+03:00,Legacy offline runtime checkpoint,hle: recover WndProc in hle.cpp
+256,2026-05-31T20:04:43+03:00,2026-05-31T20:04:43+03:00,Legacy offline runtime checkpoint,hle: recover WndProc in hle.cpp (section 2)
+257,2026-05-31T20:27:31+03:00,2026-05-31T20:27:31+03:00,Legacy offline runtime checkpoint,hle: recover MakeParentDirs in hle.cpp (section 2)
+258,2026-05-31T20:31:37+03:00,2026-05-31T20:31:37+03:00,Legacy offline runtime checkpoint,hle: recover SaveRoot in hle.cpp
+259,2026-05-31T23:08:02+03:00,2026-05-31T23:08:02+03:00,Legacy offline runtime checkpoint,hle: recover App0 in hle.cpp
+260,2026-06-04T23:57:10+03:00,2026-06-04T23:57:10+03:00,Legacy offline runtime checkpoint,hle: recover Emit in hle.cpp
+261,2026-06-06T11:12:06+03:00,2026-06-06T11:12:06+03:00,Legacy offline runtime checkpoint,hle: recover HostNowUsec in hle.cpp
+262,2026-06-06T14:01:48+03:00,2026-06-06T14:01:48+03:00,Legacy offline runtime checkpoint,hle: recover Configure in hle.cpp (section 2)
+263,2026-06-07T08:16:16+03:00,2026-06-07T08:16:16+03:00,Legacy offline runtime checkpoint,hle: recover g_simThreadId in hle.cpp
+264,2026-06-07T11:10:34+03:00,2026-06-07T11:10:34+03:00,Legacy offline runtime checkpoint,hle: recover SCE service emulation and guest callbacks
+265,2026-06-07T14:30:00+03:00,2026-06-07T14:30:00+03:00,Legacy offline runtime checkpoint,hle: recover guest import and compatibility interfaces
+266,2026-06-11T08:30:50+03:00,2026-06-11T08:30:50+03:00,Legacy offline runtime checkpoint,hle: recover guest import and compatibility interfaces (section 2)
+267,2026-06-21T19:45:25+03:00,2026-06-21T19:45:25+03:00,Legacy offline runtime checkpoint,hle: recover guest import and compatibility interfaces (section 3)
+268,2026-06-21T20:20:23+03:00,2026-06-21T20:20:23+03:00,Legacy offline runtime checkpoint,hle: recover guest import and compatibility interfaces (section 4)
+269,2026-06-22T07:01:13+03:00,2026-06-22T07:01:13+03:00,Legacy offline runtime checkpoint,runtime: recover Image::load in image.cpp (section 2)
+270,2026-06-22T09:17:22+03:00,2026-06-22T09:17:22+03:00,Legacy offline runtime checkpoint,runtime: recover Image::load in image.cpp (section 3)
+271,2026-06-22T12:58:39+03:00,2026-06-22T12:58:39+03:00,Legacy offline runtime checkpoint,runtime: recover Image::findImports in image.cpp
+272,2026-06-22T13:02:12+03:00,2026-06-22T13:02:12+03:00,Legacy offline runtime checkpoint,runtime: recover Image::parse in image.cpp
+273,2026-06-22T13:34:00+03:00,2026-06-22T13:34:00+03:00,Legacy offline runtime checkpoint,runtime: recover Image::parse in image.cpp (section 2)
+274,2026-06-22T14:52:36+03:00,2026-06-22T14:52:36+03:00,Legacy offline runtime checkpoint,runtime: recover Image::parse in image.cpp (section 3)
+275,2026-06-22T16:19:36+03:00,2026-06-22T16:19:36+03:00,Legacy offline runtime checkpoint,runtime: recover kSelfSegOff in image.cpp
+276,2026-06-22T17:45:35+03:00,2026-06-22T17:45:35+03:00,Legacy offline runtime checkpoint,runtime: recover NOMINMAX in image.cpp
+277,2026-06-22T18:30:42+03:00,2026-06-22T18:30:42+03:00,Legacy offline runtime checkpoint,runtime: recover main in main.cpp
+278,2026-06-22T18:35:00+03:00,2026-06-22T18:35:00+03:00,Legacy offline runtime checkpoint,runtime: recover main in main.cpp (section 2)
+279,2026-06-22T19:46:26+03:00,2026-06-22T19:46:26+03:00,Legacy offline runtime checkpoint,runtime: recover main in main.cpp (section 3)
+280,2026-06-22T20:34:56+03:00,2026-06-22T20:34:56+03:00,Legacy offline runtime checkpoint,runtime: recover main in main.cpp (section 4)
+281,2026-06-22T20:49:05+03:00,2026-06-22T20:49:05+03:00,Legacy offline runtime checkpoint,runtime: recover main in main.cpp (section 5)
+282,2026-06-22T20:55:21+03:00,2026-06-22T20:55:21+03:00,Legacy offline runtime checkpoint,runtime: recover main in main.cpp (section 6)
+283,2026-06-22T20:57:25+03:00,2026-06-22T20:57:25+03:00,Legacy offline runtime checkpoint,runtime: recover main in main.cpp (section 7)
+284,2026-06-22T21:13:18+03:00,2026-06-22T21:13:18+03:00,Legacy offline runtime checkpoint,runtime: recover main in main.cpp (section 8)
+285,2026-06-22T21:38:32+03:00,2026-06-22T21:38:32+03:00,Legacy offline runtime checkpoint,runtime: recover main in main.cpp (section 9)
+286,2026-06-22T22:03:43+03:00,2026-06-22T22:03:43+03:00,Legacy offline runtime checkpoint,runtime: recover buf in main.cpp
+287,2026-06-22T23:43:38+03:00,2026-06-22T23:43:38+03:00,Legacy offline runtime checkpoint,"runtime: recover guest startup, frame execution and Windows lifecycle"
+288,2026-06-24T11:01:06+03:00,2026-06-24T11:01:06+03:00,Legacy offline runtime checkpoint,runtime: recover RunMain in main.cpp
+289,2026-06-24T14:35:57+03:00,2026-06-24T14:35:57+03:00,Legacy offline runtime checkpoint,runtime: recover OnFault in main.cpp
+290,2026-06-26T07:30:20+03:00,2026-06-26T07:30:20+03:00,Legacy offline runtime checkpoint,runtime: recover OnFault in main.cpp (section 2)
+291,2026-06-26T07:38:29+03:00,2026-06-26T07:38:29+03:00,Legacy offline runtime checkpoint,runtime: recover OnFault in main.cpp (section 3)
+292,2026-06-26T09:58:40+03:00,2026-06-26T09:58:40+03:00,Legacy offline runtime checkpoint,runtime: recover IsFatalHardwareException in main.cpp
+293,2026-06-26T11:24:30+03:00,2026-06-26T11:24:30+03:00,Legacy offline runtime checkpoint,runtime: recover DumpMainStack in main.cpp
+294,2026-06-26T12:39:46+03:00,2026-06-26T12:39:46+03:00,Legacy offline runtime checkpoint,runtime: recover g_noGuiPrompts in main.cpp
+295,2026-06-26T12:43:32+03:00,2026-06-26T12:43:32+03:00,Legacy offline runtime checkpoint,"runtime: recover guest startup, frame execution and Windows lifecycle (section 2)"
+296,2026-06-26T16:30:12+03:00,2026-06-26T16:30:12+03:00,Legacy offline runtime checkpoint,"runtime: recover guest startup, frame execution and Windows lifecycle (section 3)"
+297,2026-06-26T19:16:06+03:00,2026-06-26T19:16:06+03:00,Legacy offline runtime checkpoint,runtime: recover NOMINMAX in main.cpp
+298,2026-06-26T20:59:05+03:00,2026-06-26T20:59:05+03:00,Legacy offline runtime checkpoint,netplay: introduce Aes128BlockEncrypt in crypto.cpp
+299,2026-06-28T22:00:58+03:00,2026-06-28T22:00:58+03:00,Legacy offline runtime checkpoint,netplay: recover HmacSha256 in crypto.cpp
+300,2026-06-29T12:01:11+03:00,2026-06-29T12:01:11+03:00,Legacy offline runtime checkpoint,netplay: introduce WireAad in netplay.cpp
+301,2026-06-30T13:50:37+03:00,2026-06-30T13:50:37+03:00,Legacy offline runtime checkpoint,netplay: recover MonoUsec in netplay.cpp
+302,2026-06-30T18:31:58+03:00,2026-06-30T18:31:58+03:00,Legacy offline runtime checkpoint,netplay: recover JsonGetBool in netplay.cpp
+303,2026-06-30T18:36:56+03:00,2026-06-30T18:36:56+03:00,Legacy offline runtime checkpoint,netplay: recover DetectLocalLanIp in netplay.cpp
+304,2026-06-30T19:55:27+03:00,2026-06-30T19:55:27+03:00,Legacy offline runtime checkpoint,netplay: recover EnsureUdpSocketLocked in netplay.cpp
+305,2026-06-30T22:28:56+03:00,2026-06-30T22:28:56+03:00,Legacy offline runtime checkpoint,netplay: recover SendRegisterEndpointToRelayLocked in netplay.cpp
+306,2026-06-30T22:38:08+03:00,2026-06-30T22:38:08+03:00,Legacy offline runtime checkpoint,netplay: recover PumpUdpRxLocked in netplay.cpp
+307,2026-07-02T09:07:36+03:00,2026-07-02T09:07:36+03:00,Legacy offline runtime checkpoint,netplay: recover SendInputPacketForFrameLocked in netplay.cpp
+308,2026-07-02T10:11:22+03:00,2026-07-02T10:11:22+03:00,Legacy offline runtime checkpoint,netplay: recover NetplayStepCallbackImpl in netplay.cpp
+309,2026-07-02T14:47:40+03:00,2026-07-02T14:47:40+03:00,Legacy offline runtime checkpoint,netplay: recover ApplyRoomStateFromJsonLocked in netplay.cpp
+310,2026-07-02T18:44:41+03:00,2026-07-02T18:44:41+03:00,Legacy offline runtime checkpoint,netplay: recover CheckEnvSimConfigLocked in netplay.cpp
+311,2026-07-03T14:59:48+03:00,2026-07-03T14:59:48+03:00,Legacy offline runtime checkpoint,netplay: recover CreateRoom in netplay.cpp
+312,2026-07-03T22:15:12+03:00,2026-07-03T22:15:12+03:00,Legacy offline runtime checkpoint,netplay: recover QuickMatch in netplay.cpp
+313,2026-07-04T18:39:00+03:00,2026-07-04T18:39:00+03:00,Legacy offline runtime checkpoint,netplay: recover SetReady in netplay.cpp
+314,2026-07-04T22:57:17+03:00,2026-07-04T22:57:17+03:00,Legacy offline runtime checkpoint,netplay: recover LeaveRoom in netplay.cpp
+315,2026-07-05T10:31:01+03:00,2026-07-05T10:31:01+03:00,Legacy offline runtime checkpoint,netplay: recover GetSnapshot in netplay.cpp
+316,2026-07-05T12:31:34+03:00,2026-07-05T12:31:34+03:00,Legacy offline runtime checkpoint,netplay: introduce SessionPhase in netplay.h
+317,2026-07-09T11:41:34+03:00,2026-07-09T11:41:34+03:00,Legacy offline runtime checkpoint,ui: introduce NOMINMAX in overlay.cpp
+318,2026-07-09T13:47:49+03:00,2026-07-09T13:47:49+03:00,Legacy offline runtime checkpoint,ui: recover register in overlay.cpp
+319,2026-07-09T19:58:58+03:00,2026-07-09T19:58:58+03:00,Legacy offline runtime checkpoint,ui: recover NowSec in overlay.cpp
+320,2026-07-10T09:14:58+03:00,2026-07-10T09:14:58+03:00,Legacy offline runtime checkpoint,ui: recover PushQuad in overlay.cpp
+321,2026-07-10T12:07:22+03:00,2026-07-10T12:07:22+03:00,Legacy offline runtime checkpoint,ui: recover KeySlotPtr in overlay.cpp
+322,2026-07-12T07:00:45+03:00,2026-07-12T07:00:45+03:00,Legacy offline runtime checkpoint,ui: recover AdjustSettingRow in overlay.cpp
+323,2026-07-12T08:09:16+03:00,2026-07-12T08:09:16+03:00,Legacy offline runtime checkpoint,ui: recover AdjustSettingRow in overlay.cpp (section 2)
+324,2026-07-12T12:15:46+03:00,2026-07-12T12:15:46+03:00,Legacy offline runtime checkpoint,ui: recover AdjustSettingRow in overlay.cpp (section 3)
+325,2026-07-12T14:11:53+03:00,2026-07-12T14:11:53+03:00,Legacy offline runtime checkpoint,ui: recover PollControllerForOverlay in overlay.cpp
+326,2026-07-12T21:05:20+03:00,2026-07-12T21:05:20+03:00,Legacy offline runtime checkpoint,ui: recover ShutdownOverlay in overlay.cpp
+327,2026-07-12T23:06:24+03:00,2026-07-12T23:06:24+03:00,Legacy offline runtime checkpoint,ui: recover OnWindowMessage in overlay.cpp
+328,2026-07-12T23:45:42+03:00,2026-07-12T23:45:42+03:00,Legacy offline runtime checkpoint,ui: recover RenderOverlay in overlay.cpp
+329,2026-07-14T11:20:02+03:00,2026-07-14T11:20:02+03:00,Legacy offline runtime checkpoint,ui: recover RenderOverlay in overlay.cpp (section 2)
+330,2026-07-14T17:29:50+03:00,2026-07-14T17:29:50+03:00,Legacy offline runtime checkpoint,ui: recover RenderOverlay in overlay.cpp (section 3)
+331,2026-07-14T23:10:58+03:00,2026-07-14T23:10:58+03:00,Legacy offline runtime checkpoint,ui: recover RenderOverlay in overlay.cpp (section 4)
+332,2026-07-15T08:48:23+03:00,2026-07-15T08:48:23+03:00,Legacy offline runtime checkpoint,ui: recover RenderOverlay in overlay.cpp (section 5)
+333,2026-07-15T09:13:15+03:00,2026-07-15T09:13:15+03:00,Legacy offline runtime checkpoint,ui: introduce ID3D11Device in overlay.h
+334,2026-07-15T10:01:26+03:00,2026-07-15T10:01:26+03:00,Legacy offline runtime checkpoint,"test: introduce legacy offline world, save and gameplay diagnostics"
+335,2026-07-15T13:43:40+03:00,2026-07-15T13:43:40+03:00,Legacy offline runtime checkpoint,"test: recover legacy offline world, save and gameplay diagnostics"
+336,2026-07-15T18:38:41+03:00,2026-07-15T18:38:41+03:00,Legacy offline runtime checkpoint,"test: recover legacy offline world, save and gameplay diagnostics (section 2)"
+337,2026-07-15T20:00:10+03:00,2026-07-15T20:00:10+03:00,Recovered legacy launcher and native lobby prototype,build: recover ignore rules for Build results on 'Bin' directories
+338,2026-07-15T20:44:36+03:00,2026-07-15T20:44:36+03:00,Recovered legacy launcher and native lobby prototype,build: recover ignore rules for Build results on 'Bin' directories (section 2)
+339,2026-07-15T21:32:28+03:00,2026-07-15T21:32:28+03:00,Recovered legacy launcher and native lobby prototype,build: recover ignore rules for Visual Studio profiler
+340,2026-07-19T22:41:26+03:00,2026-07-19T22:41:26+03:00,Recovered legacy launcher and native lobby prototype,build: recover ignore rules for Uncomment if necessary however generally it will be regenerated when needed
+341,2026-07-20T14:49:16+03:00,2026-07-20T14:49:16+03:00,Recovered legacy launcher and native lobby prototype,build: recover ignore rules for Visual Studio LightSwitch build output
+342,2026-07-20T18:02:17+03:00,2026-07-20T18:02:17+03:00,Recovered legacy launcher and native lobby prototype,build: recover ignore rules for Official VS Code C# Dev Kit Extension exclusion
+343,2026-07-24T08:59:21+03:00,2026-07-24T08:59:21+03:00,Recovered legacy launcher and native lobby prototype,research: recover original guest image segment metadata
+344,2026-07-24T09:04:31+03:00,2026-07-24T09:04:31+03:00,Recovered legacy launcher and native lobby prototype,research: recover guest import slot inventory
+345,2026-07-24T10:39:37+03:00,2026-07-24T10:39:37+03:00,Recovered legacy launcher and native lobby prototype,research: recover guest function roots and call graph evidence
+346,2026-07-24T11:09:45+03:00,2026-07-24T11:09:45+03:00,Recovered legacy launcher and native lobby prototype,operator: introduce Cloudflare lobby routing and operator setup
+347,2026-07-24T12:51:33+03:00,2026-07-24T12:51:33+03:00,Recovered legacy launcher and native lobby prototype,operator: introduce Cloudflare lobby routing and operator setup (section 2)
+348,2026-07-24T13:18:52+03:00,2026-07-24T13:18:52+03:00,Recovered legacy launcher and native lobby prototype,"build: recover MSVC compilation, resource embedding and GUI/console linking (section 2)"
+349,2026-07-24T16:55:33+03:00,2026-07-24T16:55:33+03:00,Recovered legacy launcher and native lobby prototype,"build: recover MSVC compilation, resource embedding and GUI/console linking (section 3)"
+350,2026-07-24T17:05:43+03:00,2026-07-24T17:05:43+03:00,Recovered legacy launcher and native lobby prototype,launcher: introduce CtrlId in launcher_main.cpp
+351,2026-07-24T17:19:09+03:00,2026-07-24T17:19:09+03:00,Recovered legacy launcher and native lobby prototype,launcher: recover ProbeHealthUrl in launcher_main.cpp
+352,2026-07-24T22:32:59+03:00,2026-07-24T22:32:59+03:00,Recovered legacy launcher and native lobby prototype,launcher: recover GetControlUtf8 in launcher_main.cpp
+353,2026-07-24T23:21:50+03:00,2026-07-24T23:21:50+03:00,Recovered legacy launcher and native lobby prototype,launcher: recover ToggleLocalServer in launcher_main.cpp
+354,2026-07-28T12:06:24+03:00,2026-07-28T12:06:24+03:00,Recovered legacy launcher and native lobby prototype,launcher: recover wWinMain in launcher_main.cpp
+355,2026-07-28T12:41:02+03:00,2026-07-28T12:41:02+03:00,Recovered legacy launcher and native lobby prototype,launcher: recover wWinMain in launcher_main.cpp (section 2)
+356,2026-07-28T15:43:10+03:00,2026-07-28T15:43:10+03:00,Recovered legacy launcher and native lobby prototype,lobby: introduce NowMs in lobby_server.cpp
+357,2026-07-30T08:22:33+03:00,2026-07-30T08:22:33+03:00,Recovered legacy launcher and native lobby prototype,lobby: recover Base64Encode in lobby_server.cpp
+358,2026-07-30T09:09:10+03:00,2026-07-30T09:09:10+03:00,Recovered legacy launcher and native lobby prototype,lobby: recover PurgeExpiredRoomsLocked in lobby_server.cpp
+359,2026-07-30T09:24:02+03:00,2026-07-30T09:24:02+03:00,Recovered legacy launcher and native lobby prototype,lobby: recover SendAll in lobby_server.cpp
+360,2026-07-30T10:32:03+03:00,2026-07-30T10:32:03+03:00,Recovered legacy launcher and native lobby prototype,lobby: recover HeaderValueCaseInsensitive in lobby_server.cpp
+361,2026-07-30T12:46:22+03:00,2026-07-30T12:46:22+03:00,Recovered legacy launcher and native lobby prototype,lobby: recover UpdateCallerEndpointsFromJson in lobby_server.cpp
+362,2026-07-30T13:53:01+03:00,2026-07-30T13:53:01+03:00,Recovered legacy launcher and native lobby prototype,lobby: recover HandleHttpClient in lobby_server.cpp
+363,2026-07-30T15:15:14+03:00,2026-07-30T15:15:14+03:00,Recovered legacy launcher and native lobby prototype,lobby: recover HandleHttpClient in lobby_server.cpp (section 2)
+364,2026-07-30T15:50:28+03:00,2026-07-30T15:50:28+03:00,Recovered legacy launcher and native lobby prototype,lobby: recover HandleHttpClient in lobby_server.cpp (section 3)
+365,2026-07-30T17:33:05+03:00,2026-07-30T17:33:05+03:00,Recovered legacy launcher and native lobby prototype,lobby: recover RunUdpRelayLoop in lobby_server.cpp
+366,2026-07-30T20:39:04+03:00,2026-07-30T20:39:04+03:00,Recovered legacy launcher and native lobby prototype,lobby: recover main in lobby_server.cpp
+367,2026-07-30T22:22:50+03:00,2026-07-30T22:22:50+03:00,Recovered legacy launcher and native lobby prototype,settings: recover lobbyServerUrl in settings.h
+368,2026-08-02T07:14:25+03:00,2026-08-02T07:14:25+03:00,Recovered legacy launcher and native lobby prototype,hle: recover HleCall in hle.cpp (section 47)
+369,2026-08-02T10:24:19+03:00,2026-08-02T10:24:19+03:00,Recovered legacy launcher and native lobby prototype,hle: recover ComputeGuestStateHash in hle.cpp
+370,2026-08-02T11:17:59+03:00,2026-08-02T11:17:59+03:00,Recovered legacy launcher and native lobby prototype,hle: recover ReadLocalPlayerButtons in hle.cpp
+371,2026-08-02T13:08:54+03:00,2026-08-02T13:08:54+03:00,Recovered legacy launcher and native lobby prototype,runtime: recover RunMain in main.cpp (section 2)
+372,2026-08-02T13:32:54+03:00,2026-08-02T13:32:54+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover TickNetplayLobby in netplay.cpp
+373,2026-08-02T15:06:20+03:00,2026-08-02T15:06:20+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover TickNetplayLobby in netplay.cpp (section 2)
+374,2026-08-02T20:23:23+03:00,2026-08-02T20:23:23+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover TickNetplayLobby in netplay.cpp (section 3)
+375,2026-08-02T23:28:52+03:00,2026-08-02T23:28:52+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover TickNetplayLobby in netplay.cpp (section 4)
+376,2026-08-03T12:33:45+03:00,2026-08-03T12:33:45+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover LeaveRoom in netplay.cpp (section 2)
+377,2026-08-03T14:21:27+03:00,2026-08-03T14:21:27+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover KickGuest in netplay.cpp
+378,2026-08-03T17:08:42+03:00,2026-08-03T17:08:42+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover SetReady in netplay.cpp (section 2)
+379,2026-08-05T14:18:39+03:00,2026-08-05T14:18:39+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover SetReady in netplay.cpp (section 3)
+380,2026-08-05T14:39:42+03:00,2026-08-05T14:39:42+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover SetRoomVisibility in netplay.cpp
+381,2026-08-05T16:31:32+03:00,2026-08-05T16:31:32+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover SetRoomVisibility in netplay.cpp (section 2)
+382,2026-08-05T22:04:44+03:00,2026-08-05T22:04:44+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover QuickMatch in netplay.cpp (section 2)
+383,2026-08-06T08:45:41+03:00,2026-08-06T08:45:41+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover QuickMatch in netplay.cpp (section 3)
+384,2026-08-06T13:09:11+03:00,2026-08-06T13:09:11+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover JoinRoomByCode in netplay.cpp
+385,2026-08-06T18:09:02+03:00,2026-08-06T18:09:02+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover JoinRoomByCode in netplay.cpp (section 2)
+386,2026-08-07T11:37:00+03:00,2026-08-07T11:37:00+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover JoinRoomById in netplay.cpp
+387,2026-08-07T13:48:41+03:00,2026-08-07T13:48:41+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover JoinRoomById in netplay.cpp (section 2)
+388,2026-08-09T11:57:10+03:00,2026-08-09T11:57:10+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover CreateRoom in netplay.cpp (section 2)
+389,2026-08-09T19:47:12+03:00,2026-08-09T19:47:12+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover CreateRoom in netplay.cpp (section 3)
+390,2026-08-11T17:39:02+03:00,2026-08-11T17:39:02+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover RefreshPublicRooms in netplay.cpp
+391,2026-08-11T21:51:01+03:00,2026-08-11T21:51:01+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover ActiveLobbyEndpoint in netplay.cpp
+392,2026-08-14T09:20:11+03:00,2026-08-14T09:20:11+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover ShutdownNetplay in netplay.cpp
+393,2026-08-14T09:56:46+03:00,2026-08-14T09:56:46+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover InitNetplay in netplay.cpp
+394,2026-08-14T10:07:03+03:00,2026-08-14T10:07:03+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover BackgroundHeartbeatLoop in netplay.cpp
+395,2026-08-14T10:25:53+03:00,2026-08-14T10:25:53+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover ApplyRoomStateFromJsonLocked in netplay.cpp (section 2)
+396,2026-08-14T11:16:19+03:00,2026-08-14T11:16:19+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover ApplyRoomStateFromJsonLocked in netplay.cpp (section 3)
+397,2026-08-14T11:50:54+03:00,2026-08-14T11:50:54+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover ApplyRoomStateFromJsonLocked in netplay.cpp (section 4)
+398,2026-08-14T12:19:45+03:00,2026-08-14T12:19:45+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover ApplyRoomStateFromJsonLocked in netplay.cpp (section 5)
+399,2026-08-14T14:12:28+03:00,2026-08-14T14:12:28+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover NetplayStepCallbackImpl in netplay.cpp (section 2)
+400,2026-08-14T15:07:49+03:00,2026-08-14T15:07:49+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover NetplayStepCallbackImpl in netplay.cpp (section 3)
+401,2026-08-14T16:11:00+03:00,2026-08-14T16:11:00+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover NetplayStepCallbackImpl in netplay.cpp (section 4)
+402,2026-08-14T19:27:00+03:00,2026-08-14T19:27:00+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover NetplayStepCallbackImpl in netplay.cpp (section 5)
+403,2026-08-14T19:50:20+03:00,2026-08-14T19:50:20+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover NetplayStepCallbackImpl in netplay.cpp (section 6)
+404,2026-08-16T15:26:43+03:00,2026-08-16T15:26:43+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover NetplayStepCallbackImpl in netplay.cpp (section 7)
+405,2026-08-16T17:52:45+03:00,2026-08-16T17:52:45+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover NetplayStepCallbackImpl in netplay.cpp (section 8)
+406,2026-08-19T09:43:04+03:00,2026-08-19T09:43:04+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover NetplayStepCallbackImpl in netplay.cpp (section 9)
+407,2026-08-19T18:19:13+03:00,2026-08-19T18:19:13+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover NetplayStepCallbackImpl in netplay.cpp (section 10)
+408,2026-08-19T22:29:20+03:00,2026-08-19T22:29:20+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover PumpUdpRxLocked in netplay.cpp (section 2)
+409,2026-08-19T23:32:19+03:00,2026-08-19T23:32:19+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover PumpUdpRxLocked in netplay.cpp (section 3)
+410,2026-08-20T19:35:37+03:00,2026-08-20T19:35:37+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover ProcessAuthenticatedPacketLocked in netplay.cpp
+411,2026-08-21T07:39:41+03:00,2026-08-21T07:39:41+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover VerifyHashesForFrameLocked in netplay.cpp
+412,2026-08-21T11:19:42+03:00,2026-08-21T11:19:42+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover TransportLabel in netplay.cpp
+413,2026-08-21T18:04:00+03:00,2026-08-21T18:04:00+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover SendSealedPeerPacketLocked in netplay.cpp
+414,2026-08-21T23:20:22+03:00,2026-08-21T23:20:22+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover QueueWsSendLocked in netplay.cpp
+415,2026-08-22T07:41:19+03:00,2026-08-22T07:41:19+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover QueueUdpSendLocked in netplay.cpp
+416,2026-08-22T12:23:22+03:00,2026-08-22T12:23:22+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover ShouldSimDropLocked in netplay.cpp
+417,2026-08-22T20:21:42+03:00,2026-08-22T20:21:42+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover FlushTxQueueLocked in netplay.cpp
+418,2026-08-28T09:11:03+03:00,2026-08-28T09:11:03+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover StopWebSocketRelay in netplay.cpp
+419,2026-08-28T09:33:40+03:00,2026-08-28T09:33:40+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover DiscoverStunEndpoint in netplay.cpp
+420,2026-08-28T10:37:56+03:00,2026-08-28T10:37:56+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover DetectLocalLanIp in netplay.cpp (section 2)
+421,2026-08-28T12:11:13+03:00,2026-08-28T12:11:13+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover DetectLocalLanIp in netplay.cpp (section 3)
+422,2026-08-28T16:54:48+03:00,2026-08-28T16:54:48+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover lastHeartbeatUsec in netplay.cpp
+423,2026-08-28T19:39:12+03:00,2026-08-28T19:39:12+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover stunPublicIp in netplay.cpp
+424,2026-08-28T20:37:33+03:00,2026-08-28T20:37:33+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover HttpRequestJson in netplay.cpp
+425,2026-08-28T23:44:30+03:00,2026-08-28T23:44:30+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover HttpRequestJson in netplay.cpp (section 2)
+426,2026-08-29T14:43:43+03:00,2026-08-29T14:43:43+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover HttpRequestJson in netplay.cpp (section 3)
+427,2026-08-29T17:34:39+03:00,2026-08-29T17:34:39+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover HttpRequestJsonAt in netplay.cpp
+428,2026-08-29T20:12:28+03:00,2026-08-29T20:12:28+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover ParseServerUrl in netplay.cpp
+429,2026-08-29T20:18:23+03:00,2026-08-29T20:18:23+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover historyCount in netplay.cpp
+430,2026-08-29T22:47:58+03:00,2026-08-29T22:47:58+03:00,Recovered legacy launcher and native lobby prototype,netplay: recover online session and input transport interfaces
+431,2026-08-29T22:51:29+03:00,2026-08-29T22:51:29+03:00,Recovered legacy launcher and native lobby prototype,ui: recover RenderOverlay in overlay.cpp (section 6)
+432,2026-08-29T23:46:35+03:00,2026-08-29T23:46:35+03:00,Recovered legacy launcher and native lobby prototype,ui: recover RenderOverlay in overlay.cpp (section 7)
+433,2026-09-01T07:27:37+03:00,2026-09-01T07:27:37+03:00,Recovered legacy launcher and native lobby prototype,ui: recover RenderOverlay in overlay.cpp (section 8)
+434,2026-09-01T13:03:48+03:00,2026-09-01T13:03:48+03:00,Recovered legacy launcher and native lobby prototype,ui: recover AdjustSettingRow in overlay.cpp (section 4)
+435,2026-09-01T15:49:20+03:00,2026-09-01T15:49:20+03:00,Recovered legacy launcher and native lobby prototype,operator: introduce managed loopback lobby and tunnel startup
+436,2026-09-01T16:06:57+03:00,2026-09-01T16:06:57+03:00,Recovered legacy launcher and native lobby prototype,test: introduce backend connectivity and multiplayer diagnostics
+437,2026-09-01T20:03:35+03:00,2026-09-01T20:03:35+03:00,Recovered legacy launcher and native lobby prototype,test: recover backend connectivity and multiplayer diagnostics
+438,2026-09-01T22:53:29+03:00,2026-09-01T22:53:29+03:00,Recovered legacy launcher and native lobby prototype,test: recover backend connectivity and multiplayer diagnostics (section 2)
+439,2026-09-01T23:34:39+03:00,2026-09-01T23:34:39+03:00,Recovered legacy launcher and native lobby prototype,test: recover backend connectivity and multiplayer diagnostics (section 3)
+440,2026-09-02T14:54:55+03:00,2026-09-02T14:54:55+03:00,Recovered legacy launcher and native lobby prototype,research: recover rd in functions.py
+441,2026-09-06T10:04:06+03:00,2026-09-06T10:04:06+03:00,Recovered legacy launcher and native lobby prototype,research: recover rd in functions.py (section 2)
+442,2026-09-06T12:24:52+03:00,2026-09-06T12:24:52+03:00,Secondary checkout baseline and prototype transition,build: recover ignore rules for Build results on 'Bin' directories (section 3)
+443,2026-09-06T16:09:50+03:00,2026-09-06T16:09:50+03:00,Secondary checkout baseline and prototype transition,build: recover ignore rules for Build results on 'Bin' directories (section 4)
+444,2026-09-06T19:49:53+03:00,2026-09-06T19:49:53+03:00,Secondary checkout baseline and prototype transition,build: recover ignore rules for Visual Studio profiler (section 2)
+445,2026-09-06T20:46:09+03:00,2026-09-06T20:46:09+03:00,Secondary checkout baseline and prototype transition,build: recover ignore rules for Uncomment if necessary however generally it will be regenerated when needed (section 2)
+446,2026-09-06T21:54:20+03:00,2026-09-06T21:54:20+03:00,Secondary checkout baseline and prototype transition,build: recover ignore rules for Visual Studio LightSwitch build output (section 2)
+447,2026-09-06T21:59:45+03:00,2026-09-06T21:59:45+03:00,Secondary checkout baseline and prototype transition,build: recover ignore rules for Official VS Code C# Dev Kit Extension exclusion (section 2)
+448,2026-09-07T11:46:23+03:00,2026-09-07T11:46:23+03:00,Secondary checkout baseline and prototype transition,research: recover original guest image segment metadata (section 2)
+449,2026-09-09T13:15:35+03:00,2026-09-09T13:15:35+03:00,Secondary checkout baseline and prototype transition,research: recover guest import slot inventory (section 2)
+450,2026-09-09T15:54:28+03:00,2026-09-09T15:54:28+03:00,Secondary checkout baseline and prototype transition,research: recover guest function roots and call graph evidence (section 2)
+451,2026-09-09T21:00:05+03:00,2026-09-09T21:00:05+03:00,Secondary checkout baseline and prototype transition,operator: retire Cloudflare lobby routing and operator setup
+452,2026-09-10T12:02:45+03:00,2026-09-10T12:02:45+03:00,Secondary checkout baseline and prototype transition,operator: retire Cloudflare lobby routing and operator setup (section 2)
+453,2026-09-10T12:59:34+03:00,2026-09-10T12:59:34+03:00,Secondary checkout baseline and prototype transition,"build: recover MSVC compilation, resource embedding and GUI/console linking (section 4)"
+454,2026-09-10T16:24:07+03:00,2026-09-10T16:24:07+03:00,Secondary checkout baseline and prototype transition,"build: recover MSVC compilation, resource embedding and GUI/console linking (section 5)"
+455,2026-09-15T08:32:23+03:00,2026-09-15T08:32:23+03:00,Secondary checkout baseline and prototype transition,lobby: retire NowMs in lobby_server.cpp
+456,2026-09-15T08:37:32+03:00,2026-09-15T08:37:32+03:00,Secondary checkout baseline and prototype transition,settings: recover lobbyServerUrl in settings.h (section 2)
+457,2026-09-15T09:15:20+03:00,2026-09-15T09:15:20+03:00,Secondary checkout baseline and prototype transition,hle: recover HleCall in hle.cpp (section 48)
+458,2026-09-15T11:30:31+03:00,2026-09-15T11:30:31+03:00,Secondary checkout baseline and prototype transition,hle: recover ComputeGuestStateHash in hle.cpp (section 2)
+459,2026-09-15T13:20:20+03:00,2026-09-15T13:20:20+03:00,Secondary checkout baseline and prototype transition,hle: recover ReadLocalPlayerButtons in hle.cpp (section 2)
+460,2026-09-15T13:41:52+03:00,2026-09-15T13:41:52+03:00,Secondary checkout baseline and prototype transition,hle: recover guest import and compatibility interfaces (section 5)
+461,2026-09-15T17:17:04+03:00,2026-09-15T17:17:04+03:00,Secondary checkout baseline and prototype transition,runtime: recover RunMain in main.cpp (section 3)
+462,2026-09-15T17:35:32+03:00,2026-09-15T17:35:32+03:00,Secondary checkout baseline and prototype transition,netplay: recover TickNetplayLobby in netplay.cpp (section 5)
+463,2026-09-15T19:26:32+03:00,2026-09-15T19:26:32+03:00,Secondary checkout baseline and prototype transition,netplay: recover TickNetplayLobby in netplay.cpp (section 6)
+464,2026-09-15T20:25:44+03:00,2026-09-15T20:25:44+03:00,Secondary checkout baseline and prototype transition,netplay: recover TickNetplayLobby in netplay.cpp (section 7)
+465,2026-09-17T18:29:23+03:00,2026-09-17T18:29:23+03:00,Secondary checkout baseline and prototype transition,netplay: recover TickNetplayLobby in netplay.cpp (section 8)
+466,2026-09-17T21:56:46+03:00,2026-09-17T21:56:46+03:00,Secondary checkout baseline and prototype transition,netplay: recover LeaveRoom in netplay.cpp (section 3)
+467,2026-09-19T15:53:43+03:00,2026-09-19T15:53:43+03:00,Secondary checkout baseline and prototype transition,netplay: recover KickGuest in netplay.cpp (section 2)
+468,2026-09-19T21:01:34+03:00,2026-09-19T21:01:34+03:00,Secondary checkout baseline and prototype transition,netplay: recover SetReady in netplay.cpp (section 4)
+469,2026-09-19T22:35:01+03:00,2026-09-19T22:35:01+03:00,Secondary checkout baseline and prototype transition,netplay: recover SetReady in netplay.cpp (section 5)
+470,2026-09-21T07:57:29+03:00,2026-09-21T07:57:29+03:00,Secondary checkout baseline and prototype transition,netplay: recover SetRoomVisibility in netplay.cpp (section 3)
+471,2026-09-21T08:13:00+03:00,2026-09-21T08:13:00+03:00,Secondary checkout baseline and prototype transition,netplay: recover SetRoomVisibility in netplay.cpp (section 4)
+472,2026-09-21T08:34:33+03:00,2026-09-21T08:34:33+03:00,Secondary checkout baseline and prototype transition,netplay: recover QuickMatch in netplay.cpp (section 4)
+473,2026-09-21T12:56:04+03:00,2026-09-21T12:56:04+03:00,Secondary checkout baseline and prototype transition,netplay: recover QuickMatch in netplay.cpp (section 5)
+474,2026-09-21T13:05:00+03:00,2026-09-21T13:05:00+03:00,Secondary checkout baseline and prototype transition,netplay: recover JoinRoomByCode in netplay.cpp (section 3)
+475,2026-09-21T13:31:18+03:00,2026-09-21T13:31:18+03:00,Secondary checkout baseline and prototype transition,netplay: recover JoinRoomByCode in netplay.cpp (section 4)
+476,2026-09-21T17:57:52+03:00,2026-09-21T17:57:52+03:00,Secondary checkout baseline and prototype transition,netplay: recover JoinRoomById in netplay.cpp (section 3)
+477,2026-09-21T21:34:25+03:00,2026-09-21T21:34:25+03:00,Secondary checkout baseline and prototype transition,netplay: recover JoinRoomById in netplay.cpp (section 4)
+478,2026-09-21T21:46:59+03:00,2026-09-21T21:46:59+03:00,Secondary checkout baseline and prototype transition,netplay: recover CreateRoom in netplay.cpp (section 4)
+479,2026-09-22T14:38:50+03:00,2026-09-22T14:38:50+03:00,Secondary checkout baseline and prototype transition,netplay: recover CreateRoom in netplay.cpp (section 5)
+480,2026-09-22T16:16:39+03:00,2026-09-22T16:16:39+03:00,Secondary checkout baseline and prototype transition,netplay: recover RefreshPublicRooms in netplay.cpp (section 2)
+481,2026-09-22T17:12:09+03:00,2026-09-22T17:12:09+03:00,Secondary checkout baseline and prototype transition,netplay: recover ActiveLobbyEndpoint in netplay.cpp (section 2)
+482,2026-09-23T09:30:28+03:00,2026-09-23T09:30:28+03:00,Secondary checkout baseline and prototype transition,netplay: recover ShutdownNetplay in netplay.cpp (section 2)
+483,2026-09-25T07:53:07+03:00,2026-09-25T07:53:07+03:00,Secondary checkout baseline and prototype transition,netplay: recover EndpointFieldsJsonLocked in netplay.cpp
+484,2026-09-25T07:58:17+03:00,2026-09-25T07:58:17+03:00,Secondary checkout baseline and prototype transition,netplay: recover ApplyRoomStateFromJsonLocked in netplay.cpp (section 6)
+485,2026-09-25T08:14:18+03:00,2026-09-25T08:14:18+03:00,Secondary checkout baseline and prototype transition,netplay: recover ApplyRoomStateFromJsonLocked in netplay.cpp (section 7)
+486,2026-09-25T10:33:51+03:00,2026-09-25T10:33:51+03:00,Secondary checkout baseline and prototype transition,netplay: recover ApplyRoomStateFromJsonLocked in netplay.cpp (section 8)
+487,2026-09-25T11:36:37+03:00,2026-09-25T11:36:37+03:00,Secondary checkout baseline and prototype transition,netplay: recover ApplyRoomStateFromJsonLocked in netplay.cpp (section 9)
+488,2026-09-25T12:14:58+03:00,2026-09-25T12:14:58+03:00,Secondary checkout baseline and prototype transition,netplay: recover NetplayStepCallbackImpl in netplay.cpp (section 11)
+489,2026-09-25T13:28:20+03:00,2026-09-25T13:28:20+03:00,Secondary checkout baseline and prototype transition,netplay: recover NetplayStepCallbackImpl in netplay.cpp (section 12)
+490,2026-09-25T13:58:24+03:00,2026-09-25T13:58:24+03:00,Secondary checkout baseline and prototype transition,netplay: recover NetplayStepCallbackImpl in netplay.cpp (section 13)
+491,2026-09-25T15:21:28+03:00,2026-09-25T15:21:28+03:00,Secondary checkout baseline and prototype transition,netplay: recover NetplayStepCallbackImpl in netplay.cpp (section 14)
+492,2026-09-25T16:43:16+03:00,2026-09-25T16:43:16+03:00,Secondary checkout baseline and prototype transition,netplay: recover NetplayStepCallbackImpl in netplay.cpp (section 15)
+493,2026-09-25T17:06:22+03:00,2026-09-25T17:06:22+03:00,Secondary checkout baseline and prototype transition,netplay: recover NetplayStepCallbackImpl in netplay.cpp (section 16)
+494,2026-09-25T17:44:57+03:00,2026-09-25T17:44:57+03:00,Secondary checkout baseline and prototype transition,netplay: recover NetplayStepCallbackImpl in netplay.cpp (section 17)
+495,2026-09-25T18:40:58+03:00,2026-09-25T18:40:58+03:00,Secondary checkout baseline and prototype transition,netplay: recover NetplayStepCallbackImpl in netplay.cpp (section 18)
+496,2026-09-25T19:07:11+03:00,2026-09-25T19:07:11+03:00,Secondary checkout baseline and prototype transition,netplay: recover NetplayStepCallbackImpl in netplay.cpp (section 19)
+497,2026-09-25T20:45:33+03:00,2026-09-25T20:45:33+03:00,Secondary checkout baseline and prototype transition,netplay: recover PumpTransportsRxLocked in netplay.cpp
+498,2026-09-25T20:58:01+03:00,2026-09-25T20:58:01+03:00,Secondary checkout baseline and prototype transition,netplay: recover PumpTransportsRxLocked in netplay.cpp (section 2)
+499,2026-09-25T21:10:58+03:00,2026-09-25T21:10:58+03:00,Secondary checkout baseline and prototype transition,netplay: recover PumpUdpRxLocked in netplay.cpp (section 4)
+500,2026-09-25T23:24:56+03:00,2026-09-25T23:24:56+03:00,Secondary checkout baseline and prototype transition,netplay: recover VerifyHashesForFrameLocked in netplay.cpp (section 2)
+501,2026-09-26T07:55:06+03:00,2026-09-26T07:55:06+03:00,Secondary checkout baseline and prototype transition,netplay: recover SendSealedPeerPacketLocked in netplay.cpp (section 2)
+502,2026-09-26T10:49:50+03:00,2026-09-26T10:49:50+03:00,Secondary checkout baseline and prototype transition,netplay: recover SendSealedPeerPacketLocked in netplay.cpp (section 3)
+503,2026-09-26T13:38:15+03:00,2026-09-26T13:38:15+03:00,Secondary checkout baseline and prototype transition,netplay: recover QueueUdpSendLocked in netplay.cpp (section 2)
+504,2026-09-26T16:08:01+03:00,2026-09-26T16:08:01+03:00,Secondary checkout baseline and prototype transition,netplay: recover ComputeSimDelayUsecLocked in netplay.cpp
+505,2026-09-26T16:23:08+03:00,2026-09-26T16:23:08+03:00,Secondary checkout baseline and prototype transition,netplay: recover FlushTxQueueLocked in netplay.cpp (section 2)
+506,2026-09-26T17:01:51+03:00,2026-09-26T17:01:51+03:00,Secondary checkout baseline and prototype transition,netplay: recover StopWebSocketRelay in netplay.cpp (section 2)
+507,2026-09-26T17:13:37+03:00,2026-09-26T17:13:37+03:00,Secondary checkout baseline and prototype transition,netplay: recover DiscoverStunEndpoint in netplay.cpp (section 2)
+508,2026-09-26T19:30:45+03:00,2026-09-26T19:30:45+03:00,Secondary checkout baseline and prototype transition,netplay: recover DetectLocalLanIp in netplay.cpp (section 4)
+509,2026-09-26T21:31:33+03:00,2026-09-26T21:31:33+03:00,Secondary checkout baseline and prototype transition,netplay: recover lastSyncedRoom in netplay.cpp
+510,2026-09-26T22:16:32+03:00,2026-09-26T22:16:32+03:00,Secondary checkout baseline and prototype transition,netplay: recover simOneWayLatencyMs in netplay.cpp
+511,2026-09-27T07:16:22+03:00,2026-09-27T07:16:22+03:00,Secondary checkout baseline and prototype transition,netplay: recover HttpRequestJson in netplay.cpp (section 4)
+512,2026-09-27T08:56:34+03:00,2026-09-27T08:56:34+03:00,Secondary checkout baseline and prototype transition,netplay: recover HttpRequestJsonAt in netplay.cpp (section 2)
+513,2026-09-27T09:51:26+03:00,2026-09-27T09:51:26+03:00,Secondary checkout baseline and prototype transition,netplay: recover HttpRequestJsonAt in netplay.cpp (section 3)
+514,2026-09-27T16:02:47+03:00,2026-09-27T16:02:47+03:00,Secondary checkout baseline and prototype transition,netplay: recover ParseServerUrl in netplay.cpp (section 2)
+515,2026-09-27T17:58:42+03:00,2026-09-27T17:58:42+03:00,Secondary checkout baseline and prototype transition,netplay: recover viaWebSocket in netplay.cpp
+516,2026-09-27T21:03:39+03:00,2026-09-27T21:03:39+03:00,Secondary checkout baseline and prototype transition,netplay: recover kPktRelayEnvelope in netplay.cpp
+517,2026-09-27T22:01:39+03:00,2026-09-27T22:01:39+03:00,Secondary checkout baseline and prototype transition,netplay: recover online session and input transport interfaces (section 2)
+518,2026-09-29T07:20:51+03:00,2026-09-29T07:20:51+03:00,Secondary checkout baseline and prototype transition,ui: recover RenderOverlay in overlay.cpp (section 9)
+519,2026-09-30T20:38:03+03:00,2026-09-30T20:38:03+03:00,Secondary checkout baseline and prototype transition,ui: recover RenderOverlay in overlay.cpp (section 10)
+520,2026-10-01T10:21:36+03:00,2026-10-01T10:21:36+03:00,Secondary checkout baseline and prototype transition,ui: recover RenderOverlay in overlay.cpp (section 11)
+521,2026-10-01T11:06:39+03:00,2026-10-01T11:06:39+03:00,Secondary checkout baseline and prototype transition,ui: recover AdjustSettingRow in overlay.cpp (section 5)
+522,2026-10-01T13:22:04+03:00,2026-10-01T13:22:04+03:00,Secondary checkout baseline and prototype transition,operator: retire managed loopback lobby and tunnel startup
+523,2026-10-01T22:12:18+03:00,2026-10-01T22:12:18+03:00,Secondary checkout baseline and prototype transition,test: retire backend connectivity and multiplayer diagnostics
+524,2026-10-01T23:29:35+03:00,2026-10-01T23:29:35+03:00,Secondary checkout baseline and prototype transition,research: recover rd in functions.py (section 3)
+525,2026-10-03T09:45:47+03:00,2026-10-03T09:45:47+03:00,Authenticated input netplay and relay implementation,build: recover ignore rules for Multiplayer operator tools and private credentials
+526,2026-10-03T11:11:02+03:00,2026-10-03T11:11:02+03:00,Authenticated input netplay and relay implementation,docs: recover README.md guidance on nidhogg-port
+527,2026-10-03T19:00:23+03:00,2026-10-03T19:00:23+03:00,Authenticated input netplay and relay implementation,docs: introduce MULTIPLAYER.md guidance on Nidhogg Windows multiplayer
+528,2026-10-04T07:23:37+03:00,2026-10-04T07:23:37+03:00,Authenticated input netplay and relay implementation,docs: recover MULTIPLAYER.md guidance on Operator setup
+529,2026-10-04T10:02:56+03:00,2026-10-04T10:02:56+03:00,Authenticated input netplay and relay implementation,docs: recover MULTIPLAYER.md guidance on Remove startup later:
+530,2026-10-04T11:47:38+03:00,2026-10-04T11:47:38+03:00,Authenticated input netplay and relay implementation,docs: introduce NETWORK-VERIFICATION.md guidance on Verification record — 2026-11-12
+531,2026-10-04T12:03:37+03:00,2026-10-04T12:03:37+03:00,Authenticated input netplay and relay implementation,hle: recover HleCall in hle.cpp (section 49)
+532,2026-10-04T14:04:14+03:00,2026-10-04T14:04:14+03:00,Authenticated input netplay and relay implementation,hle: recover HleCall in hle.cpp (section 50)
+533,2026-10-04T16:46:29+03:00,2026-10-04T16:46:29+03:00,Authenticated input netplay and relay implementation,hle: recover BeginDeterministicSession in hle.cpp
+534,2026-10-04T17:47:52+03:00,2026-10-04T17:47:52+03:00,Authenticated input netplay and relay implementation,hle: recover ComputeGuestStateHash in hle.cpp (section 3)
+535,2026-10-04T18:14:35+03:00,2026-10-04T18:14:35+03:00,Authenticated input netplay and relay implementation,hle: recover ComputeGuestStateHash in hle.cpp (section 4)
+536,2026-10-04T20:42:18+03:00,2026-10-04T20:42:18+03:00,Authenticated input netplay and relay implementation,hle: recover ComputeGuestStateHash in hle.cpp (section 5)
+537,2026-10-05T09:55:02+03:00,2026-10-05T09:55:02+03:00,Authenticated input netplay and relay implementation,hle: recover Emit in hle.cpp (section 2)
+538,2026-10-05T10:48:11+03:00,2026-10-05T10:48:11+03:00,Authenticated input netplay and relay implementation,hle: recover g_onlineMatchSeed in hle.cpp
+539,2026-10-05T15:47:43+03:00,2026-10-05T15:47:43+03:00,Authenticated input netplay and relay implementation,hle: recover guest import and compatibility interfaces (section 6)
+540,2026-10-06T07:49:08+03:00,2026-10-06T07:49:08+03:00,Authenticated input netplay and relay implementation,runtime: recover RunMain in main.cpp (section 4)
+541,2026-10-06T08:03:27+03:00,2026-10-06T08:03:27+03:00,Authenticated input netplay and relay implementation,runtime: recover RunMain in main.cpp (section 5)
+542,2026-10-06T09:40:43+03:00,2026-10-06T09:40:43+03:00,Authenticated input netplay and relay implementation,"runtime: recover guest startup, frame execution and Windows lifecycle (section 4)"
+543,2026-10-06T11:28:27+03:00,2026-10-06T11:28:27+03:00,Authenticated input netplay and relay implementation,netplay: recover TickNetplayLobby in netplay.cpp (section 9)
+544,2026-10-06T17:10:05+03:00,2026-10-06T17:10:05+03:00,Authenticated input netplay and relay implementation,netplay: recover TickNetplayLobby in netplay.cpp (section 10)
+545,2026-10-06T22:02:11+03:00,2026-10-06T22:02:11+03:00,Authenticated input netplay and relay implementation,netplay: recover TickNetplayLobby in netplay.cpp (section 11)
+546,2026-10-12T07:40:39+03:00,2026-10-12T07:40:39+03:00,Authenticated input netplay and relay implementation,netplay: recover QuickMatch in netplay.cpp (section 6)
+547,2026-10-13T10:53:36+03:00,2026-10-13T10:53:36+03:00,Authenticated input netplay and relay implementation,netplay: recover JoinRoomById in netplay.cpp (section 5)
+548,2026-10-13T13:44:01+03:00,2026-10-13T13:44:01+03:00,Authenticated input netplay and relay implementation,netplay: recover CreateRoom in netplay.cpp (section 6)
+549,2026-10-13T14:44:20+03:00,2026-10-13T14:44:20+03:00,Authenticated input netplay and relay implementation,netplay: recover ResumeOnlineSession in netplay.cpp
+550,2026-10-13T14:58:20+03:00,2026-10-13T14:58:20+03:00,Authenticated input netplay and relay implementation,netplay: recover ApplyRoomStateFromJsonLocked in netplay.cpp (section 10)
+551,2026-10-13T16:59:16+03:00,2026-10-13T16:59:16+03:00,Authenticated input netplay and relay implementation,netplay: recover ApplyRoomStateFromJsonLocked in netplay.cpp (section 11)
+552,2026-10-13T19:17:00+03:00,2026-10-13T19:17:00+03:00,Authenticated input netplay and relay implementation,netplay: recover NetplayStepCallbackImpl in netplay.cpp (section 20)
+553,2026-10-13T23:52:50+03:00,2026-10-13T23:52:50+03:00,Authenticated input netplay and relay implementation,netplay: recover NetplayStepCallbackImpl in netplay.cpp (section 21)
+554,2026-10-16T07:42:22+03:00,2026-10-16T07:42:22+03:00,Authenticated input netplay and relay implementation,netplay: recover NetplayStepCallbackImpl in netplay.cpp (section 22)
+555,2026-10-16T08:55:41+03:00,2026-10-16T08:55:41+03:00,Authenticated input netplay and relay implementation,netplay: recover NetplayStepCallbackImpl in netplay.cpp (section 23)
+556,2026-10-16T10:22:26+03:00,2026-10-16T10:22:26+03:00,Authenticated input netplay and relay implementation,netplay: recover NetplayStepCallbackImpl in netplay.cpp (section 24)
+557,2026-10-16T10:44:31+03:00,2026-10-16T10:44:31+03:00,Authenticated input netplay and relay implementation,netplay: recover NetplayStepCallbackImpl in netplay.cpp (section 25)
+558,2026-10-16T10:51:16+03:00,2026-10-16T10:51:16+03:00,Authenticated input netplay and relay implementation,netplay: recover PumpUdpRxLocked in netplay.cpp (section 5)
+559,2026-10-16T12:32:05+03:00,2026-10-16T12:32:05+03:00,Authenticated input netplay and relay implementation,netplay: recover PumpUdpRxLocked in netplay.cpp (section 6)
+560,2026-10-16T12:47:50+03:00,2026-10-16T12:47:50+03:00,Authenticated input netplay and relay implementation,netplay: recover PumpUdpRxLocked in netplay.cpp (section 7)
+561,2026-10-16T13:00:31+03:00,2026-10-16T13:00:31+03:00,Authenticated input netplay and relay implementation,netplay: recover VerifyHashesForFrameLocked in netplay.cpp (section 3)
+562,2026-10-16T13:10:47+03:00,2026-10-16T13:10:47+03:00,Authenticated input netplay and relay implementation,netplay: recover SendRegisterEndpointToRelayLocked in netplay.cpp (section 2)
+563,2026-10-16T13:23:45+03:00,2026-10-16T13:23:45+03:00,Authenticated input netplay and relay implementation,netplay: recover SendSealedPeerPacketLocked in netplay.cpp (section 4)
+564,2026-10-16T15:09:39+03:00,2026-10-16T15:09:39+03:00,Authenticated input netplay and relay implementation,netplay: recover SendSealedPeerPacketLocked in netplay.cpp (section 5)
+565,2026-10-16T17:04:10+03:00,2026-10-16T17:04:10+03:00,Authenticated input netplay and relay implementation,netplay: recover EnsureUdpSocketLocked in netplay.cpp (section 2)
+566,2026-10-16T18:07:25+03:00,2026-10-16T18:07:25+03:00,Authenticated input netplay and relay implementation,netplay: recover autoExitOnDisconnect in netplay.cpp
+567,2026-10-16T19:53:11+03:00,2026-10-16T19:53:11+03:00,Authenticated input netplay and relay implementation,netplay: recover websocketRelay in netplay.cpp
+568,2026-10-16T21:23:34+03:00,2026-10-16T21:23:34+03:00,Authenticated input netplay and relay implementation,netplay: recover publicIp in netplay.cpp
+569,2026-10-16T22:06:51+03:00,2026-10-16T22:06:51+03:00,Authenticated input netplay and relay implementation,netplay: recover HttpRequestJson in netplay.cpp (section 5)
+570,2026-10-16T22:48:41+03:00,2026-10-16T22:48:41+03:00,Authenticated input netplay and relay implementation,netplay: recover HttpRequestJson in netplay.cpp (section 6)
+571,2026-10-16T23:04:34+03:00,2026-10-16T23:04:34+03:00,Authenticated input netplay and relay implementation,netplay: recover HttpRequestJson in netplay.cpp (section 7)
+572,2026-10-16T23:09:06+03:00,2026-10-16T23:09:06+03:00,Authenticated input netplay and relay implementation,netplay: recover ParseServerUrl in netplay.cpp (section 3)
+573,2026-10-16T23:42:14+03:00,2026-10-16T23:42:14+03:00,Authenticated input netplay and relay implementation,netplay: recover valid in netplay.cpp
+574,2026-10-17T14:28:50+03:00,2026-10-17T14:28:50+03:00,Authenticated input netplay and relay implementation,netplay: recover room lifecycle and synchronized original-game input
+575,2026-10-17T15:18:50+03:00,2026-10-17T15:18:50+03:00,Authenticated input netplay and relay implementation,netplay: recover kProtocolVersion in netplay.h
+576,2026-10-17T20:30:55+03:00,2026-10-17T20:30:55+03:00,Authenticated input netplay and relay implementation,netplay: introduce DiscoverStunEndpoint in stun.cpp
+577,2026-10-17T22:37:44+03:00,2026-10-17T22:37:44+03:00,Authenticated input netplay and relay implementation,netplay: introduce WebSocketRelay::Stop in websocket.cpp
+578,2026-10-23T08:25:58+03:00,2026-10-23T08:25:58+03:00,Authenticated input netplay and relay implementation,netplay: introduce Connected in websocket.h
+579,2026-10-23T12:22:07+03:00,2026-10-23T12:22:07+03:00,Authenticated input netplay and relay implementation,ui: introduce QueueOnline in online_actions.inc
+580,2026-10-23T19:51:36+03:00,2026-10-23T19:51:36+03:00,Authenticated input netplay and relay implementation,ui: recover HandleOnlineAction in online_actions.inc
+581,2026-10-23T21:08:17+03:00,2026-10-23T21:08:17+03:00,Authenticated input netplay and relay implementation,ui: recover ShutdownOverlay in overlay.cpp (section 2)
+582,2026-10-23T23:35:39+03:00,2026-10-23T23:35:39+03:00,Authenticated input netplay and relay implementation,ui: recover AdjustSettingRow in overlay.cpp (section 6)
+583,2026-10-24T08:57:48+03:00,2026-10-24T08:57:48+03:00,Authenticated input netplay and relay implementation,ui: recover native settings and multiplayer overlay rendering
+584,2026-10-24T12:45:02+03:00,2026-10-24T12:45:02+03:00,Authenticated input netplay and relay implementation,lobby: introduce reproducible WebSocket dependency resolution
+585,2026-10-24T13:30:54+03:00,2026-10-24T13:30:54+03:00,Authenticated input netplay and relay implementation,lobby: introduce name in server.mjs
+586,2026-10-24T15:57:40+03:00,2026-10-24T15:57:40+03:00,Authenticated input netplay and relay implementation,lobby: recover member in server.mjs
+587,2026-10-24T20:28:01+03:00,2026-10-24T20:28:01+03:00,Authenticated input netplay and relay implementation,lobby: recover await in server.mjs
+588,2026-10-24T21:49:58+03:00,2026-10-24T21:49:58+03:00,Authenticated input netplay and relay implementation,test: introduce packet in test.mjs
+589,2026-10-24T23:26:17+03:00,2026-10-24T23:26:17+03:00,Authenticated input netplay and relay implementation,launcher: introduce configurable GUI startup and online endpoint selection
+590,2026-10-25T08:35:19+03:00,2026-10-25T08:35:19+03:00,Authenticated input netplay and relay implementation,operator: introduce managed loopback lobby and tunnel startup (section 2)
+591,2026-10-25T10:47:33+03:00,2026-10-25T10:47:33+03:00,Authenticated input netplay and relay implementation,operator: introduce owned-process shutdown with PID lifetime checks
+592,2026-10-26T08:28:46+03:00,2026-10-26T08:28:46+03:00,Authenticated input netplay and relay implementation,test: introduce main in multiplayer_pair.py
+593,2026-10-26T11:59:05+03:00,2026-10-26T11:59:05+03:00,Authenticated input netplay and relay implementation,test: introduce import in offline_network_regression.py
+594,2026-10-26T13:57:10+03:00,2026-10-26T13:57:10+03:00,Cloudflare account handoff documentation,docs: recover NETWORK-VERIFICATION.md guidance on Verification record — 2026-11-12
+595,2026-10-26T17:41:05+03:00,2026-10-26T17:41:05+03:00,Permanent lobby deployment configuration,docs: recover MULTIPLAYER.md guidance on Remove startup later: (section 2)
+596,2026-10-26T21:37:18+03:00,2026-10-26T21:37:18+03:00,Permanent lobby deployment configuration,docs: recover MULTIPLAYER.md guidance on Stable lobby.japer.me — requires user account/DNS action
+597,2026-10-30T08:15:47+03:00,2026-10-30T08:15:47+03:00,Permanent lobby deployment configuration,docs: recover MULTIPLAYER.md guidance on Stable lobby.japer.me — deployed configuration and setup referenc
+598,2026-10-30T09:05:26+03:00,2026-10-30T09:05:26+03:00,Permanent lobby deployment configuration,docs: recover NETWORK-VERIFICATION.md guidance on Permanent deployment follow-up
+599,2026-10-30T10:05:41+03:00,2026-10-30T10:05:41+03:00,Permanent lobby deployment configuration,netplay: recover HttpRequestJson in netplay.cpp (section 8)
+600,2026-10-31T14:19:57+03:00,2026-10-31T14:19:57+03:00,Permanent lobby deployment configuration,test: introduce api in probe-deployment.mjs
+601,2026-10-31T17:22:38+03:00,2026-10-31T17:22:38+03:00,Embedded artwork and portable packaging,docs: recover README.md guidance on nidhogg-port (section 2)
+602,2026-10-31T18:23:41+03:00,2026-10-31T18:23:41+03:00,Embedded artwork and portable packaging,resources: introduce supplied Nidhogg application artwork
+603,2026-11-01T07:09:16+03:00,2026-11-01T07:09:16+03:00,Embedded artwork and portable packaging,release: introduce sha256 in package-desktop.py
+604,2026-11-01T11:38:23+03:00,2026-11-01T11:38:23+03:00,Embedded artwork and portable packaging,release: recover name in package-desktop.py
+605,2026-11-01T12:16:45+03:00,2026-11-01T12:16:45+03:00,"Repository documentation, source hygiene and validation tooling",maintenance: introduce bug_report.yml guidance on structured bug reproduction form
+606,2026-11-01T12:27:26+03:00,2026-11-01T12:27:26+03:00,"Repository documentation, source hygiene and validation tooling",maintenance: introduce validate.yml guidance on manual Windows build and backend validation
+607,2026-11-01T14:37:03+03:00,2026-11-01T14:37:03+03:00,"Repository documentation, source hygiene and validation tooling",build: recover ignore rules for credential and operator-file exclusions
+608,2026-11-01T15:10:58+03:00,2026-11-01T15:10:58+03:00,"Repository documentation, source hygiene and validation tooling",build: recover ignore rules for User-specific files (section 2)
+609,2026-11-01T16:05:43+03:00,2026-11-01T16:05:43+03:00,"Repository documentation, source hygiene and validation tooling","build: recover ignore rules for Generated diagnostics, packages and dependency trees"
+610,2026-11-01T17:56:11+03:00,2026-11-01T17:56:11+03:00,"Repository documentation, source hygiene and validation tooling",build: recover ignore rules for personal-save and test-output exclusions
+611,2026-11-01T18:28:04+03:00,2026-11-01T18:28:04+03:00,"Repository documentation, source hygiene and validation tooling",build: recover ignore rules for Game assets and audio (section 2)
+612,2026-11-01T18:55:46+03:00,2026-11-01T18:55:46+03:00,"Repository documentation, source hygiene and validation tooling","build: recover ignore rules for Original game files, decoded executables and runtime data"
+613,2026-11-01T19:28:32+03:00,2026-11-01T19:28:32+03:00,"Repository documentation, source hygiene and validation tooling",build: recover ignore rules for Visual Studio workspace exclusions
+614,2026-11-01T22:05:13+03:00,2026-11-01T22:05:13+03:00,"Repository documentation, source hygiene and validation tooling",build: recover ignore rules for Build products and IDE state
+615,2026-11-01T23:18:48+03:00,2026-11-01T23:18:48+03:00,"Repository documentation, source hygiene and validation tooling",docs: introduce CONTRIBUTING.md guidance on Contributing
+616,2026-11-01T23:23:39+03:00,2026-11-01T23:23:39+03:00,"Repository documentation, source hygiene and validation tooling",docs: recover README.md guidance on Host
+617,2026-11-03T08:33:18+03:00,2026-11-03T08:33:18+03:00,"Repository documentation, source hygiene and validation tooling",docs: recover README.md guidance on Documentation
+618,2026-11-06T10:58:52+03:00,2026-11-06T10:58:52+03:00,"Repository documentation, source hygiene and validation tooling",docs: recover README.md guidance on Project map
+619,2026-11-06T18:15:07+03:00,2026-11-06T18:15:07+03:00,"Repository documentation, source hygiene and validation tooling",docs: recover README.md guidance on Develop and verify
+620,2026-11-06T19:03:13+03:00,2026-11-06T19:03:13+03:00,"Repository documentation, source hygiene and validation tooling",docs: recover README.md guidance on State
+621,2026-11-06T21:40:03+03:00,2026-11-06T21:40:03+03:00,"Repository documentation, source hygiene and validation tooling",docs: recover README.md guidance on Build
+622,2026-11-07T09:27:46+03:00,2026-11-07T09:27:46+03:00,"Repository documentation, source hygiene and validation tooling",docs: recover README.md guidance on Play on Windows
+623,2026-11-07T15:35:17+03:00,2026-11-07T15:35:17+03:00,"Repository documentation, source hygiene and validation tooling",docs: recover README.md guidance on nidhogg-port (section 3)
+624,2026-11-09T08:43:14+03:00,2026-11-09T08:43:14+03:00,"Repository documentation, source hygiene and validation tooling",docs: recover README.md guidance on Nidhogg Win64 Port
+625,2026-11-09T08:53:09+03:00,2026-11-09T08:53:09+03:00,"Repository documentation, source hygiene and validation tooling",docs: introduce SECURITY.md guidance on Security reporting
+626,2026-11-09T12:26:06+03:00,2026-11-09T12:26:06+03:00,"Repository documentation, source hygiene and validation tooling",docs: introduce ARCHITECTURE.md guidance on Runtime architecture
+627,2026-11-09T17:15:49+03:00,2026-11-09T17:15:49+03:00,"Repository documentation, source hygiene and validation tooling",docs: introduce INITIAL-RESEARCH.md guidance on Initial extraction and reverse-engineering notes
+628,2026-11-09T17:38:47+03:00,2026-11-09T17:38:47+03:00,"Repository documentation, source hygiene and validation tooling",docs: recover INITIAL-RESEARCH.md guidance on Next block of work
+629,2026-11-09T22:30:17+03:00,2026-11-09T22:30:17+03:00,"Repository documentation, source hygiene and validation tooling","build: recover MSVC compilation, resource embedding and GUI/console linking (section 6)"
+630,2026-11-09T23:01:29+03:00,2026-11-09T23:01:29+03:00,"Repository documentation, source hygiene and validation tooling",codec: introduce upstream MIT license notice
+631,2026-11-10T09:36:04+03:00,2026-11-10T09:36:04+03:00,"Repository documentation, source hygiene and validation tooling",release: recover asset-free Windows release packaging
+632,2026-11-12T04:21:38+03:00,2026-11-12T04:21:38+03:00,Playable Windows release and history metadata refinement,release: ship playable Windows v1.0.0 with verified offline/local support

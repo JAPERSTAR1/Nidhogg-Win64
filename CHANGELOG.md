@@ -3,7 +3,13 @@
 Changes below summarize recovered snapshots. They are not release dates inferred
 from the synthetic author-date schedule; see docs/HISTORY.md.
 
-## Unreleased — recovered 2026-11-12
+## v1.0.0 — 2026-11-12
+
+Playable Windows x64 release targeting offline/local play. The release ZIP
+contains the GUI runtime, artwork, English/Arabic startup instructions, exact
+source revision, SHA-256 checksums and third-party notices. Original game files
+are supplied separately by the player. Online multiplayer remains experimental.
+See [release notes](docs/RELEASE-v1.0.0.md) for exact verification scope.
 
 - Original PS4 game execution through Windows compatibility, GNM/PM4 rendering,
   NGS2/ATRAC9 audio, configurable display/input and native overlay settings.
@@ -17,6 +23,8 @@ from the synthetic author-date schedule; see docs/HISTORY.md.
   verified local desktop packages.
 - Source provenance, contribution/security guidance, third-party notices and a
   manually triggered asset-free validation workflow.
+- Descriptive reconstructed commit messages and unique synthetic author/committer
+  timestamps, with original provenance and actual reconstruction time retained.
 
 Independent-network gameplay, general NAT compatibility, low-latency relay play,
 rollback, reconnect/resume and complete in-menu click testing remain unverified

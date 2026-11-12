@@ -1,5 +1,9 @@
 # Verification record — 2026-11-12
 
+The v1.0.0 offline/local release has a separate [packaged-binary verification
+record](RELEASE-VERIFICATION.md). Its release classification does not certify the
+experimental online path or change the independent-network limitation below.
+
 ## Repository reconstruction validation
 
 Before reconstructing the source history on 2026-11-12, the final secondary

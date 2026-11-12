@@ -63,6 +63,8 @@ def main():
     playable.mkdir()
     shutil.copy2(executable, playable / 'Nidhogg.exe')
     shutil.copy2(ROOT / 'port/resources/nidhogg-logo.png', playable / 'Nidhogg.png')
+    shutil.copy2(ROOT / 'THIRD_PARTY_NOTICES.md', playable / 'THIRD_PARTY_NOTICES.md')
+    shutil.copy2(ROOT / 'port/src/atrac9/LICENSE', playable / 'LibAtrac9-LICENSE.txt')
     (playable / 'portable.txt').write_text('Portable settings and saves stay in this folder.\n')
     (playable / 'config').mkdir()
     clean_settings = {'assetPath': '', 'lobbyServerUrl': 'https://lobby.japer.me', 'playerName': 'Fencer'}
