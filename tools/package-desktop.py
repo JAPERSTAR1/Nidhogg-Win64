@@ -32,7 +32,7 @@ def desktop_folder():
     return Path(buffer.value)
 
 def archive(folder):
-    target = folder.with_suffix('.zip')
+    target = folder.parent / (folder.name + '.zip')
     with zipfile.ZipFile(target, 'x', zipfile.ZIP_DEFLATED, compresslevel=6) as output:
         for item in sorted(folder.rglob('*')):
             if item.is_file():
@@ -59,7 +59,7 @@ def main():
     if any((args.desktop / name).exists() or (args.desktop / (name + '.zip')).exists() for name in names):
         suffix = ' - ' + datetime.now(timezone(timedelta(hours=3))).strftime('%Y%m%d-%H%M%S')
     playable, original = [args.desktop / (name + suffix) for name in names]
-    if any(p.exists() or p.with_suffix('.zip').exists() for p in [playable, original]):
+    if any(p.exists() or (p.parent / (p.name + '.zip')).exists() for p in [playable, original]):
         raise RuntimeError('Destination already exists; no files overwritten')
     playable.mkdir()
     shutil.copy2(executable, playable / 'Nidhogg.exe')
