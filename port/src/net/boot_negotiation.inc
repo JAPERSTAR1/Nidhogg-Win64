@@ -30,13 +30,15 @@ bool NegotiateBootDelayLocked(std::unique_lock<std::mutex>& lk) {
         }
         if (g_net.snap.isHost && proposal && g_net.peerDelayProposal && !g_net.bootCommitted) {
             g_net.snap.inputDelayFrames = g_net.autoDelay ? std::max<int>(proposal, g_net.peerDelayProposal) : proposal;
+            g_net.bootHostStartUsec = now + std::max<uint64_t>(500000ULL, static_cast<uint64_t>(g_net.snap.rttMs * 4000.0));
             g_net.bootCommitted = true;
         }
         const bool start = g_net.snap.isHost ? g_net.bootCommitted && g_net.bootAcked : g_net.bootStartSeen;
-        if (now - lastAgreement >= 50000ULL || start) {
+        if (now - lastAgreement >= 50000ULL) {
             BootAgreementPayload agreement{};
             agreement.delay = g_net.bootCommitted ? static_cast<uint8_t>(g_net.snap.inputDelayFrames) : proposal;
             agreement.flags = proposal ? 1 : 0;
+            agreement.hostStartUsec = g_net.bootHostStartUsec;
             if (g_net.snap.isHost && g_net.bootCommitted) agreement.flags |= 2;
             if (!g_net.snap.isHost && g_net.bootCommitted) agreement.flags |= 4;
             if (g_net.snap.isHost && start) agreement.flags |= 8;
@@ -44,13 +46,18 @@ bool NegotiateBootDelayLocked(std::unique_lock<std::mutex>& lk) {
             lastAgreement = now;
         }
         FlushTxQueueLocked();
-        if (start) {
+        const uint64_t localStart = g_net.snap.isHost ? g_net.bootHostStartUsec :
+            timing::LocalDeadline(g_net.bootHostStartUsec, g_net.peerClockOffsetUsec);
+        if (start && localStart && now >= localStart) {
             g_net.bootAgreementDone = true;
             g_net.localInputs.clear(); g_net.remoteInputs.clear();
             for (int f = 0; f < g_net.snap.inputDelayFrames; ++f) {
                 g_net.localInputs[f] = 0; g_net.remoteInputs[f] = 0;
             }
             g_net.rttSamples.clear(); g_net.jitterSamples.clear();
+            g_net.snap.statusText = "In match - calibrated connection";
+            LOG_INFO("[netplay] shared start lateness=%.2fms peerClockOffset=%.2fms",
+                (now - localStart) / 1000.0, g_net.peerClockOffsetUsec / 1000.0);
             LOG_INFO("[netplay] agreed delay=%df sampled input floor=%.1fms transport=%s",
                 g_net.snap.inputDelayFrames, g_net.snap.inputDelayFrames * (1000.0 / 60.0),
                 g_net.snap.transport == TransportMode::DirectP2P ? "DirectP2P" :

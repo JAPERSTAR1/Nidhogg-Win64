@@ -146,6 +146,11 @@ export function createLobby({ ttlMs = 20000, maxRooms = 128, now = Date.now,
     }
     return view(r, role);
   }
+  function requestIp(req) {
+    const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+    const forwarded = process.env.TRUST_PROXY === 'caddy' ? req.headers['x-real-ip'] : req.headers['cf-connecting-ip'];
+    return local && isIP(forwarded) ? forwarded : req.socket.remoteAddress;
+  }
   const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://localhost');
@@ -155,11 +160,8 @@ export function createLobby({ ttlMs = 20000, maxRooms = 128, now = Date.now,
       let b = {};
       try { b = size ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}; } catch { throw new ApiError(400, 'Invalid JSON'); }
       requireThat(b && typeof b === 'object' && !Array.isArray(b), 400, 'Expected object');
-      // Only trust Cloudflare's overwritten client-IP header from the local tunnel.
-      const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
-      const forwarded = process.env.TRUST_PROXY === 'caddy' ? req.headers['x-real-ip'] : req.headers['cf-connecting-ip'];
-      const ip = local && isIP(forwarded) ? forwarded : req.socket.remoteAddress;
-      const result = route(req.method, url, b, ip);
+      // Forwarded addresses are accepted only from the local trusted proxy.
+      const result = route(req.method, url, b, requestIp(req));
       res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(result));
     } catch (e) {
       res.writeHead(e.status ?? 500, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
@@ -169,7 +171,7 @@ export function createLobby({ ttlMs = 20000, maxRooms = 128, now = Date.now,
   server.requestTimeout = 5000; server.headersTimeout = 5000; server.maxConnections = 512;
   server.on('upgrade', (req, socket, head) => {
     try {
-      sweep(); rate(req.socket.remoteAddress, 5);
+      sweep(); rate(requestIp(req), 5);
       requireThat(req.headers['x-nidhogg-version'] === VERSION, 426, 'Protocol mismatch');
       const url = new URL(req.url, 'http://localhost');
       requireThat(url.pathname === '/relay', 404, 'Unknown endpoint');

@@ -4,6 +4,7 @@
 #include "crypto.h"
 #include "websocket.h"
 #include "stun.h"
+#include "timing.h"
 
 #include "../core/logger.h"
 #include "../core/settings.h"
@@ -67,6 +68,7 @@ struct BootAgreementPayload {
     uint8_t delay = 0;
     uint8_t flags = 0; // 1=proposal, 2=host committed, 4=guest ack, 8=start
     uint16_t reserved = 0;
+    uint64_t hostStartUsec = 0;
 };
 
 struct InputPayload {
@@ -79,6 +81,7 @@ struct InputPayload {
     uint64_t stateHash = 0;
     uint64_t sendTimeUsec = 0;
     uint64_t echoTimeUsec = 0;
+    uint64_t sampleTimeUsec = 0; // Original capture time, unchanged by retransmission.
 };
 #pragma pack(pop)
 
@@ -221,7 +224,7 @@ bool HttpRequestJson(const std::string& method, const std::string& path, const s
     HINTERNET hSession = WinHttpOpen(L"NidhoggPort/1.0", WINHTTP_ACCESS_TYPE_NO_PROXY,
                                      WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!hSession) { outErr = "WinHttpOpen failed"; return false; }
-    WinHttpSetTimeouts(hSession, 1500, 1500, 2000, 2000);
+    WinHttpSetTimeouts(hSession, 3000, 3000, 5000, 5000);
 
     HINTERNET hConnect = WinHttpConnect(hSession, u.host.c_str(), u.port, 0);
     if (!hConnect) {
@@ -383,10 +386,17 @@ struct NetState {
     bool autoDelay = true;
     uint8_t peerDelayProposal = 0;
     int configuredDelay = 2;
+    uint64_t bestClockRttUsec = UINT64_MAX;
+    int64_t peerClockOffsetUsec = 0;
+    uint64_t bootHostStartUsec = 0;
+    uint64_t peerSampleFrame = 0, peerSampleLocalUsec = 0;
+    bool hasPeerSample = false;
+    double phaseErrorUsec = 0;
     uint64_t stageSelectionStart = UINT64_MAX;
 };
 
 NetState g_net;
+std::atomic<int> g_framePacingAdjustment{0};
 
 struct HeartbeatResult {
     std::string roomId, response, error;
@@ -786,6 +796,13 @@ void PumpUdpRxLocked() {
                     std::memcpy(&echoed, plain.data() + 8, 8);
                     g_net.lastPeerTimestampUsec = peerTs;
                     UpdateRttLocked(echoed);
+                    if (!g_net.bootCommitted) {
+                        const auto clock = timing::EstimatePeerClock(echoed, peerTs, MonoUsec());
+                        if (clock.valid && clock.rttUsec < g_net.bestClockRttUsec) {
+                            g_net.bestClockRttUsec = clock.rttUsec;
+                            g_net.peerClockOffsetUsec = clock.peerOffsetUsec;
+                        }
+                    }
                 }
                 if (g_net.snap.phase == SessionPhase::ConnectingTransport) {
                     g_net.snap.phase = SessionPhase::SyncingMenu;
@@ -830,6 +847,16 @@ void PumpUdpRxLocked() {
 
                 const uint8_t count = std::min<uint8_t>(ip.historyCount, 16);
                 if (!count || ip.latestFrame > g_net.matchFrame + 64) break;
+                const auto delay = static_cast<uint64_t>(g_net.snap.inputDelayFrames);
+                if (ip.sampleTimeUsec && ip.latestFrame >= delay &&
+                    (!g_net.hasPeerSample || ip.latestFrame - delay > g_net.peerSampleFrame)) {
+                    const auto mapped = timing::LocalDeadline(ip.sampleTimeUsec, g_net.peerClockOffsetUsec);
+                    if (mapped) {
+                        g_net.peerSampleFrame = ip.latestFrame - delay;
+                        g_net.peerSampleLocalUsec = mapped;
+                        g_net.hasPeerSample = true;
+                    }
+                }
                 for (uint8_t k = 0; k < count; ++k) {
                     if (ip.latestFrame >= k && ip.latestFrame - k + 64 >= g_net.matchFrame) {
                         g_net.remoteInputs[ip.latestFrame - k] = ip.buttonsHistory[k];
@@ -847,7 +874,9 @@ void PumpUdpRxLocked() {
                 if (agreement.delay < 1 || agreement.delay > 12) break;
                 if (agreement.flags & 1) g_net.peerDelayProposal = agreement.delay;
                 if (!g_net.snap.isHost && (agreement.flags & 2)) {
+                    if (!agreement.hostStartUsec) break;
                     g_net.snap.inputDelayFrames = agreement.delay; g_net.bootCommitted = true;
+                    g_net.bootHostStartUsec = agreement.hostStartUsec;
                 }
                 if (g_net.snap.isHost && g_net.bootCommitted && (agreement.flags & 4) &&
                     agreement.delay == g_net.snap.inputDelayFrames) g_net.bootAcked = true;
@@ -884,6 +913,8 @@ void SendInputPacketForFrameLocked(uint64_t targetFrame, bool includeHash, uint6
     }
     ip.sendTimeUsec = MonoUsec();
     ip.echoTimeUsec = g_net.lastPeerTimestampUsec;
+    const auto captured = g_net.capturedInputUsec.find(targetFrame);
+    if (captured != g_net.capturedInputUsec.end()) ip.sampleTimeUsec = captured->second;
     SendSealedPeerPacketLocked(kPktInput, &ip, sizeof(ip));
 }
 
@@ -987,6 +1018,15 @@ bool NetplayStepCallbackImpl(uint64_t simFrame, uint32_t localButtons,
 
     const uint64_t f = g_net.matchFrame;
     const uint64_t stepNow = MonoUsec();
+    if (g_net.hasPeerSample) {
+        const auto delta = static_cast<int64_t>(f) - static_cast<int64_t>(g_net.peerSampleFrame);
+        const double error = static_cast<double>(stepNow) -
+            (static_cast<double>(g_net.peerSampleLocalUsec) + delta * 16667.0);
+        if (std::abs(delta) <= 64 && std::abs(error) < 1000000.0) {
+            g_net.phaseErrorUsec += 0.05 * (error - g_net.phaseErrorUsec);
+            g_framePacingAdjustment.store(timing::FramePacingCorrection(g_net.phaseErrorUsec), std::memory_order_relaxed);
+        }
+    }
     if (g_net.gameStartSubmit != UINT64_MAX) {
         if (g_net.previousGameStepUsec) {
             const uint64_t interval = stepNow - g_net.previousGameStepUsec;
@@ -1157,7 +1197,7 @@ void ApplyRoomStateFromJsonLocked(const std::string& resp) {
     int64_t agreedDelay = 3;
     if (JsonGetInt(resp, "inputDelayFrames", agreedDelay)) {
         g_net.configuredDelay = std::clamp<int>(static_cast<int>(agreedDelay), 1, 12);
-        if (!g_net.bootAgreementDone) g_net.snap.inputDelayFrames = g_net.configuredDelay;
+        if (!g_net.bootCommitted && !g_net.bootAgreementDone) g_net.snap.inputDelayFrames = g_net.configuredDelay;
     }
     JsonGetBool(resp, "autoInputDelay", g_net.autoDelay);
     if (JsonGetInt(resp, "playerCount", pCount)) g_net.snap.playerCount = static_cast<int>(pCount);
@@ -1761,6 +1801,7 @@ bool StartMatch(std::string& outError) {
 }
 
 void LeaveRoom() {
+    g_framePacingAdjustment.store(0, std::memory_order_relaxed);
     ps4::SetNetplayStepCallback(nullptr);
     std::string roomId, token;
     {
@@ -1787,6 +1828,8 @@ void LeaveRoom() {
         g_net.lastRelayProbeUsec = 0; std::memset(g_net.relayCookie, 0, sizeof(g_net.relayCookie));
         g_net.bootAgreementDone = false; g_net.bootCommitted = false;
         g_net.bootAcked = false; g_net.bootStartSeen = false; g_net.peerDelayProposal = 0;
+        g_net.bestClockRttUsec = UINT64_MAX; g_net.peerClockOffsetUsec = 0;
+        g_net.bootHostStartUsec = 0; g_net.hasPeerSample = false; g_net.phaseErrorUsec = 0;
         g_net.directEstablished = false;
         g_net.hasPeerPublic = false;
         g_net.hasPeerLan = false;
@@ -1821,6 +1864,8 @@ bool CopyRoomCodeToClipboard() {
     CloseClipboard();
     return true;
 }
+
+int FramePacingAdjustmentUsec() { return g_framePacingAdjustment.load(std::memory_order_relaxed); }
 
 void TickNetplayLobby() {
     InitNetplay();
@@ -1879,7 +1924,7 @@ void TickNetplayLobby() {
         }
         const uint64_t now = MonoUsec();
         if (!g_net.snap.roomId.empty() && !g_net.authToken.empty() &&
-            now - g_net.lastHeartbeatUsec >= 400000ULL) {  // 400ms lobby poll / heartbeat
+            now - g_net.lastHeartbeatUsec >= (g_net.snap.phase == SessionPhase::LobbyWaiting ? 400000ULL : 2000000ULL)) {
             g_net.lastHeartbeatUsec = now;
             roomId = g_net.snap.roomId;
             token = g_net.authToken;

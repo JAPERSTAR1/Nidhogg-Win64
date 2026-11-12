@@ -2698,9 +2698,10 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                     timeBeginPeriod(1);
                     s_nextFlipUsec = HostNowUsec();
                 }
-                const uint64_t periodUsec =
-                    (g_videoOut.flipRate == 1) ? 33333ULL :
-                    (g_videoOut.flipRate == 2) ? 50000ULL : 16667ULL;
+                const int64_t basePeriodUsec =
+                    (g_videoOut.flipRate == 1) ? 33333LL :
+                    (g_videoOut.flipRate == 2) ? 50000LL : 16667LL;
+                const uint64_t periodUsec = static_cast<uint64_t>(basePeriodUsec + net::FramePacingAdjustmentUsec());
                 s_nextFlipUsec += periodUsec;
                 const uint64_t preNow = HostNowUsec();
                 if (preNow > s_nextFlipUsec + 100000ULL) s_nextFlipUsec = preNow + periodUsec;

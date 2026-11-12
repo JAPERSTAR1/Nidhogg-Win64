@@ -80,6 +80,7 @@ bool ResumeOnlineSession(); // Called before the first guest instruction on matc
 void NotifyOriginalMatchStart(uint64_t submittedFrame);
 void ShutdownNetplay();
 void TickNetplayLobby();  // Called once per frame from UI/renderer
+int FramePacingAdjustmentUsec(); // Wall-clock phase trim only; guest time remains frame-indexed.
 
 // Lobby & Matchmaking operations
 bool RefreshPublicRooms(const std::string& regionFilter, bool availableOnly,
