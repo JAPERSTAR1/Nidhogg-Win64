@@ -1,5 +1,21 @@
 # Verification record — 2026-11-12
 
+## Repository reconstruction validation
+
+Before reconstructing the source history on 2026-11-12, the final secondary
+working tree was rebuilt successfully. Backend tests passed; embedded original
+PNG and all seven icon sizes passed resource verification. The offline harness
+again passed 12/12 checks. `history-release-validation/report.json` records a new
+2800-frame two-process localhost relay run: both exit 0, both Yellow winner,
+matching Castle progression through results/rematch, 20 matching state checks
+per client and no detected divergence/timeouts. These are new local tests, not
+additional independent-network verification.
+
+The asset-free ZIP now also includes LibAtrac9's MIT notice and third-party
+notices. The GitHub workflow is manual and has not been executed on GitHub.
+See [HISTORY.md](HISTORY.md) for the explicitly synthetic author-date schedule;
+that schedule is not evidence of past testing or development activity.
+
 This is a secondary checkout, branch `codex/internet-multiplayer`. Pre-change
 checkpoint: `993f8ba`. No original game data or other checkout was edited.
 

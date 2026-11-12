@@ -1,0 +1,40 @@
+name: Validate Windows runtime and lobby
+
+# Manual dispatch avoids unsolicited CI usage on private repositories.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install locked lobby dependencies
+        run: npm ci --prefix server
+      - name: Test lobby and relay validation
+        run: npm test --prefix server
+      - name: Build GUI and console runtime
+        shell: pwsh
+        run: ./port/build.ps1
+      - name: Verify embedded artwork
+        run: python tools/verify-icon.py
+      - name: Package asset-free runtime
+        shell: pwsh
+        run: ./tools/package-windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nidhogg-Windows-runtime
+          path: dist/Nidhogg-Windows.zip
+          retention-days: 14

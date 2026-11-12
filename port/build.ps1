@@ -3,7 +3,7 @@
 #   .\build.ps1 run        compile and run
 #   .\build.ps1 clean
 
-param([string]$Target = "build")
+param([ValidateSet("build", "run", "clean")][string]$Target = "build")
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -18,6 +18,10 @@ $vcvars = Join-Path $vs "VC\Auxiliary\Build\vcvars64.bat"
 if (-not (Test-Path $vcvars)) { throw "vcvars64.bat missing at $vcvars" }
 
 if ($Target -eq "clean") {
+    $expected = [IO.Path]::GetFullPath((Join-Path $root "out"))
+    if ([IO.Path]::GetFullPath($out) -ne $expected -or (Split-Path -Parent $expected) -ne [IO.Path]::GetFullPath($root)) {
+        throw "Refusing to clean outside the port output directory"
+    }
     if (Test-Path $out) { Remove-Item -Recurse -Force $out }
     return
 }
@@ -43,5 +47,5 @@ Write-Host "built $exe" -ForegroundColor Green
 
 if ($Target -eq "run") {
     Push-Location (Split-Path -Parent $root)
-    try { & $exe (Join-Path $root "..\work\nidhogg.elf") } finally { Pop-Location }
+    try { & $exe } finally { Pop-Location }
 }
