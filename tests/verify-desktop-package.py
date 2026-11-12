@@ -1,5 +1,6 @@
 """Smoke-test the delivered portable EXE with no external asset path supplied."""
 import json
+from datetime import datetime
 import os
 from pathlib import Path
 import subprocess
@@ -7,7 +8,7 @@ import subprocess
 root = Path(__file__).resolve().parents[1]
 report = json.loads((root / 'tests/results/desktop-package-report.json').read_text())
 folder = Path(report['windows_folder'])
-output = root / 'tests/results/desktop-package-smoke'
+output = root / ('tests/results/desktop-package-smoke-' + datetime.now().strftime('%Y%m%d-%H%M%S-%f'))
 output.mkdir(parents=True, exist_ok=True)
 env = {key: value for key, value in os.environ.items() if not key.startswith('NIDHOGG_')}
 env.update(NIDHOGG_QA_UNFOCUSED='1', NIDHOGG_UNCAPPED='1',
@@ -33,5 +34,6 @@ checks = {
     'no_machine_specific_asset_path_in_shared_settings': json.loads((folder / 'config/settings.json').read_text())['assetPath'] == '',
 }
 (output / 'report.json').write_text(json.dumps(checks, indent=2))
+(root / 'tests/results/desktop-package-smoke-latest.json').write_text(json.dumps({'report': str(output / 'report.json')}, indent=2))
 print(json.dumps(checks, indent=2))
 raise SystemExit(0 if all(checks.values()) else 1)
