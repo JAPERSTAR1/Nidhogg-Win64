@@ -983,10 +983,19 @@ uint32_t ReadLocalPlayerButtons(int playerIndex, uint8_t& lx, uint8_t& ly, uint8
 
     static std::vector<AutoPressCmd> s_p1Auto = ParseAutoPressEnv("NIDHOGG_AUTOPRESS");
     static std::vector<AutoPressCmd> s_p2Auto = ParseAutoPressEnv("NIDHOGG_AUTOPRESS_P2");
+    static std::vector<AutoPressCmd> s_matchAuto = ParseAutoPressEnv("NIDHOGG_AUTOPRESS_MATCH");
     const auto& seq = (playerIndex == 1) ? s_p1Auto : s_p2Auto;
     for (const auto& cmd : seq) {
         if (g_submits >= cmd.startFrame && g_submits < cmd.startFrame + cmd.duration) {
             buttons |= cmd.mask;
+        }
+    }
+    if (playerIndex == 1 && g_netplayClockLock.load(std::memory_order_relaxed)) {
+        const uint64_t mf = g_netplaySimFrame.load(std::memory_order_relaxed);
+        for (const auto& cmd : s_matchAuto) {
+            if (mf >= cmd.startFrame && mf < cmd.startFrame + cmd.duration) {
+                buttons |= cmd.mask;
+            }
         }
     }
     return buttons;
@@ -1078,11 +1087,13 @@ uint64_t ComputeGuestStateHash() {
         uint64_t ent = *reinterpret_cast<const uint64_t*>(g_base + 0x3e2230);
         while (ent && entityCount < 2048 && Readable(reinterpret_cast<void*>(ent), 0x128)) {
             const auto* eb = reinterpret_cast<const uint8_t*>(ent);
-            if (eb[0x9b] == 0) {  // not marked destroyed
+            // Hash non-destroyed, room-scoped gameplay entities (exclude boot-time
+            // persistent audio/menu managers `eb[0x9d] != 0` whose timers started before lobby join).
+            if (eb[0x9b] == 0 && eb[0x9d] == 0) {
                 const uint64_t vt = *reinterpret_cast<const uint64_t*>(eb);
                 const uint64_t relVt = (vt >= g_base) ? (vt - g_base) : vt;
                 mixBytes(&relVt, sizeof(relVt));
-                mixBytes(eb + 0x80, 0xA4);  // positions, velocities, alarms, sprite, angles
+                mixBytes(eb + 0x98, 0x8C);
                 ++entityCount;
             }
             ent = *reinterpret_cast<const uint64_t*>(eb + 0x08);
@@ -1095,6 +1106,7 @@ uint64_t ComputeGuestStateHash() {
 void SetNetplayStepCallback(NetplayStepFn fn) {
     g_netplayStep = fn;
     g_netplaySyncedFrame = UINT64_MAX;
+    g_netplaySimFrame.store(0, std::memory_order_relaxed);
     if (!fn) g_netplayClockLock.store(false, std::memory_order_relaxed);
 }
 
@@ -1670,17 +1682,21 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                         ? buttons
                         : ReadLocalPlayerButtons(1, dummyLx, dummyLy, dummyRx, dummyRy);
                     uint32_t syncedP1 = 0, syncedP2 = 0;
-                    if (g_netplayStep(g_submits, localP1, syncedP1, syncedP2, g_simRandState)) {
-                        g_netplayClockLock.store(true, std::memory_order_relaxed);
-                        g_netplaySimFrame.store(g_submits, std::memory_order_relaxed);
+                    uint64_t matchFrm = 0;
+                    bool lockClk = false;
+                    if (g_netplayStep(g_submits, localP1, syncedP1, syncedP2, g_simRandState,
+                                      matchFrm, lockClk)) {
+                        g_netplayClockLock.store(lockClk, std::memory_order_relaxed);
+                        g_netplaySimFrame.store(matchFrm, std::memory_order_relaxed);
                         g_netplayP1Buttons = syncedP1;
                         g_netplayP2Buttons = syncedP2;
                         g_netplaySyncedFrame = g_submits;
-                        if (g_base && Readable(reinterpret_cast<void*>(g_base + 0x1f0068), 4)) {
+                        if (lockClk && g_base && Readable(reinterpret_cast<void*>(g_base + 0x1f0068), 4)) {
                             *reinterpret_cast<uint32_t*>(g_base + 0x1f0068) = g_simRandState;
                         }
                     } else {
                         g_netplayClockLock.store(false, std::memory_order_relaxed);
+                        g_netplaySimFrame.store(0, std::memory_order_relaxed);
                     }
                 }
                 if (g_netplaySyncedFrame == g_submits) {

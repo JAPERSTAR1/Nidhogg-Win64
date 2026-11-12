@@ -730,6 +730,17 @@ void AdjustSettingRow(void* hwnd, int tab, int row, int dir, bool activated) {
                         g_ui.selectedRow = 0;
                     }
                     break;
+                case 7:  // Start Local Lobby Server (1-click host server on this PC)
+                    if (activated) {
+                        if (net::EnsureLocalLobbyServerRunning(err)) {
+                            g_ui.onlineBanner = "Local lobby server active at http://127.0.0.1:27880";
+                            g_ui.onlineBannerIsError = false;
+                        } else {
+                            g_ui.onlineBanner = err;
+                            g_ui.onlineBannerIsError = true;
+                        }
+                    }
+                    break;
             }
         } else if (g_ui.onlinePage == OnlineSubPage::Browser) {
             if (row == 0 && activated) {
@@ -983,6 +994,14 @@ bool IsOverlayOpen() {
 }
 
 bool OnWindowMessage(void* hwnd, uint32_t msg, uint64_t wp, int64_t lp) {
+    static int s_qaUnfocused = -1;
+    if (s_qaUnfocused < 0) {
+        char* v = nullptr;
+        size_t len = 0;
+        s_qaUnfocused = (_dupenv_s(&v, &len, "NIDHOGG_QA_UNFOCUSED") == 0 && v && *v == '1') ? 1 : 0;
+        if (v) std::free(v);
+    }
+    if (s_qaUnfocused == 1) return false;
     if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) {
         const int vk = static_cast<int>(wp);
 
@@ -1229,8 +1248,9 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
     if (cfg.showNetStats && netSnap.phase != net::SessionPhase::Offline) {
         char netBuf[192];
         const char* tmode =
-            (netSnap.transport == net::TransportMode::DirectP2P) ? "P2P-AES" :
-            (netSnap.transport == net::TransportMode::RelayFallback) ? "RELAY-AES" : "NEGOTIATING";
+            (netSnap.transport == net::TransportMode::DirectP2P) ? "P2P-UDP-AES" :
+            (netSnap.transport == net::TransportMode::WebSocketRelay) ? "WSS-RELAY-AES" :
+            (netSnap.transport == net::TransportMode::RelayFallback) ? "UDP-RELAY-AES" : "NEGOTIATING";
         const char* syncTxt = netSnap.desyncDetected ? "DESYNC!" : "SYNC OK";
         std::snprintf(netBuf, sizeof(netBuf), "ONLINE [%s] P%d | RTT %.1fms | D:%df | %s #%llu",
                       tmode, netSnap.localPlayerNum, netSnap.rttMs, netSnap.inputDelayFrames,
@@ -1247,8 +1267,8 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
     if (g_ui.open) {
         DrawRect(0, 0, W, H, Rgba(6, 8, 14, 175));
 
-        const float pw = std::min(W - 40.0f * S, 460.0f * S);
-        const float ph = std::min(H - 36.0f * S, 360.0f * S);
+        const float pw = std::min(W - 32.0f * S, 540.0f * S);
+        const float ph = std::min(H - 32.0f * S, 368.0f * S);
         const float px = std::floor((W - pw) * 0.5f);
         const float py = std::floor((H - ph) * 0.5f);
 
@@ -1258,7 +1278,7 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
         // Title header
         DrawRect(px + 2.0f * S, py + 2.0f * S, pw - 4.0f * S, 24.0f * S, kColHeaderBg);
         DrawTextUi(px + 12.0f * S, py + 9.0f * S, S, kColGold,
-                   "NIDHOGG  //  PC SETTINGS & ONLINE MULTIPLAYER");
+                   "NIDHOGG  //  PC SETTINGS & ONLINE");
         const std::string closeHint = "[F1 / ESC]";
         DrawTextUi(px + pw - MeasureTextWidth(S, closeHint) - 12.0f * S, py + 9.0f * S,
                    S, kColMuted, closeHint);
@@ -1431,8 +1451,9 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
                 rows.push_back({"5. Join Private Room", "Enter Room Code", true, kColGold});
                 rows.push_back({"   Host Stage Selection", StageName(g_ui.createStageIndex)});
                 rows.push_back({"6. Online Settings", cfg.playerName + " @ " + cfg.region, true, kColMuted});
+                rows.push_back({"7. [ Start Local Lobby Server ]", net::ActiveLobbyEndpoint(), true, kColMuted});
                 footerNote = g_ui.onlineBanner.empty()
-                                 ? "Native P2P encrypted UDP lockstep + automatic relay fallback."
+                                 ? "Endpoint: " + net::ActiveLobbyEndpoint() + " (P2P UDP + WSS Relay)"
                                  : g_ui.onlineBanner;
             } else if (g_ui.onlinePage == OnlineSubPage::Browser) {
                 rows.push_back({"[ Refresh Public Rooms ]",
@@ -1531,7 +1552,7 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
 
         // Footer bar
         DrawRect(px + 2.0f * S, py + ph - 24.0f * S, pw - 4.0f * S, 22.0f * S, kColHeaderBg);
-        if (footerNote.size() > 54) footerNote.resize(54);
+        if (footerNote.size() > 64) footerNote.resize(64);
         const Color footCol = (g_ui.tab == 4 && g_ui.onlineBannerIsError) ? kColRed : kColMuted;
         DrawTextUi(px + 10.0f * S, py + ph - 16.0f * S, S, footCol, footerNote);
 
