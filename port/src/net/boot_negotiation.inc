@@ -38,6 +38,8 @@ bool NegotiateBootDelayLocked(std::unique_lock<std::mutex>& lk) {
             BootAgreementPayload agreement{};
             agreement.delay = g_net.bootCommitted ? static_cast<uint8_t>(g_net.snap.inputDelayFrames) : proposal;
             agreement.flags = proposal ? 1 : 0;
+            // Reuse the reserved field so opaque deployed relays need no update.
+            if(g_net.snap.isHost) agreement.reserved=static_cast<uint16_t>(0x100|g_net.snap.stageIndex);
             agreement.hostStartUsec = g_net.bootHostStartUsec;
             if (g_net.snap.isHost && g_net.bootCommitted) agreement.flags |= 2;
             if (!g_net.snap.isHost && g_net.bootCommitted) agreement.flags |= 4;

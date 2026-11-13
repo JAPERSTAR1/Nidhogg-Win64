@@ -791,6 +791,7 @@ int32_t Ngs2Destroy(uint64_t /*handle*/) { return 0; }
 int32_t AudioOutOpen(int32_t /*userId*/, int32_t /*type*/, int32_t /*index*/, uint32_t len,
                      uint32_t freq, uint32_t param) {
     std::scoped_lock lk(g_audioOutMtx);
+    if(g_shuttingDown.load(std::memory_order_relaxed)) return -1;
     int slot = -1;
     for (int i = 1; i < 16; ++i) {
         if (!g_ports[i].inUse) { slot = i; break; }
@@ -846,11 +847,16 @@ int32_t AudioOutOutputs(const void* params, uint32_t count) {
         return 0;
     }
 
+    // Keep the selected device, event and headers alive through the write.
+    // Shutdown/device changes must not close them while this call is waiting
+    // for an output buffer or calling waveOutWrite.
+    std::unique_lock outputLock(g_audioOutMtx);
+    if(g_shuttingDown.load(std::memory_order_relaxed)) return 0;
+
     const int wantDev = core::CurrentSettings().audioDeviceId;
     WavePort* primary = nullptr;
     uint32_t grain = 512;
     {
-        std::scoped_lock lk(g_audioOutMtx);
         for (uint32_t i = 0; i < count; ++i) {
             const int32_t h = list[i].handle;
             if (h > 0 && h < 16 && g_ports[h].inUse) {
@@ -907,6 +913,7 @@ int32_t AudioOutOutputs(const void* params, uint32_t count) {
     WAVEHDR& hdr = primary->hdrs[idx];
 
     while (hdr.dwFlags & WHDR_INQUEUE) {
+        if(g_shuttingDown.load(std::memory_order_relaxed)) return 0;
         WaitForSingleObject(primary->ev, 15);
     }
 
@@ -917,7 +924,6 @@ int32_t AudioOutOutputs(const void* params, uint32_t count) {
     }
     MMRESULT wr = waveOutWrite(primary->hwo, &hdr, sizeof(WAVEHDR));
     if (wr == MMSYSERR_NODRIVER || wr == WAVERR_UNPREPARED) {
-        std::scoped_lock lk(g_audioOutMtx);
         OpenWaveDeviceLocked(*primary, -1);
     }
     return static_cast<int32_t>(grain);
@@ -951,6 +957,13 @@ void ShutdownAudio() {
 }
 
 uint64_t MixedFrames() { return g_mixedFrames.load(std::memory_order_relaxed); }
+void ResetAudio() {
+    ShutdownAudio();
+    std::scoped_lock lock(g_mtx,g_audioOutMtx);
+    g_voices.clear();g_racks.clear();g_systems.clear();g_nextHandle=0x100;
+    for(auto& port:g_ports) port=WavePort{};
+    g_mixedFrames=0;g_activeVoices=0;g_peakAmp=0;g_shuttingDown=false;
+}
 float PeakAmplitude() { return g_peakAmp.exchange(0.0f, std::memory_order_relaxed); }
 uint32_t ActiveVoices() { return g_activeVoices.load(std::memory_order_relaxed); }
 

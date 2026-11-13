@@ -25,6 +25,8 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include <unordered_set>
+#include <unordered_map>
 
 namespace ps4 {
 namespace {
@@ -50,6 +52,21 @@ std::atomic<uint64_t> g_netplaySyncedFrame{UINT64_MAX};
 std::mutex g_roomMtx;
 std::string g_currentRoom = "boot";
 std::string g_app0Override;
+void* g_hostFiber=nullptr;
+std::atomic<bool> g_guestRestart{false};
+thread_local unsigned g_guestLockDepth=0;
+HANDLE g_guestHeap=nullptr;
+std::mutex g_guestResourceMtx;
+std::vector<HANDLE> g_guestThreads;
+std::unordered_set<FILE*> g_guestFiles;
+std::unordered_map<void*,void(*)(void*)> g_guestResources;
+
+CRITICAL_SECTION* NewGuestMutex() {
+    auto* cs=new CRITICAL_SECTION{};InitializeCriticalSection(cs);
+    std::scoped_lock lock(g_guestResourceMtx);
+    g_guestResources[cs]=[](void* p){auto* m=static_cast<CRITICAL_SECTION*>(p);DeleteCriticalSection(m);delete m;};
+    return cs;
+}
 
 uint64_t g_logLimit = 0;   // per-call trace budget; 0 turns it off
 uint64_t g_traceFrom = 0;  // frame to begin tracing from
@@ -310,12 +327,13 @@ uint64_t HostNowUsec() {
 
 // Guest-visible clock: locked to synchronized simulation frame on the main
 // simulation thread during online matches so frame delta-timers stay identical.
+uint64_t g_nativePausedUsec=0;
 uint64_t NowUsec() {
     if (g_netplayClockLock.load(std::memory_order_relaxed) &&
         GetCurrentThreadId() == g_simThreadId) {
         return 1000000ULL + g_netplaySimFrame.load(std::memory_order_relaxed) * 16667ULL;
     }
-    return HostNowUsec();
+    return HostNowUsec()-(GetCurrentThreadId()==g_simThreadId?g_nativePausedUsec:0);
 }
 
 // Runtime Win64 -> SysV 2-argument shim for guest qsort comparators.
@@ -856,6 +874,41 @@ bool Readable(const void* p, size_t n) {
     return true;
 }
 
+void ApplyVisualEffectSettings() {
+    // CUSA00920's FinalFantasyVIIITransition and Flash render events. Only
+    // redirect Draw: their Create/Step/Destroy events, timers and RNG calls
+    // must still run identically, including when peers choose different FX.
+    // 0x4fa20 is an existing empty void event (RET) in this same guest image.
+    constexpr uint64_t emptyEvent=0x4fa20;
+    if(!g_base || !Readable(reinterpret_cast<void*>(g_base+emptyEvent),1) ||
+       *reinterpret_cast<const uint8_t*>(g_base+emptyEvent)!=0xc3) return;
+    const auto& cfg=core::CurrentSettings();
+    struct Event {uint64_t slot,original;bool show;};
+    const Event events[]={{0x329c10,0x4fec0,cfg.showRoomTransitions},
+                          {0x329c90,0x4ffb0,cfg.showScreenFlashes}};
+    bool changed=false;
+    for(const auto& event:events) {
+        auto* slot=reinterpret_cast<uint64_t*>(g_base+event.slot);
+        if(!Readable(slot,sizeof(*slot))) continue;
+        const uint64_t original=g_base+event.original,disabled=g_base+emptyEvent;
+        if(*slot!=original && *slot!=disabled) {
+            static bool warned=false;
+            if(!warned) {LOG_WARN("[visual-effects] unsupported guest render event; leaving it intact");warned=true;}
+            continue;
+        }
+        const uint64_t desired=event.show?original:disabled;
+        if(*slot==desired) continue;
+        DWORD oldProtect=0;
+        if(VirtualProtect(slot,sizeof(*slot),PAGE_READWRITE,&oldProtect)) {
+            *slot=desired;
+            DWORD ignored=0;VirtualProtect(slot,sizeof(*slot),oldProtect,&ignored);
+            changed=true;
+        }
+    }
+    if(changed) LOG_INFO("[visual-effects] room transitions=%s screen flashes=%s",
+        cfg.showRoomTransitions?"original":"off",cfg.showScreenFlashes?"original":"off");
+}
+
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (gnm::OnWindowMessage(hwnd, msg, static_cast<uint64_t>(wp), static_cast<int64_t>(lp))) {
         return 0;
@@ -900,6 +953,7 @@ HWND CreatePortWindow(uint32_t w, uint32_t h) {
                                 CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left,
                                 rc.bottom - rc.top, nullptr, nullptr, inst, nullptr);
     g_videoOut.window = hwnd;
+    LOG_INFO("[window] created pid=%lu hwnd=%p",GetCurrentProcessId(),hwnd);
     return hwnd;
 }
 
@@ -1004,6 +1058,47 @@ uint32_t ReadLocalPlayerButtons(int playerIndex, uint8_t& lx, uint8_t& ly, uint8
 uint32_t LastSlot() { return g_lastSlot; }
 uint64_t LastCallSite() { return g_lastRet; }
 void HleSetImageBase(uint64_t base) { g_base = base; }
+void SetGuestHostFiber(void* fiber){g_hostFiber=fiber;}
+void RequestGuestRestart(){g_guestRestart.store(true);}
+bool GuestRestartRequested(){return g_guestRestart.load();}
+bool ResetGuestRuntime() {
+    // Called on the host fiber after the guest yielded without owning locks.
+    // Worker threads leave cooperatively at an import boundary with no guest
+    // mutex held. Never release their memory while a worker could still use it.
+    for(HANDLE thread:g_guestThreads) {
+        const uint64_t deadline=HostNowUsec()+5000000;
+        while(WaitForSingleObject(thread,10)==WAIT_TIMEOUT) {
+            if(HostNowUsec()>deadline) {LOG_ERROR("[guest-reset] worker did not quiesce");return false;}
+            gnm::PresentCachedFrame(g_videoOut.window);
+        }
+        CloseHandle(thread);
+    }
+    g_guestThreads.clear();
+    audio::ResetAudio();
+    {
+        std::scoped_lock lock(g_guestResourceMtx);
+        for(FILE* file:g_guestFiles) std::fclose(file);
+        g_guestFiles.clear();
+        for(auto [pointer,destroy]:g_guestResources) destroy(pointer);
+        g_guestResources.clear();
+    }
+    for(int fd=3;fd<64;++fd) if(g_posixFds[fd]) {std::fclose(g_posixFds[fd]);g_posixFds[fd]=nullptr;}
+    std::fill(std::begin(g_fiosOps),std::end(g_fiosOps),FiosOp{});
+    if(g_guestHeap) HeapDestroy(g_guestHeap);
+    g_guestHeap=HeapCreate(0,0,0);
+    if(g_directArena && !VirtualFree(g_directArena,kDirectArenaSize,MEM_DECOMMIT)) return false;
+    g_directUsed=0;g_spans=SpanCache{};g_machine.Reset();
+    g_submits=0;g_dumpedSubmit=false;
+    HWND window=g_videoOut.window;g_videoOut=VideoOut{};g_videoOut.window=window;
+    {std::scoped_lock lock(g_roomMtx);g_currentRoom="boot";}
+    g_simRandState=0x13579bdf;g_onlineMatchSeed=0;
+    g_netplayStep=nullptr;g_netplayClockLock=false;g_netplaySyncedFrame=UINT64_MAX;
+    g_netplayP1Buttons=g_netplayP2Buttons=0;g_nativePausedUsec=0;
+    gnm::ResetGuestResources();
+    g_guestRestart.store(false);
+    LOG_INFO("[guest-reset] completed in process pid=%lu hwnd=%p",GetCurrentProcessId(),window);
+    return g_guestHeap!=nullptr;
+}
 
 void HleSetApp0(const std::string& app0Dir) {
     if (app0Dir.empty()) return;
@@ -1027,6 +1122,13 @@ void HleShutdown() {
     if (g_shutDownDone.exchange(true)) return;
     LOG_INFO("[hle] shutting down cleanly at frame %llu (room=%s)",
              static_cast<unsigned long long>(g_submits), CurrentRoom().c_str());
+    for(HANDLE thread:g_guestThreads) {
+        if(WaitForSingleObject(thread,2000)!=WAIT_OBJECT_0) {
+            LOG_WARN("[hle] guest worker did not stop before process exit");ExitProcess(0);
+        }
+        CloseHandle(thread);
+    }
+    g_guestThreads.clear();
 
     for (DWORD i = 0; i < 4; ++i) {
         XINPUT_VIBRATION vib{};
@@ -1338,6 +1440,10 @@ const char* SlotName(uint32_t s) {
 
 uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_t* stack) {
     Configure();
+    if((g_guestRestart.load() || g_shutDownDone.load()) && g_guestLockDepth==0) {
+        if(GetCurrentThreadId()!=g_simThreadId) ExitThread(0);
+        if(g_guestRestart.load() && g_hostFiber) SwitchToFiber(g_hostFiber);
+    }
     g_lastSlot = slot;
     g_lastRet = ret;
     if (slot < 512) ++g_slotCalls[slot];
@@ -1362,14 +1468,16 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
         // ---- libc memory
         case 0:
         case 14:
-            std::free(ptr(0));
+            if(r.gpr[0]) HeapFree(g_guestHeap,0,ptr(0));
             return 0;
         case 3:
         case 13:
         case 16:
-            return reinterpret_cast<uint64_t>(std::malloc(static_cast<size_t>(r.gpr[0]) ? static_cast<size_t>(r.gpr[0]) : 1));
+            if(!g_guestHeap) g_guestHeap=HeapCreate(0,0,0);
+            return reinterpret_cast<uint64_t>(HeapAlloc(g_guestHeap,0,r.gpr[0]?static_cast<size_t>(r.gpr[0]):1));
         case 151:
-            return reinterpret_cast<uint64_t>(std::realloc(ptr(0), static_cast<size_t>(r.gpr[1]) ? static_cast<size_t>(r.gpr[1]) : 1));
+            if(!g_guestHeap) g_guestHeap=HeapCreate(0,0,0);
+            return reinterpret_cast<uint64_t>(r.gpr[0]?HeapReAlloc(g_guestHeap,0,ptr(0),r.gpr[1]?r.gpr[1]:1):HeapAlloc(g_guestHeap,0,r.gpr[1]?r.gpr[1]:1));
 
         // ---- libc string / stdlib
         case 1: {
@@ -1531,6 +1639,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             if (mode.find('w') != std::string::npos || mode.find('a') != std::string::npos)
                 MakeParentDirs(path);
             std::FILE* f = core::FopenUtf8(path, mode.c_str());
+            if(f) {std::scoped_lock lock(g_guestResourceMtx);g_guestFiles.insert(f);}
             if (g_verbose) LOG_INFO("[fios] fopen \"%s\" mode \"%s\" -> %p", path.c_str(), mode.c_str(), static_cast<void*>(f));
             return reinterpret_cast<uint64_t>(f);
         }
@@ -1545,9 +1654,12 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             return r.gpr[0] ? std::fread(ptr(0), static_cast<size_t>(r.gpr[1]),
                                          static_cast<size_t>(r.gpr[2]),
                                          reinterpret_cast<std::FILE*>(r.gpr[3])) : 0;
-        case 50:  // fclose
-            return r.gpr[0] ? static_cast<uint64_t>(
-                std::fclose(reinterpret_cast<std::FILE*>(r.gpr[0]))) : 0;
+        case 50: { // fclose
+            if(!r.gpr[0]) return 0;
+            auto* file=reinterpret_cast<FILE*>(r.gpr[0]);
+            std::scoped_lock lock(g_guestResourceMtx);g_guestFiles.erase(file);
+            return static_cast<uint64_t>(std::fclose(file));
+        }
         case 52: {  // mkdir(path, mode)
             std::string path = HostPath(str(0));
             return core::MakeDirsUtf8(path) ? 0 : static_cast<uint64_t>(static_cast<int64_t>(-1));
@@ -1709,6 +1821,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
 
             uint8_t lx = 0x80, ly = 0x80, rx = 0x80, ry = 0x80;
             uint32_t buttons = ReadLocalPlayerButtons(handle, lx, ly, rx, ry);
+            buttons=ui::FilterGameMenuInput(handle,buttons,g_submits,lx,ly);
 
             if (const auto netplayStep = g_netplayStep.load()) {
                 if (g_netplaySyncedFrame != g_submits) {
@@ -1905,7 +2018,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                 ta, CREATE_SUSPENDED, &tid);
             if (Readable(ptr(0), 8))
                 *reinterpret_cast<uint64_t*>(ptr(0)) = reinterpret_cast<uint64_t>(h);
-            if (h) ResumeThread(h);
+            if (h) {g_guestThreads.push_back(h);ResumeThread(h);}
             return 0;
         }
         case 223:  // scePthreadExit
@@ -1924,6 +2037,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             };
             if (Readable(ptr(0), 8)) {
                 auto* tc = new TaggedCond{};
+                {std::scoped_lock lock(g_guestResourceMtx);g_guestResources[tc]=[](void* p){delete static_cast<TaggedCond*>(p);};}
                 InitializeConditionVariable(&tc->cv);
                 *reinterpret_cast<TaggedCond**>(ptr(0)) = tc;
             }
@@ -1938,6 +2052,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                 auto** pp = reinterpret_cast<TaggedCond**>(ptr(0));
                 if (*pp && Readable(*pp, sizeof(TaggedCond)) && (*pp)->magic == 0xC04D564152ULL) {
                     (*pp)->magic = 0;
+                    {std::scoped_lock lock(g_guestResourceMtx);g_guestResources.erase(*pp);}
                     delete *pp;
                     *pp = nullptr;
                 }
@@ -2116,8 +2231,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
         case 145:    // pthread_mutex_init(mtx, attr)
         case 352: {  // scePthreadMutexInit(mtx, attr, name)
             if (Readable(ptr(0), 8)) {
-                auto* cs = new CRITICAL_SECTION{};
-                InitializeCriticalSection(cs);
+                auto* cs = NewGuestMutex();
                 *reinterpret_cast<CRITICAL_SECTION**>(ptr(0)) = cs;
             }
             return 0;
@@ -2128,6 +2242,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                 auto** slotPtr = reinterpret_cast<CRITICAL_SECTION**>(ptr(0));
                 if (*slotPtr) {
                     DeleteCriticalSection(*slotPtr);
+                    {std::scoped_lock lock(g_guestResourceMtx);g_guestResources.erase(*slotPtr);}
                     delete *slotPtr;
                     *slotPtr = nullptr;
                 }
@@ -2138,22 +2253,22 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             if (!Readable(ptr(0), 8)) return 0;
             auto** slotPtr = reinterpret_cast<CRITICAL_SECTION**>(ptr(0));
             if (!*slotPtr) {
-                auto* cs = new CRITICAL_SECTION{};
-                InitializeCriticalSection(cs);
+                auto* cs = NewGuestMutex();
                 *slotPtr = cs;
             }
-            return TryEnterCriticalSection(*slotPtr) ? 0 : 0x80020010ull;
+            if(TryEnterCriticalSection(*slotPtr)) {++g_guestLockDepth;return 0;}
+            return 0x80020010ull;
         }
         case 147:    // pthread_mutex_lock(mtx)
         case 354: {  // scePthreadMutexLock(mtx)
             if (Readable(ptr(0), 8)) {
                 auto** slotPtr = reinterpret_cast<CRITICAL_SECTION**>(ptr(0));
                 if (!*slotPtr) {
-                    auto* cs = new CRITICAL_SECTION{};
-                    InitializeCriticalSection(cs);
+                    auto* cs = NewGuestMutex();
                     *slotPtr = cs;
                 }
                 EnterCriticalSection(*slotPtr);
+                ++g_guestLockDepth;
             }
             return 0;
         }
@@ -2161,7 +2276,7 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
         case 355: {  // scePthreadMutexUnlock(mtx)
             if (Readable(ptr(0), 8)) {
                 auto* cs = *reinterpret_cast<CRITICAL_SECTION**>(ptr(0));
-                if (cs) LeaveCriticalSection(cs);
+                if (cs) {LeaveCriticalSection(cs);if(g_guestLockDepth) --g_guestLockDepth;}
             }
             return 0;
         }
@@ -2710,7 +2825,19 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
             // Hand the frame to the backend.  This is the whole point of the
             // interpreter: the guest produced a command stream, the stream
             // produced draw state, and the state becomes real GPU work here.
+            ApplyVisualEffectSettings();
             gnm::RenderFrame(g_videoOut.window, g_machine.draws());
+            const bool nativePause=ui::PausesSimulation();
+            const uint64_t pauseStart=nativePause?HostNowUsec():0;
+            while(ui::PausesSimulation() && !IsQuitRequested() && !GuestRestartRequested()) {
+                gnm::PresentCachedFrame(g_videoOut.window);
+                Sleep(8);
+            }
+            if(nativePause) {
+                const uint64_t duration=HostNowUsec()-pauseStart;
+                g_nativePausedUsec+=duration;
+                s_nextFlipUsec+=duration;
+            }
 
             if (IsQuitRequested() || (g_maxFrames > 0 && g_submits >= g_maxFrames)) {
                 HleShutdown();
@@ -2721,20 +2848,14 @@ uint64_t HleCall(uint32_t slot, const ImportRegs& r, uint64_t ret, const uint64_
                 uint64_t now = HostNowUsec();
                 const int presLimit = core::CurrentSettings().presentationFpsLimit;
                 const bool highRatePres = (presLimit == 0 || presLimit > 60);
-                const uint64_t subPeriod = (presLimit > 60)
-                    ? (1000000ULL / static_cast<uint64_t>(presLimit))
-                    : 2000ULL;
-                uint64_t nextSubPresent = now + subPeriod;
-
                 while ((now = HostNowUsec()) < s_nextFlipUsec) {
                     if (IsQuitRequested()) {
                         HleShutdown();
                         ExitProcess(0);
                     }
-                    if (highRatePres && now >= nextSubPresent &&
-                        now + 1200ULL < s_nextFlipUsec) {
+                    if (highRatePres && gnm::PresentationDue() &&
+                        now + 500ULL < s_nextFlipUsec) {
                         gnm::PresentCachedFrame(g_videoOut.window);
-                        nextSubPresent = HostNowUsec() + subPeriod;
                         continue;
                     }
                     if (s_nextFlipUsec - now > 2500ULL) Sleep(1);

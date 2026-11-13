@@ -358,8 +358,30 @@ int RunMain(const std::vector<std::string>& args, bool hasConsole) {
     LOG_INFO("entering guest 0x%llx", static_cast<unsigned long long>(image.entry()));
     if (!ps4::net::ResumeOnlineSession()) return 1;
     auto call = MakeSysvCall();
-    call(reinterpret_cast<uint64_t>(image.at(image.entry())),
-         reinterpret_cast<uint64_t>(block), 0);
+    // Keep the process, window, frontend and connection alive. Each guest run
+    // has its own stack, heap and workers; reset only after all workers exit.
+    const std::vector<uint8_t> initialImage(image.base(),image.base()+image.size());
+    void* hostFiber=IsThreadAFiber()?GetCurrentFiber():ConvertThreadToFiber(nullptr);
+    if(!hostFiber) return 1;
+    ps4::SetGuestHostFiber(hostFiber);
+    struct GuestRun {SysvCall call;uint64_t entry,arg;void* host;bool finished=false;};
+    GuestRun run{call,reinterpret_cast<uint64_t>(image.at(image.entry())),reinterpret_cast<uint64_t>(block),hostFiber};
+    for(;;) {
+        void* guest=CreateFiberEx(0x100000,0x1000000,FIBER_FLAG_FLOAT_SWITCH,[](void* context) {
+            auto& run=*static_cast<GuestRun*>(context);
+            run.call(run.entry,run.arg,0);run.finished=true;SwitchToFiber(run.host);
+        },&run);
+        if(!guest) return 1;
+        SwitchToFiber(guest);
+        if(run.finished) {DeleteFiber(guest);break;}
+        if(!ps4::GuestRestartRequested() || !ps4::ResetGuestRuntime()) return 1;
+        DeleteFiber(guest);
+        DWORD oldProtect=0;
+        if(!VirtualProtect(image.base(),image.size(),PAGE_EXECUTE_READWRITE,&oldProtect)) return 1;
+        std::memcpy(image.base(),initialImage.data(),initialImage.size());
+        DWORD ignored=0;VirtualProtect(image.base(),image.size(),oldProtect,&ignored);
+        ps4::net::CompleteInProcessBoot();
+    }
     ps4::HleShutdown();
     return 0;
 }

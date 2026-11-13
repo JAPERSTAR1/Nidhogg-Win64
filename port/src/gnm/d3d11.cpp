@@ -1,5 +1,6 @@
 #define NOMINMAX
 #include "d3d11.h"
+#include "../hle.h"
 
 #include "../core/logger.h"
 #include "../core/settings.h"
@@ -8,12 +9,14 @@
 #include <windows.h>
 
 #include <d3d11.h>
+#include <d3d11sdklayers.h>
 #include <d3dcompiler.h>
 #include <dxgi1_5.h>
 #include <wincodec.h>
 #include <wrl/client.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -90,7 +93,7 @@ cbuffer Transform : register(b0) {
     float4 Row3;
 };
 struct VsIn {
-    float3 pos   : POSITION;
+    float4 pos   : POSITION;
     float4 color : COLOR0;
     float2 uv    : TEXCOORD0;
 };
@@ -101,7 +104,7 @@ struct VsOut {
 };
 VsOut VSMain(VsIn i) {
     VsOut o;
-    o.pos = i.pos.x * Row0 + i.pos.y * Row1 + i.pos.z * Row2 + Row3;
+    o.pos = i.pos;
     o.color = i.color;
     o.uv = i.uv;
     return o;
@@ -155,7 +158,7 @@ float4 PSMain(VsOut i) : SV_Target {
 )";
 
 struct Vertex {
-    float pos[3];
+    float pos[4];
     float color[4];
     float uv[2];
 };
@@ -173,6 +176,7 @@ struct Renderer {
     bool ok = false;
     bool allowTearing = false;
     bool displayInitialized = false;
+    bool compositing=false,displayApplyPending=false;
 
     HWND hwnd = nullptr;
     uint32_t swapWidth = 0;
@@ -184,6 +188,7 @@ struct Renderer {
 
     ComPtr<ID3D11Device> device;
     ComPtr<ID3D11DeviceContext> context;
+    ComPtr<ID3D11InfoQueue> debugQueue;
     ComPtr<IDXGISwapChain> swap;
     ComPtr<ID3D11RenderTargetView> backBuffer;
 
@@ -218,12 +223,22 @@ struct Renderer {
         ComPtr<ID3D11Texture2D> tex;
         ComPtr<ID3D11RenderTargetView> rtv;
         ComPtr<ID3D11ShaderResourceView> srv;
+        ComPtr<ID3D11Texture2D> readback;
+        ComPtr<ID3D11ShaderResourceView> readSrv;
     };
     struct ClearRgba {
         float c[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     };
 
     std::unordered_map<uint64_t, ID3D11ShaderResourceView*> textures;
+    struct DescriptorHash {
+        size_t operator()(const std::array<uint32_t,8>& words) const {
+            size_t hash=1469598103934665603ULL;
+            for(auto word:words) hash=(hash^word)*1099511628211ULL;
+            return hash;
+        }
+    };
+    std::unordered_map<std::array<uint32_t,8>,ID3D11ShaderResourceView*,DescriptorHash> frameTextures;
     std::unordered_map<uint64_t, ID3D11SamplerState*> samplers;
     std::unordered_map<uint64_t, ID3D11BlendState*> blends;
     std::unordered_map<uint64_t, OffscreenRt> offscreenRts;
@@ -232,6 +247,8 @@ struct Renderer {
     uint32_t vbCapacity = 0;
     uint32_t ibCapacity = 0;
     uint64_t lastPresentQpcUsec = 0;
+    uint64_t nextPresentUsec=0;
+    int lastPresentLimit=-1;
 
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
@@ -239,7 +256,16 @@ struct Renderer {
 };
 
 Renderer g;
+uint64_t g_guestSimFrame=0;
 
+struct RenderProfile {
+    bool enabled=GetEnvironmentVariableA("NIDHOGG_RENDER_PROFILE",nullptr,0)!=0;
+    FILE* file=nullptr;
+    uint64_t frame=0,vertices=0,uploads=0,started=0;
+    unsigned missing=0,feedback=0,masterReads=0,rtCreates=0;
+    double geometryMs=0,uploadMs=0;
+};
+RenderProfile g_profile;
 uint64_t QpcUsec() {
     static LARGE_INTEGER freq{};
     if (!freq.QuadPart) QueryPerformanceFrequency(&freq);
@@ -361,11 +387,17 @@ ID3D11ShaderResourceView* LookupTexture(const ImageDesc& image) {
     if (!image.address) return nullptr;
     auto rtIt = g.offscreenRts.find(image.address);
     if (rtIt != g.offscreenRts.end() && rtIt->second.srv) return rtIt->second.srv.Get();
+    // Guest CPU work has finished for this submission. Hash each immutable
+    // image once here, but recheck its contents on the next submission so
+    // uploads and guest allocation reuse cannot leave stale textures behind.
+    std::array<uint32_t,8> descriptor;
+    std::copy_n(image.src,8,descriptor.begin());
+    auto cached=g.frameTextures.find(descriptor);
+    if(cached!=g.frameTextures.end()) return cached->second;
     const uint64_t key = ImageKey(image);
     auto it = g.textures.find(key);
-    if (it != g.textures.end()) return it->second;
-    ID3D11ShaderResourceView* srv = CreateTexture(image);
-    if (srv) g.textures.emplace(key, srv);
+    ID3D11ShaderResourceView* srv=it!=g.textures.end()?it->second:CreateTexture(image);
+    if(srv) {g.textures.emplace(key,srv);g.frameTextures.emplace(descriptor,srv);}
     return srv;
 }
 
@@ -373,6 +405,8 @@ ID3D11RenderTargetView* EnsureOffscreenRt(uint64_t addr, uint32_t w, uint32_t h)
     auto it = g.offscreenRts.find(addr);
     if (it != g.offscreenRts.end() && it->second.width == w && it->second.height == h)
         return it->second.rtv.Get();
+
+    ++g_profile.rtCreates;
 
     Renderer::OffscreenRt rt;
     rt.width = w;
@@ -572,9 +606,9 @@ bool CompileShaders() {
         return false;
 
     const D3D11_INPUT_ELEMENT_DESC elements[] = {
-        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, 0,  D3D11_INPUT_PER_VERTEX_DATA, 0},
-        {"COLOR",    0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0},
-        {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,       0, 28, D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"POSITION", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 0,  D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"COLOR",    0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 16, D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,       0, 32, D3D11_INPUT_PER_VERTEX_DATA, 0},
     };
     return SUCCEEDED(g.device->CreateInputLayout(elements, 3, vsBlob->GetBufferPointer(),
                                                  vsBlob->GetBufferSize(), &g.layout));
@@ -588,12 +622,16 @@ bool EnsureSwapchainSize(uint32_t width, uint32_t height, int wantBuffers) {
         wantBuffers == g.swapBuffers)
         return true;
 
+    if(g.context) g.context->OMSetRenderTargets(0,nullptr,nullptr);
     g.backBuffer.Reset();
     if (!g.swap) return false;
     const UINT flags = g.allowTearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0u;
-    if (FAILED(g.swap->ResizeBuffers(static_cast<UINT>(wantBuffers), width, height,
-                                     DXGI_FORMAT_R8G8B8A8_UNORM, flags)))
+    const HRESULT resized=g.swap->ResizeBuffers(static_cast<UINT>(wantBuffers),width,height,
+                                                DXGI_FORMAT_R8G8B8A8_UNORM,flags);
+    if (FAILED(resized)) {
+        LOG_ERROR("[display] ResizeBuffers failed: 0x%08lx",resized);
         return false;
+    }
 
     ComPtr<ID3D11Texture2D> back;
     if (FAILED(g.swap->GetBuffer(0, IID_PPV_ARGS(&back)))) return false;
@@ -601,6 +639,7 @@ bool EnsureSwapchainSize(uint32_t width, uint32_t height, int wantBuffers) {
     g.swapWidth = width;
     g.swapHeight = height;
     g.swapBuffers = wantBuffers;
+    LOG_INFO("[display] backbuffer resized %ux%u buffers=%d",width,height,wantBuffers);
     return true;
 }
 
@@ -631,9 +670,16 @@ bool CreateDevice(HWND hwnd, uint32_t width, uint32_t height) {
 
     const D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0};
     D3D_FEATURE_LEVEL got{};
+    UINT deviceFlags=GetEnvironmentVariableA("NIDHOGG_D3D_DEBUG",nullptr,0)?D3D11_CREATE_DEVICE_DEBUG:0;
     HRESULT hr = D3D11CreateDeviceAndSwapChain(
-        nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, levels, 2, D3D11_SDK_VERSION, &swapDesc,
+        nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, deviceFlags, levels, 2, D3D11_SDK_VERSION, &swapDesc,
         &g.swap, &g.device, &got, &g.context);
+    if(FAILED(hr) && deviceFlags) {
+        LOG_WARN("[d3d11-debug] debug device unavailable (0x%08lx), retrying normal device",hr);
+        deviceFlags=0;
+        hr=D3D11CreateDeviceAndSwapChain(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,0,levels,2,
+            D3D11_SDK_VERSION,&swapDesc,&g.swap,&g.device,&got,&g.context);
+    }
     if (FAILED(hr)) {
         g.allowTearing = false;
         swapDesc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
@@ -646,6 +692,7 @@ bool CreateDevice(HWND hwnd, uint32_t width, uint32_t height) {
         LOG_ERROR("[d3d11] device creation failed 0x%08lx", static_cast<unsigned long>(hr));
         return false;
     }
+    if(deviceFlags && SUCCEEDED(g.device.As(&g.debugQueue))) LOG_INFO("[d3d11-debug] validation enabled");
 
     // Disable DXGI's built-in Alt+Enter handler so our settings/revert manager owns it cleanly.
     {
@@ -760,7 +807,7 @@ bool BuildGeometry(const Draw& draw, const uint32_t* sh) {
     const BufferDesc uv = DecodeBuffer(tableWords + 8);
     if (!pos.stride || !pos.base) return false;
 
-    std::vector<uint32_t> localIndices;
+    static std::vector<uint32_t> localIndices;
     const uint32_t* indexData = nullptr;
     uint32_t indexCount = 0;
 
@@ -786,16 +833,16 @@ bool BuildGeometry(const Draw& draw, const uint32_t* sh) {
         return false;
     }
 
-    uint32_t highest = 0;
-    for (uint32_t i = 0; i < indexCount; ++i)
-        if (indexData[i] > highest) highest = indexData[i];
+    uint32_t lowest=UINT32_MAX, highest=0;
+    for(uint32_t i=0;i<indexCount;++i) {
+        lowest=std::min(lowest,indexData[i]);highest=std::max(highest,indexData[i]);
+    }
+    if(highest>=65536 || lowest>highest) return false;
+    const uint32_t need=highest-lowest+1;
 
-    const uint32_t need = highest + 1;
-    if (need > 65536) return false;
-
-    const uint64_t posBytes = static_cast<uint64_t>(pos.stride) * need;
-    const uint64_t colorBytes = static_cast<uint64_t>(color.stride) * need;
-    const uint64_t uvBytes = static_cast<uint64_t>(uv.stride) * need;
+    const uint64_t posBytes = static_cast<uint64_t>(pos.stride) * (highest+1);
+    const uint64_t colorBytes = static_cast<uint64_t>(color.stride) * (highest+1);
+    const uint64_t uvBytes = static_cast<uint64_t>(uv.stride) * (highest+1);
     if (!Readable(pos.base, static_cast<size_t>(posBytes))) return false;
     const bool haveColor = color.stride && color.base && Readable(color.base, static_cast<size_t>(colorBytes));
     const bool haveUv = uv.stride && uv.base && Readable(uv.base, static_cast<size_t>(uvBytes));
@@ -803,15 +850,21 @@ bool BuildGeometry(const Draw& draw, const uint32_t* sh) {
     const uint32_t baseVertex = static_cast<uint32_t>(g.vertices.size());
     for (uint32_t v = 0; v < need; ++v) {
         Vertex out{};
-        std::memcpy(out.pos, reinterpret_cast<const void*>(pos.base + v * pos.stride), 12);
+        const uint64_t source=static_cast<uint64_t>(lowest)+v;
+        float point[3];std::memcpy(point,reinterpret_cast<const void*>(pos.base+source*pos.stride),12);
+        // Bake the original homogeneous transform per vertex. W remains
+        // intact for clipping/perspective interpolation; adjacent sprites can
+        // now share one draw even when their model transforms differ.
+        for(int k=0;k<4;++k)
+            out.pos[k]=point[0]*g.matrix[k]+point[1]*g.matrix[k+4]+point[2]*g.matrix[k+8]+g.matrix[k+12];
         if (haveColor)
-            std::memcpy(out.color, reinterpret_cast<const void*>(color.base + v * color.stride), 16);
+            std::memcpy(out.color, reinterpret_cast<const void*>(color.base + source * color.stride), 16);
         else
             out.color[0] = out.color[1] = out.color[2] = out.color[3] = 1.0f;
-        if (haveUv) std::memcpy(out.uv, reinterpret_cast<const void*>(uv.base + v * uv.stride), 8);
+        if (haveUv) std::memcpy(out.uv, reinterpret_cast<const void*>(uv.base + source * uv.stride), 8);
         g.vertices.push_back(out);
     }
-    for (uint32_t i = 0; i < indexCount; ++i) g.indices.push_back(baseVertex + indexData[i]);
+    for (uint32_t i = 0; i < indexCount; ++i) g.indices.push_back(baseVertex + indexData[i]-lowest);
     return true;
 }
 
@@ -830,26 +883,27 @@ bool LoadMatrix(const uint32_t* sh) {
 
 void UploadAndDraw() {
     if (g.indices.empty() || g.vertices.empty()) return;
+    g_profile.vertices+=g.vertices.size();++g_profile.uploads;
 
     if (!g.vb || g.vbCapacity < g.vertices.size()) {
         g.vb.Reset();
         D3D11_BUFFER_DESC desc{};
         desc.Usage = D3D11_USAGE_DYNAMIC;
         desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-        desc.ByteWidth = static_cast<UINT>(g.vertices.size() * sizeof(Vertex));
+        g.vbCapacity=std::max<uint32_t>(256,static_cast<uint32_t>(g.vertices.size()+g.vertices.size()/2));
+        desc.ByteWidth = g.vbCapacity * sizeof(Vertex);
         desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
         if (FAILED(g.device->CreateBuffer(&desc, nullptr, &g.vb))) return;
-        g.vbCapacity = static_cast<uint32_t>(g.vertices.size());
     }
     if (!g.ib || g.ibCapacity < g.indices.size()) {
         g.ib.Reset();
         D3D11_BUFFER_DESC desc{};
         desc.Usage = D3D11_USAGE_DYNAMIC;
         desc.BindFlags = D3D11_BIND_INDEX_BUFFER;
-        desc.ByteWidth = static_cast<UINT>(g.indices.size() * sizeof(uint32_t));
+        g.ibCapacity=std::max<uint32_t>(384,static_cast<uint32_t>(g.indices.size()+g.indices.size()/2));
+        desc.ByteWidth = g.ibCapacity * sizeof(uint32_t);
         desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
         if (FAILED(g.device->CreateBuffer(&desc, nullptr, &g.ib))) return;
-        g.ibCapacity = static_cast<uint32_t>(g.indices.size());
     }
 
     D3D11_MAPPED_SUBRESOURCE mapped{};
@@ -861,9 +915,6 @@ void UploadAndDraw() {
     std::memcpy(mapped.pData, g.indices.data(), g.indices.size() * sizeof(uint32_t));
     g.context->Unmap(g.ib.Get(), 0);
 
-    if (FAILED(g.context->Map(g.cb.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) return;
-    std::memcpy(mapped.pData, g.matrix, sizeof(g.matrix));
-    g.context->Unmap(g.cb.Get(), 0);
 
     const UINT stride = sizeof(Vertex);
     const UINT offset = 0;
@@ -961,8 +1012,14 @@ void MaybeCaptureScreenshot(uint64_t simFrame) {
 }
 
 void CompositeAndPresent(HWND hwnd, uint64_t simFrame, bool isNewSimFrame) {
+    if(g.displayApplyPending) {g.displayApplyPending=false;ApplyDisplaySettings(hwnd);}
     if (!g.backBuffer || !g.masterSrv) return;
     const auto& cfg = core::CurrentSettings();
+    const auto started=QpcUsec();
+    if(cfg.presentationFpsLimit!=g.lastPresentLimit) {g.nextPresentUsec=0;g.lastPresentLimit=cfg.presentationFpsLimit;}
+    const uint64_t tolerance=(isNewSimFrame && cfg.presentationFpsLimit==60)?500:0;
+    if(g.nextPresentUsec && started+tolerance<g.nextPresentUsec) return;
+    g.compositing=true;
 
     // Unbind masterRtv before sampling masterSrv
     ID3D11RenderTargetView* backRtv = g.backBuffer.Get();
@@ -1040,7 +1097,7 @@ void CompositeAndPresent(HWND hwnd, uint64_t simFrame, bool isNewSimFrame) {
     g.context->PSSetConstantBuffers(0, 1, &pcbPtr);
     g.context->PSSetShaderResources(0, 1, &msrv);
     g.context->PSSetSamplers(0, 1, &smp);
-    g.context->Draw(3, 0);
+    if(!ui::OwnsScreen()) g.context->Draw(3, 0);
 
     ID3D11ShaderResourceView* nullSrv = nullptr;
     g.context->PSSetShaderResources(0, 1, &nullSrv);
@@ -1068,7 +1125,18 @@ void CompositeAndPresent(HWND hwnd, uint64_t simFrame, bool isNewSimFrame) {
         sync = (dtMs > 17.2) ? 0u : 1u;
     }
     const UINT pflags = (sync == 0u && g.allowTearing && !inFs) ? DXGI_PRESENT_ALLOW_TEARING : 0u;
-    g.swap->Present(sync, pflags);
+    const HRESULT result=g.swap->Present(sync,pflags);
+    if(FAILED(result)) {LOG_ERROR("[d3d11] Present failed: 0x%08lx",result);ps4::RequestQuit();}
+    if(cfg.presentationFpsLimit>0) {
+        const uint64_t period=1000000ULL/static_cast<uint64_t>(cfg.presentationFpsLimit);
+        if(!g.nextPresentUsec || started>g.nextPresentUsec+period*2) g.nextPresentUsec=started;
+        g.nextPresentUsec+=period;
+    } else g.nextPresentUsec=0;
+    if(g_profile.enabled) {
+        static uint64_t count=0,start=QpcUsec();
+        if(++count%240==0) LOG_INFO("[presentation] count=%llu elapsed_us=%llu limit=%d",count,QpcUsec()-start,cfg.presentationFpsLimit);
+    }
+    g.compositing=false;
 }
 
 }  // namespace
@@ -1077,7 +1145,14 @@ void RenderFrame(void* hwndVoid, const std::vector<Draw>& draws) {
     HWND hwnd = static_cast<HWND>(hwndVoid);
     if (!hwnd || draws.empty()) return;
     if (!EnsureRenderer(hwnd)) return;
-
+    const uint64_t profileStart=QpcUsec();
+    if(g_profile.enabled && !g_profile.file) {
+        g_profile.file=core::FopenUtf8(core::LogsDirPath()+"/render.csv","wb");
+        if(g_profile.file) std::fputs("frame,room,draws,vertices,uploads,geometry_ms,upload_ms,render_ms,textures,missing,feedback,master_reads,rt_creates\n",g_profile.file);
+    }
+    ++g_profile.frame;g_profile.vertices=g_profile.uploads=0;g_profile.geometryMs=g_profile.uploadMs=0;
+    g_profile.missing=g_profile.feedback=g_profile.masterReads=0;
+    g_profile.rtCreates=0;
     MSG msg;
     while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
         TranslateMessage(&msg);
@@ -1115,12 +1190,38 @@ void RenderFrame(void* hwndVoid, const std::vector<Draw>& draws) {
 
     g.vertices.clear();
     g.indices.clear();
+    g.frameTextures.clear();
+
+    struct Batch {
+        ID3D11RenderTargetView* target=nullptr;
+        ID3D11ShaderResourceView* texture=nullptr;
+        ID3D11SamplerState* sampler=nullptr;
+        ID3D11BlendState* blend=nullptr;
+        D3D11_VIEWPORT viewport{};
+        float factor[4]{};
+    } batch;
+    bool pending=false;
+    auto flush=[&] {
+        if(!pending || g.indices.empty()) return;
+        ID3D11ShaderResourceView* none=nullptr;
+        g.context->PSSetShaderResources(0,1,&none);
+        g.context->OMSetRenderTargets(1,&batch.target,nullptr);
+        g.context->RSSetViewports(1,&batch.viewport);
+        g.context->OMSetBlendState(batch.blend,batch.factor,0xffffffff);
+        g.context->PSSetShaderResources(0,1,&batch.texture);
+        g.context->PSSetSamplers(0,1,&batch.sampler);
+        const uint64_t uploadStart=g_profile.enabled?QpcUsec():0;
+        UploadAndDraw();
+        if(g_profile.enabled) g_profile.uploadMs+=(QpcUsec()-uploadStart)/1000.0;
+        g.indices.clear();g.vertices.clear();pending=false;
+    };
 
     for (const auto& draw : draws) {
         const uint32_t* sh = draw.regs[Space::Sh];
         const uint32_t* cx = draw.regs[Space::Context];
 
         if (draw.kind == Draw::Kind::Dispatch) {
+            flush();
             if (sh[0x20C] == 0x40100009u) {
                 const BufferDesc src = DecodeBuffer(&sh[0x244]);
                 const BufferDesc dst = DecodeBuffer(&sh[0x248]);
@@ -1149,9 +1250,7 @@ void RenderFrame(void* hwndVoid, const std::vector<Draw>& draws) {
         if (sh[0x048] && sh[0x048] != 0x40100010u) continue;
         if (!LoadMatrix(sh)) continue;
 
-        const size_t firstIndex = g.indices.size();
-        if (!BuildGeometry(draw, sh)) continue;
-
+        Batch next;
         const float xScale = *reinterpret_cast<const float*>(&cx[kCtxViewport + 0]);
         const float xOffset = *reinterpret_cast<const float*>(&cx[kCtxViewport + 1]);
         const float yScale = *reinterpret_cast<const float*>(&cx[kCtxViewport + 2]);
@@ -1166,59 +1265,90 @@ void RenderFrame(void* hwndVoid, const std::vector<Draw>& draws) {
             uint32_t rw = (xScale > 0.0f) ? static_cast<uint32_t>(xScale * 2.0f + 0.5f) : rtPitch;
             uint32_t rh = (yScale < 0.0f) ? static_cast<uint32_t>(-yScale * 2.0f + 0.5f) : rtSliceH;
             if (rw >= 16 && rh >= 16 && rw <= 4096 && rh <= 4096) {
+                const auto old=g.offscreenRts.find(rtAddr);
+                if(old!=g.offscreenRts.end() && (old->second.width!=rw || old->second.height!=rh)) flush();
                 if (ID3D11RenderTargetView* off = EnsureOffscreenRt(rtAddr, rw, rh)) {
                     targetRtv = off;
                     isOffscreen = true;
                 }
             }
         }
-        if (targetRtv != currentRtv) {
-            ID3D11ShaderResourceView* nullSrv = nullptr;
-            g.context->PSSetShaderResources(0, 1, &nullSrv);
-            currentRtv = targetRtv;
-            g.context->OMSetRenderTargets(1, &currentRtv, nullptr);
+        next.target=targetRtv;
+        next.viewport=masterVp;
+        if(xScale>0 && yScale<0) {
+            const float mx=isOffscreen?1.0f:sx,my=isOffscreen?1.0f:sy;
+            next.viewport={(xOffset-xScale)*mx,(yOffset+yScale)*my,xScale*2*mx,-yScale*2*my,0,1};
         }
-
-        if (xScale > 0.0f && yScale < 0.0f) {
-            const float mulX = isOffscreen ? 1.0f : sx;
-            const float mulY = isOffscreen ? 1.0f : sy;
-            const D3D11_VIEWPORT dvp{(xOffset - xScale) * mulX, (yOffset + yScale) * mulY,
-                                     (xScale * 2.0f) * mulX, (-yScale * 2.0f) * mulY, 0.0f, 1.0f};
-            g.context->RSSetViewports(1, &dvp);
-        }
-
-        const float blendFactor[4] = {
-            *reinterpret_cast<const float*>(&cx[kCtxBlendConstants + 0]),
-            *reinterpret_cast<const float*>(&cx[kCtxBlendConstants + 1]),
-            *reinterpret_cast<const float*>(&cx[kCtxBlendConstants + 2]),
-            *reinterpret_cast<const float*>(&cx[kCtxBlendConstants + 3]),
-        };
-        g.context->OMSetBlendState(LookupBlend(cx[kCtxBlend0Control], cx[kCtxTargetMask]),
-                                   blendFactor, 0xffffffff);
+        std::memcpy(next.factor,&cx[kCtxBlendConstants],sizeof(next.factor));
+        next.blend=LookupBlend(cx[kCtxBlend0Control],cx[kCtxTargetMask]);
 
         const ImageDesc texture = DecodeImage(&sh[kPsTexture]);
         ID3D11ShaderResourceView* srv = LookupTexture(texture);
-        if (!srv) srv = g.missingTexture.Get();
+        if(texture.address==mainRtAddr) ++g_profile.masterReads;
+        if (!srv) {
+            if(texture.address) {
+                ++g_profile.missing;
+                static unsigned reported=0;
+                if(g_profile.enabled && reported++<16) LOG_WARN("[render-texture] unavailable frame=%llu room=%s address=%llx size=%ux%u format=%u",g_profile.frame,ps4::CurrentRoom().c_str(),texture.address,texture.width,texture.height,texture.dataFormat);
+            }
+            srv=g.missingTexture.Get();
+        }
+        const auto feedback=g.offscreenRts.find(texture.address);
+        if(feedback!=g.offscreenRts.end() && feedback->second.rtv.Get()==targetRtv) {
+            ++g_profile.feedback;
+            // PS4's in-place composition must read the preceding image. D3D11
+            // forbids binding one resource as SRV and RTV simultaneously.
+            // Snapshot only these dependent passes and preserve command order.
+            flush();auto& surface=feedback->second;
+            if(!surface.readback) {
+                D3D11_TEXTURE2D_DESC desc{};surface.tex->GetDesc(&desc);
+                desc.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+                if(SUCCEEDED(g.device->CreateTexture2D(&desc,nullptr,&surface.readback)))
+                    g.device->CreateShaderResourceView(surface.readback.Get(),nullptr,&surface.readSrv);
+            }
+            if(surface.readSrv) {
+                ID3D11ShaderResourceView* none=nullptr;g.context->PSSetShaderResources(0,1,&none);
+                g.context->OMSetRenderTargets(0,nullptr,nullptr);
+                g.context->CopyResource(surface.readback.Get(),surface.tex.Get());
+                srv=surface.readSrv.Get();
+            }
+        }
         ID3D11SamplerState* sampler = LookupSampler(&sh[kPsSampler]);
         if (!sampler) sampler = g.defaultSampler.Get();
-        g.context->PSSetShaderResources(0, 1, &srv);
-        g.context->PSSetSamplers(0, 1, &sampler);
-        UploadAndDraw();
-        g.indices.resize(firstIndex);
-        g.vertices.clear();
+        next.texture=srv;next.sampler=sampler;
+        const bool compatible=pending && next.target==batch.target && next.texture==batch.texture &&
+            next.sampler==batch.sampler && next.blend==batch.blend &&
+            !std::memcmp(next.factor,batch.factor,sizeof(next.factor)) &&
+            !std::memcmp(&next.viewport,&batch.viewport,sizeof(next.viewport));
+        if(!compatible) {flush();batch=next;}
+        const uint64_t geometryStart=g_profile.enabled?QpcUsec():0;
+        if(!BuildGeometry(draw,sh)) continue;
+        if(g_profile.enabled) g_profile.geometryMs+=(QpcUsec()-geometryStart)/1000.0;
+        pending=true;
+    }
+    flush();
+
+    if(g_profile.file) {
+        std::fprintf(g_profile.file,"%llu,%s,%zu,%llu,%llu,%.3f,%.3f,%.3f,%zu,%u,%u,%u,%u\n",g_profile.frame,
+          ps4::CurrentRoom().c_str(),draws.size(),g_profile.vertices,g_profile.uploads,
+          g_profile.geometryMs,g_profile.uploadMs,(QpcUsec()-profileStart)/1000.0,g.textures.size(),g_profile.missing,g_profile.feedback,g_profile.masterReads,g_profile.rtCreates);
+        if(g_profile.frame%60==0) std::fflush(g_profile.file);
     }
 
-    static uint64_t s_simFrame = 0;
-    ++s_simFrame;
-
-    // Decoupled 30 FPS presentation cap: simulation continues at 60.00 Hz while
-    // every 2nd frame skips swapchain presentation unless a screenshot is scheduled.
-    if (cfg.presentationFpsLimit > 0 && cfg.presentationFpsLimit <= 30 && (s_simFrame & 1u) != 0) {
-        MaybeCaptureScreenshot(s_simFrame);
-        return;
-    }
-
+    const uint64_t s_simFrame=++g_guestSimFrame;
+    ui::RecordSimulationFrame();
     CompositeAndPresent(hwnd, s_simFrame, true);
+    if(g.debugQueue) {
+        const auto count=g.debugQueue->GetNumStoredMessages();
+        for(UINT64 i=0;i<count;++i) {
+            SIZE_T bytes=0;g.debugQueue->GetMessage(i,nullptr,&bytes);
+            std::vector<uint8_t> storage(bytes);
+            auto* message=reinterpret_cast<D3D11_MESSAGE*>(storage.data());
+            if(SUCCEEDED(g.debugQueue->GetMessage(i,message,&bytes)) && message->Severity<=D3D11_MESSAGE_SEVERITY_WARNING)
+                LOG_WARN("[d3d11-debug] id=%d: %s",message->ID,message->pDescription);
+        }
+        g.debugQueue->ClearStoredMessages();
+    }
 }
 
 void PresentCachedFrame(void* hwndVoid) {
@@ -1232,6 +1362,7 @@ void PresentCachedFrame(void* hwndVoid) {
     if (!EnsureRenderer(hwnd)) return;
     CompositeAndPresent(hwnd, 0, false);
 }
+bool PresentationDue(){return g.nextPresentUsec==0 || QpcUsec()>=g.nextPresentUsec;}
 
 bool OnWindowMessage(void* hwnd, uint32_t msg, uint64_t wp, int64_t lp) {
     return ui::OnWindowMessage(hwnd, msg, wp, lp);
@@ -1244,6 +1375,9 @@ bool IsOverlayCapturingInput() {
 void ApplyDisplaySettings(void* hwndVoid) {
     HWND hwnd = static_cast<HWND>(hwndVoid);
     if (!hwnd) return;
+    // Mouse activation can arrive while RenderOverlay is building this frame.
+    // Finish presenting it before replacing its backbuffer and viewport.
+    if(g.compositing) {g.displayApplyPending=true;return;}
 
     auto& cfg = core::CurrentSettings();
     const auto monitors = core::EnumerateMonitors();
@@ -1255,6 +1389,7 @@ void ApplyDisplaySettings(void* hwndVoid) {
 
     // Always exit exclusive fullscreen before changing window styles or monitor
     if (g.swap) {
+        if(g.context) g.context->OMSetRenderTargets(0,nullptr,nullptr);
         g.backBuffer.Reset();
         g.swap->SetFullscreenState(FALSE, nullptr);
     }
@@ -1333,7 +1468,15 @@ void ApplyDisplaySettings(void* hwndVoid) {
     }
 }
 
+void ResetGuestResources() {
+    if(g.context) g.context->ClearState();
+    for(auto [key,view]:g.textures) if(view) view->Release();
+    g.textures.clear();g.frameTextures.clear();g.offscreenRts.clear();g.pendingClears.clear();
+    g_guestSimFrame=0;g_profile.frame=0;g.nextPresentUsec=0;
+}
+
 void ShutdownRenderer() {
+    if(g_profile.file) {std::fclose(g_profile.file);g_profile.file=nullptr;}
     ui::ShutdownOverlay();
     if (g.swap) {
         g.swap->SetFullscreenState(FALSE, nullptr);
@@ -1342,6 +1485,7 @@ void ShutdownRenderer() {
         if (srv) srv->Release();
     }
     g.textures.clear();
+    g.frameTextures.clear();
     for (auto& [k, smp] : g.samplers) {
         if (smp) smp->Release();
     }
@@ -1375,7 +1519,9 @@ void ShutdownRenderer() {
     g.defaultSampler.Reset();
     g.swap.Reset();
     g.context.Reset();
+    g.debugQueue.Reset();
     g.device.Reset();
+    g.nextPresentUsec=0;g.lastPresentLimit=-1;
     g.ok = false;
     g.tried = false;
     g.displayInitialized = false;

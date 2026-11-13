@@ -37,7 +37,7 @@ void PollOnlineAction() {
         }
         if (result.home) g_ui.onlinePage = OnlineSubPage::Home;
         if (result.closeOverlay) g_ui.open = false;
-    } else { g_ui.open = true; g_ui.tab = 4; }
+    } else if(!result.hasRooms) { g_ui.open = true; g_ui.tab = net::GetSnapshot().roomId.empty()?6:4; }
 }
 void HandleOnlineAction(int row, int dir, bool activated, bool& save) {
     if (g_onlineTask.valid()) return;
@@ -48,14 +48,18 @@ void HandleOnlineAction(int row, int dir, bool activated, bool& save) {
         snap.phase == net::SessionPhase::InMatch ||
         ((snap.phase == net::SessionPhase::Error || snap.phase == net::SessionPhase::Disconnected) && !snap.roomId.empty());
     if (active) {
+        if(row==1 && snap.isHost) {
+            std::string error;
+            if(!net::SelectRoomStage((snap.stageIndex+(dir?dir:1)+4)%4,error)) g_ui.onlineBanner=error;
+            return;
+        }
         if (!activated) return;
         switch (row) {
             case 0: if (net::CopyRoomCodeToClipboard()) g_ui.onlineBanner = "Room Code copied."; break;
-            case 1: QueueSimple([ready = !snap.localReady](std::string& e) { return net::SetReady(ready, e); }); break;
             case 2: if (snap.isHost) QueueSimple([pub = !snap.isPublic](std::string& e) { return net::SetRoomVisibility(pub, e); }); break;
-            case 3: if (snap.isHost) QueueSimple([](std::string& e) { return net::StartMatch(e); }, false, true); break;
+            case 3: if (snap.isHost && snap.remoteConnected) QueueSimple([](std::string& e) { return net::StartMatch(e); }); break;
             case 4: if (snap.isHost) QueueSimple([](std::string& e) { return net::KickGuest(e); }); break;
-            case 5: QueueSimple([](std::string&) { net::LeaveRoom(); return true; }, true); break;
+            case 5: QueueSimple([](std::string&) { net::LeaveRoom(); return true; }, true);g_ui.tab=6;g_ui.selectedRow=0;break;
         }
     } else if (g_ui.onlinePage == OnlineSubPage::Home) {
         if (row == 5) { g_ui.createStageIndex = (g_ui.createStageIndex + (dir ? dir : 1) + 4) % 4; return; }
@@ -105,11 +109,11 @@ void HandleOnlineAction(int row, int dir, bool activated, bool& save) {
                 cfg.region = regions[(index + (dir ? dir : 1) + 4) % 4]; save = true; break;
             }
             case 2:
-                if (activated && !dir) cfg.autoInputDelay = !cfg.autoInputDelay;
+                if (activated) cfg.autoInputDelay = !cfg.autoInputDelay;
                 else cfg.inputDelayFrames = std::clamp(cfg.inputDelayFrames + dir, 1, 12);
                 save = true; break;
             case 3: if (activated) g_ui.editingText = g_ui.editingText == EditTarget::ServerUrl ? EditTarget::None : EditTarget::ServerUrl; break;
-            case 4: if (activated) { g_ui.editingText = EditTarget::None; g_ui.onlinePage = OnlineSubPage::Home; g_ui.selectedRow = 6; } break;
+            case 4: if (activated) { g_ui.editingText = EditTarget::None; g_ui.onlinePage = OnlineSubPage::Home; g_ui.tab=g_ui.fromMultiplayer?6:0;g_ui.selectedRow=0; } break;
         }
     }
 }

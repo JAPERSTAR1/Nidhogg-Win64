@@ -26,6 +26,7 @@ test('rooms, authorization, isolation, relay packets, expiry and cleanup', async
     assert.equal((await api('/api/rooms', undefined, 'old'))[0], 426);
     assert.equal((await api('/api/rooms/create', { stageIndex: 99 }))[0], 400);
     const [status, host] = await create(false); assert.equal(status, 200);
+    assert.equal((await api('/api/rooms/start', { roomId: host.roomId, authToken: host.authToken }))[0], 409);
     assert.equal((await api('/api/rooms'))[1].rooms.length, 0);
     assert.equal((await api('/api/rooms/join', { roomId: host.roomId }))[0], 404);
     const [joined, guest] = await api('/api/rooms/join_code', { roomCode: host.roomCode, playerName: 'guest' });
@@ -33,12 +34,16 @@ test('rooms, authorization, isolation, relay packets, expiry and cleanup', async
     const auth = p => ({ roomId: p.roomId, authToken: p.authToken });
     assert.equal((await api('/api/rooms/join_code', { roomCode: host.roomCode }))[0], 409);
     assert.equal((await api('/api/rooms/start', auth(guest)))[0], 403);
-    assert.equal((await api('/api/rooms/start', auth(host)))[0], 409);
     assert.equal((await api('/api/rooms/heartbeat', { ...auth(host), authToken: 'forged' }))[0], 403);
-    for (const p of [host, guest]) assert.equal((await api('/api/rooms/ready', { ...auth(p), ready: true }))[0], 200);
+    assert.equal(guest.hostReady, false); assert.equal(guest.guestReady, false);
+    assert.equal((await api('/api/rooms/start', { ...auth(host), stageIndex: 99 }))[0], 400);
+    assert.equal((await api('/api/rooms/start', { ...auth(host), stageIndex: 1.5 }))[0], 400);
     const beforeStartKey = host.sessionKey;
-    const started = (await api('/api/rooms/start', auth(host)))[1];
+    const started = (await api('/api/rooms/start', { ...auth(host), stageIndex: 2 }))[1];
+    assert.equal(started.stageIndex, 2);
     assert.equal(started.status, 'in_match'); assert.notEqual(started.sessionKey, beforeStartKey);
+    assert.equal((await api('/api/rooms/start', { ...auth(host), stageIndex: 2 }))[1].sessionKey, started.sessionKey);
+    assert.equal((await api('/api/rooms/start', { ...auth(host), stageIndex: 3 }))[0], 409);
     Object.assign(host, started);
     Object.assign(guest, (await api('/api/rooms/heartbeat', auth(guest)))[1]);
     const a = await wsConnect(host), b = await wsConnect(guest);

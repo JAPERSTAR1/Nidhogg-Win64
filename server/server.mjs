@@ -17,7 +17,7 @@ function name(value, fallback) {
 }
 
 export function createLobby({ ttlMs = 20000, maxRooms = 128, now = Date.now,
-  udpPort = null, udpBind = '0.0.0.0', relayPublicIp = '' } = {}) {
+  udpPort = null, udpBind = '0.0.0.0', relayPublicIp = '', legacyStartPolicy = false } = {}) {
   const rooms = new Map(), buckets = new Map();
   const udp = udpPort === null ? null : createUdpRelay({ port: udpPort, bind: udpBind, rooms, now });
   const wss = new WebSocketServer({ noServer: true, maxPayload: 2048, perMessageDeflate: false });
@@ -131,7 +131,13 @@ export function createLobby({ ttlMs = 20000, maxRooms = 128, now = Date.now,
         requireThat(role === 1 && r.status === 'waiting', 403, 'Host only, before start'); r.guest?.ws?.close(1000, 'Removed'); r.guest = null; break;
       case '/api/rooms/start':
         requireThat(role === 1, 403, 'Host only');
-        requireThat(r.guest && r.host.ready && r.guest.ready, 409, 'Both players must be ready');
+        requireThat(r.guest, 409, 'A second player must be connected');
+        requireThat(!legacyStartPolicy || (r.host.ready && r.guest.ready), 409, 'Both players must be ready');
+        if (!legacyStartPolicy && b.stageIndex !== undefined) {
+          requireThat(Number.isInteger(b.stageIndex) && b.stageIndex >= 0 && b.stageIndex <= 3, 400, 'Invalid stage');
+          requireThat(r.status === 'waiting' || b.stageIndex === r.stage, 409, 'Match already started');
+          r.stage = b.stageIndex;
+        }
         // A previously removed guest must not retain a key usable in a new match.
         if (r.status === 'waiting') {
           r.session = randomBytes(8).readBigUInt64LE().toString();
@@ -212,7 +218,7 @@ export function createLobby({ ttlMs = 20000, maxRooms = 128, now = Date.now,
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const lobby = createLobby({ udpPort: process.env.UDP_PORT ? Number(process.env.UDP_PORT) : null,
-    relayPublicIp: process.env.RELAY_PUBLIC_IP ?? '' });
+    relayPublicIp: process.env.RELAY_PUBLIC_IP ?? '', legacyStartPolicy: process.env.NIDHOGG_QA_LEGACY_LOBBY === '1' });
   await lobby.udpReady;
   lobby.server.listen(Number(process.env.PORT ?? 27880), process.env.BIND ?? '127.0.0.1', () => console.log(`Nidhogg lobby listening on ${JSON.stringify(lobby.server.address())}`));
   for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, async () => { await lobby.close(); process.exit(0); });

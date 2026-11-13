@@ -76,7 +76,8 @@ struct NetStatsSnapshot {
 };
 
 void InitNetplay();
-bool ResumeOnlineSession(); // Called before the first guest instruction on match handoff.
+bool ResumeOnlineSession(); // Compatibility for an explicitly resumed session.
+void CompleteInProcessBoot();
 void NotifyOriginalMatchStart(uint64_t submittedFrame);
 void ShutdownNetplay();
 void TickNetplayLobby();  // Called once per frame from UI/renderer
@@ -94,6 +95,7 @@ bool SetRoomVisibility(bool isPublic, std::string& outError);
 bool SetReady(bool ready, std::string& outError);
 bool KickGuest(std::string& outError);
 bool StartMatch(std::string& outError);
+bool SelectRoomStage(int stageIndex,std::string& outError);
 void LeaveRoom();
 bool CopyRoomCodeToClipboard();
 

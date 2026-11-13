@@ -17,19 +17,45 @@ and [deployment/cost limits](docs/AZURE-DEPLOYMENT.md).
 
 ## Play on Windows
 
-1. Download [Nidhogg-Windows-v1.1.0-rc.1-x64.zip](https://github.com/JAPERSTAR1/Nidhogg-Win64-Port/releases/tag/v1.1.0-rc.1)
+1. Download [Nidhogg-Windows-v1.1.0-rc.2-x64.zip](https://github.com/JAPERSTAR1/Nidhogg-Win64-Port/releases/tag/v1.1.0-rc.2)
    and extract the complete ZIP, or build the runtime below. The previous v1.0.0 remains available for offline/local play;
    both online players must use the new client.
 2. Run `Nidhogg.exe` and select your CUSA00920 folder containing `eboot.bin` and
    `Data/`. A sibling `CUSA00920/` folder is also discovered automatically.
-3. Use **F1** for display, audio, controls and online settings. Keyboard and
+3. Choose the game's **Options** for graphics, display, audio, controls, online and HUD
+   settings; **F1** also opens this menu. Keyboard and
    XInput controllers are supported; bindings are configurable.
-4. Open **Online Multiplayer → Host/Join → Ready → Start**. Private rooms have
-   six-character codes. Each online player uses their own Player 1 bindings.
+4. **Multiplayer** opens a full game-styled session
+   screen: Local Versus, public sessions, Host Public/Private, or Join With Code.
+   Private rooms have six-character codes. The host chooses the map in the room
+   and presses **Start Game** once a second player joins; no manual Ready is required.
+   Each online player uses their own Player 1 bindings. Starting keeps the same
+   game process and window. Older releases retain their previous UI.
 
 The default endpoint is `https://lobby.japer.me`. The Azure server operates independently
 of the operator PC, subject to its promotional-credit shutdown limits. Players need no VPN, Node.js or tunnel software.
 An unavailable endpoint does not prevent offline play.
+
+The current release integrates the menus and adds a customizable connection
+HUD. **F3** hides/shows it; **HUD** settings select ping, input delay, connection type,
+sync status, corner, size and background opacity. New settings default to hidden,
+with ping as the only selected item. `start-game.cmd` opens the game normally;
+`start-game.ps1 -Online` opens the online menu directly.
+
+Options and Multiplayer own the whole game viewport, using the original font and
+art loaded from your assets. They replace the scene while open, with no gameplay
+image or floating settings panel behind them. See [frontend verification](docs/NATIVE-FRONTEND.md).
+
+Graphics settings offer 30/60/120/144/240/unlimited presentation, internal resolution,
+filters, VSync and buffering. Gameplay remains at its original 60 Hz. Presentations
+above 60 repeat the latest completed game image; they do not add animation frames.
+Actual presentation rate depends on rendering work, display and VSync. See
+[the local UI/performance verification](docs/INTEGRATED-UI-PERFORMANCE.md).
+
+**Room Transition Effects** and **Screen Flashes** in Graphics default to **Off**
+to remove the transition streaks and full-screen flash. Each can be restored to
+**Original** independently; gameplay updates and online state remain unchanged.
+See [frame-by-frame verification](docs/REDUCED-FLASHES.md).
 
 ## Build
 
@@ -79,7 +105,7 @@ source releases.
 | `port/src/image.*`, `thunks.*`, `hle.*` | Guest mapping, ABI bridging, SCE compatibility |
 | `port/src/gnm/` | PM4 interpretation and Direct3D 11 rendering |
 | `port/src/audio/`, `atrac9/` | Windows audio and codec integration |
-| `port/src/core/`, `ui/` | Settings, diagnostics and native overlays |
+| `port/src/core/`, `ui/` | Settings, diagnostics and full frontend screens |
 | `port/src/net/` | Input synchronization, packet authentication, UDP/STUN and WSS |
 | `server/`, `deploy/` | Lobby/relay backend, Azure services and monitoring |
 | `analysis/`, `tools/` | Reverse-engineering records and investigation utilities |

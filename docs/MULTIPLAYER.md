@@ -1,9 +1,11 @@
 # Nidhogg Windows multiplayer
 
-Both players need the 1.1 client (protocol `nidhogg-win64-2.1`). Run Nidhogg.exe,
-select your CUSA00920 assets, then Online Multiplayer → Host/Join → Ready → Start.
-Private rooms have six-character codes; public browsing and Quick Match are also
-available. Each player uses their own Player 1 controls. F1 opens settings.
+Both players need the updated 1.1.0-rc.2 client (protocol `nidhogg-win64-2.1`).
+Run Nidhogg.exe, select your CUSA00920 assets, then choose Multiplayer.
+Select a public session, Host Public/Private Game, or Join With Code. Private
+rooms have six-character codes. The host chooses MAP in the room and starts once
+the second player joins, without a manual Ready step. Each player uses their own
+Player 1 controls. Options/F1 opens settings; F3 toggles the optional connection HUD.
 Leave input delay on Auto; arrows select the minimum delay (1–12 frames).
 
 The default endpoint is **https://lobby.japer.me**. Matchmaking and relay run on
@@ -33,8 +35,9 @@ claim to implement the original PSN matchmaking/netcode or rollback.
   A shared future start accounts for independent monotonic clock origins.
   A filtered, bounded ±500µs wall-clock pacing correction keeps input sampling
   aligned; guest time, frame indices and PRNG remain deterministic.
-* A clean child process restarts the original guest to eliminate menu-state
-  differences. Credentials pass through a private child environment.
+* An in-process guest reset and a fresh fiber eliminate menu-state differences
+  while preserving the application PID, window and room connection. Workers stop
+  before guest memory is reset. See [frontend startup](NATIVE-FRONTEND.md).
 * State hashes detect divergence using initialized entity/base motion/sprite/
   flag fields, room and PRNG. They do not serialize every custom game variable.
   Tests also compare winners/results/rematches. Detected desync or disconnection

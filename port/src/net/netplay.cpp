@@ -321,6 +321,7 @@ struct NetState {
     uint64_t peerNonceHigh = 0;
     uint64_t peerNonceMask = 0;
     uint32_t matchSeed = 0xCAFE1234u;
+    bool matchCommitted = false;
     uint16_t relayUdpPort = 27881;
     sockaddr_in relayAddr{};
     bool hasRelayAddr = false;
@@ -377,6 +378,7 @@ struct NetState {
     uint64_t gameStartSubmit = UINT64_MAX;
     bool resumed = false;
     bool restartPending = false;
+    int hostStageOverride=-1;
     bool handingOff = false;
     bool bootNavigating = false;
     bool bootAgreementDone = false;
@@ -406,51 +408,11 @@ struct HeartbeatResult {
 std::future<HeartbeatResult> g_heartbeat;
 
 void RestartAtDeterministicBoot() {
-    // The menu has persistent actors, alarms and frame-dependent animation state.
-    // A fresh process starts the *original* guest from identical initial conditions.
-    // Credentials travel only in the child's private environment, never argv/files.
-    std::string resume;
-    {
-        std::scoped_lock lk(g_net.mtx);
-        if (!g_net.restartPending || g_net.resumed) return;
-        g_net.restartPending = false;
-        resume = "{\"roomId\":\"" + JsonEsc(g_net.snap.roomId) + "\",\"authToken\":\"" +
-            JsonEsc(g_net.authToken) + "\",\"udpPort\":" + std::to_string(g_net.localUdpPort) +
-            ",\"isHost\":" + (g_net.snap.isHost ? "true" : "false") + "}";
-    }
-    std::vector<wchar_t> environment;
-    LPWCH source = GetEnvironmentStringsW();
-    if (!source) return;
-    for (const wchar_t* p = source; *p; p += wcslen(p) + 1) {
-        std::wstring entry(p);
-        if (entry.rfind(L"NIDHOGG_NET_RESUME=", 0) == 0 || entry.rfind(L"NIDHOGG_NET_AUTO=", 0) == 0 ||
-            entry.rfind(L"NIDHOGG_OPEN_ONLINE=", 0) == 0 || entry.rfind(L"NIDHOGG_OPEN_SETTINGS=", 0) == 0) continue;
-        environment.insert(environment.end(), entry.begin(), entry.end()); environment.push_back(0);
-    }
-    FreeEnvironmentStringsW(source);
-    const auto credential = core::Utf8ToWide("NIDHOGG_NET_RESUME=" + resume);
-    environment.insert(environment.end(), credential.begin(), credential.end());
-    environment.push_back(0); environment.push_back(0);
-    std::wstring command = GetCommandLineW();
-    STARTUPINFOW startup{}; startup.cb = sizeof(startup);
-    // This is the player's new interactive game window, not an operator helper.
-    startup.dwFlags = STARTF_USESHOWWINDOW; startup.wShowWindow = SW_SHOWNORMAL;
-    PROCESS_INFORMATION process{};
-    if (!CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE,
-        CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED | CREATE_NO_WINDOW,
-        environment.data(), nullptr, &startup, &process)) {
-        std::scoped_lock lk(g_net.mtx);
-        g_net.snap.phase = SessionPhase::Error;
-        g_net.snap.errorText = "Cannot launch synchronized game (Windows " + std::to_string(GetLastError()) + ")";
-        return;
-    }
-    LOG_INFO("[netplay] handing room membership to clean synchronized guest process");
-    g_net.handingOff = true;
-    ps4::HleShutdown();
-    ResumeThread(process.hThread); CloseHandle(process.hThread);
-    WaitForSingleObject(process.hProcess, INFINITE);
-    DWORD code = 1; GetExitCodeProcess(process.hProcess, &code); CloseHandle(process.hProcess);
-    ExitProcess(code);
+    std::scoped_lock lock(g_net.mtx);
+    if(!g_net.restartPending || g_net.resumed) return;
+    g_net.restartPending=false;
+    g_net.snap.statusText="Preparing match...";
+    ps4::RequestGuestRestart();
 }
 
 std::string DetectLocalLanIp() {
@@ -874,6 +836,7 @@ void PumpUdpRxLocked() {
                 if (agreement.delay < 1 || agreement.delay > 12) break;
                 if (agreement.flags & 1) g_net.peerDelayProposal = agreement.delay;
                 if (!g_net.snap.isHost && (agreement.flags & 2)) {
+                    if((agreement.reserved&0xfffc)==0x100) g_net.snap.stageIndex=agreement.reserved&3;
                     if (!agreement.hostStartUsec) break;
                     g_net.snap.inputDelayFrames = agreement.delay; g_net.bootCommitted = true;
                     g_net.bootHostStartUsec = agreement.hostStartUsec;
@@ -1173,6 +1136,12 @@ bool NetplayStepCallbackImpl(uint64_t simFrame, uint32_t localButtons,
 }
 
 void ApplyRoomStateFromJsonLocked(const std::string& resp) {
+    std::string roomStatus;
+    JsonGetStr(resp, "status", roomStatus);
+    // A lobby heartbeat may finish after the host's Start request. Its old
+    // seed/key must never replace the match credentials during the local reset.
+    if(g_net.matchCommitted && roomStatus=="waiting") return;
+    if(roomStatus=="in_match") g_net.matchCommitted=true;
     JsonGetStr(resp, "roomId", g_net.snap.roomId);
     JsonGetStr(resp, "roomName", g_net.snap.roomName);
     JsonGetStr(resp, "roomCode", g_net.snap.roomCode);
@@ -1201,7 +1170,8 @@ void ApplyRoomStateFromJsonLocked(const std::string& resp) {
     }
     JsonGetBool(resp, "autoInputDelay", g_net.autoDelay);
     if (JsonGetInt(resp, "playerCount", pCount)) g_net.snap.playerCount = static_cast<int>(pCount);
-    if (JsonGetInt(resp, "stageIndex", stageIdx)) g_net.snap.stageIndex = static_cast<int>(stageIdx);
+    if ((!g_net.resumed || g_net.snap.phase==SessionPhase::LobbyWaiting) && JsonGetInt(resp, "stageIndex", stageIdx)) g_net.snap.stageIndex =
+        g_net.snap.isHost && g_net.hostStageOverride>=0?g_net.hostStageOverride:static_cast<int>(stageIdx);
     if (JsonGetInt(resp, "relayUdpPort", relayPort) && relayPort > 0 && relayPort <= 65535)
         g_net.relayUdpPort = static_cast<uint16_t>(relayPort);
 
@@ -1270,8 +1240,6 @@ void ApplyRoomStateFromJsonLocked(const std::string& resp) {
         return;
     }
 
-    std::string roomStatus;
-    JsonGetStr(resp, "status", roomStatus);
     if (roomStatus == "closed") {
         g_net.snap.phase = SessionPhase::Disconnected;
         g_net.snap.statusText = "Host closed the room.";
@@ -1380,6 +1348,25 @@ bool ResumeOnlineSession() {
     LOG_INFO("[netplay] BARRIER SYNCED -> deterministic boot (seed=0x%08x, role=%s)",
         g_net.matchSeed, host ? "host" : "guest");
     return true;
+}
+
+void CompleteInProcessBoot() {
+    ps4::ui::BeginMatchTransition();
+    std::scoped_lock lock(g_net.mtx);
+    g_net.resumed=true;g_net.bootNavigating=true;g_net.bootAgreementDone=false;
+    g_net.bootCommitted=g_net.bootAcked=g_net.bootStartSeen=false;
+    g_net.peerDelayProposal=0;g_net.bestClockRttUsec=UINT64_MAX;
+    g_net.matchFrame=0;g_net.stageSelectionStart=UINT64_MAX;
+    g_net.gameStartSubmit=UINT64_MAX;
+    g_net.localInputs.clear();g_net.remoteInputs.clear();
+    g_net.localStateHashes.clear();g_net.remoteStateHashes.clear();
+    g_net.snap.phase=SessionPhase::InMatch;
+    g_net.snap.statusText="Preparing synchronized match...";
+    g_net.snap.inputDelayFrames=3;
+    for(int f=0;f<3;++f) {g_net.localInputs[f]=0;g_net.remoteInputs[f]=0;}
+    ps4::BeginDeterministicSession(g_net.matchSeed);
+    ps4::SetNetplayStepCallback(&NetplayStepCallbackImpl);
+    LOG_INFO("[netplay] BARRIER SYNCED -> in-process deterministic boot pid=%lu",GetCurrentProcessId());
 }
 
 void NotifyOriginalMatchStart(uint64_t submittedFrame) {
@@ -1564,7 +1551,7 @@ bool JoinRoomById(const std::string& roomId, std::string& outError) {
     g_net.snap.isHost = false;
     g_net.snap.localPlayerNum = 2;
     g_net.snap.remoteConnected = true;
-    g_net.snap.statusText = "Joined room — toggle Ready when prepared.";
+    g_net.snap.statusText = "Joined room — waiting for the host to start.";
     JsonGetStr(resp, "authToken", g_net.authToken);
     ApplyRoomStateFromJsonLocked(resp);
     SendRegisterEndpointToRelayLocked();
@@ -1621,7 +1608,7 @@ bool JoinRoomByCode(const std::string& roomCode, std::string& outError) {
     g_net.snap.isHost = false;
     g_net.snap.localPlayerNum = 2;
     g_net.snap.remoteConnected = true;
-    g_net.snap.statusText = "Joined private room via code — toggle Ready!";
+    g_net.snap.statusText = "Joined private room via code — waiting for the host to start.";
     JsonGetStr(resp, "authToken", g_net.authToken);
     ApplyRoomStateFromJsonLocked(resp);
     SendRegisterEndpointToRelayLocked();
@@ -1675,7 +1662,7 @@ bool QuickMatch(const std::string& preferredRegion, bool& outNoRoomsAvailable,
     g_net.snap.isHost = false;
     g_net.snap.localPlayerNum = 2;
     g_net.snap.remoteConnected = true;
-    g_net.snap.statusText = "Quick Match found opponent! Toggle Ready.";
+    g_net.snap.statusText = "Quick Match found opponent! Waiting for the host to start.";
     JsonGetStr(resp, "authToken", g_net.authToken);
     ApplyRoomStateFromJsonLocked(resp);
     SendRegisterEndpointToRelayLocked();
@@ -1773,7 +1760,18 @@ bool KickGuest(std::string& outError) {
     return true;
 }
 
+bool SelectRoomStage(int stageIndex,std::string& outError) {
+    std::scoped_lock lock(g_net.mtx);
+    if(!g_net.snap.isHost || g_net.snap.phase!=SessionPhase::LobbyWaiting || stageIndex<0 || stageIndex>3) {
+        outError="Only the host can choose a map before starting.";return false;
+    }
+    g_net.hostStageOverride=stageIndex;g_net.snap.stageIndex=stageIndex;return true;
+}
+
 bool StartMatch(std::string& outError) {
+    // Old deployed lobbies still require the readiness fields. Clients set
+    // these automatically; there is no player-facing Ready step.
+    if(!SetReady(true,outError)) return false;
     std::string roomId, token;
     {
         std::scoped_lock lk(g_net.mtx);
@@ -1788,8 +1786,14 @@ bool StartMatch(std::string& outError) {
     body << "{\"roomId\":\"" << JsonEsc(roomId) << "\",\"authToken\":\"" << JsonEsc(token) << "\"}";
     int status = 0;
     std::string resp;
-    if (!HttpRequestJson("POST", "/api/rooms/start", body.str(), status, resp, outError))
-        return false;
+    std::string startBody=body.str();startBody.pop_back();
+    startBody+=",\"stageIndex\":"+std::to_string(GetSnapshot().stageIndex)+"}";
+    const uint64_t deadline=MonoUsec()+3000000;
+    do {
+        if (!HttpRequestJson("POST", "/api/rooms/start", startBody, status, resp, outError)) return false;
+        if(status!=409 || resp.find("ready")==std::string::npos || MonoUsec()>=deadline) break;
+        Sleep(150);
+    } while(true);
     if (status != 200) {
         if (!JsonGetStr(resp, "error", outError) || outError.empty())
             outError = "Cannot start match yet (need 2 players).";
@@ -1803,6 +1807,7 @@ bool StartMatch(std::string& outError) {
 void LeaveRoom() {
     g_framePacingAdjustment.store(0, std::memory_order_relaxed);
     ps4::SetNetplayStepCallback(nullptr);
+    {std::scoped_lock lock(g_net.mtx);g_net.hostStageOverride=-1;g_net.resumed=false;g_net.restartPending=false;g_net.matchCommitted=false;}
     std::string roomId, token;
     {
         std::scoped_lock lk(g_net.mtx);
@@ -1896,6 +1901,8 @@ void TickNetplayLobby() {
         } else if (mode == "host_private") {
             g_net.cliAutoStart = true;
             CreateRoom("QA Private Room", false, 0, err);
+            const auto chosenStage=getEnv("NIDHOGG_NET_QA_STAGE");
+            if(!chosenStage.empty()) SelectRoomStage(std::clamp(std::atoi(chosenStage.c_str()),0,3),err);
             const std::string codeOut = getEnv("NIDHOGG_NET_CODE_OUT");
             if (!codeOut.empty()) {
                 if (std::FILE* f = core::FopenUtf8(codeOut, "wb")) {
@@ -1905,16 +1912,16 @@ void TickNetplayLobby() {
                 }
             }
         } else if (mode == "join_code" && !arg.empty()) {
-            if (JoinRoomByCode(arg, err)) SetReady(true, err);
+            JoinRoomByCode(arg, err);
         } else if (mode == "quickmatch") {
             bool none = false;
-            if (QuickMatch(arg, none, err)) SetReady(true, err);
+            QuickMatch(arg, none, err);
         }
         if (!err.empty()) LOG_WARN("[netplay-auto] mode=%s err=%s", mode.c_str(), err.c_str());
     }
 
     std::string roomId, token, heartbeatBody;
-    bool shouldPoll = false;
+    bool shouldPoll = false,autoReady=false;
     bool autoStartReady = false;
     {
         std::scoped_lock lk(g_net.mtx);
@@ -1928,6 +1935,7 @@ void TickNetplayLobby() {
             g_net.lastHeartbeatUsec = now;
             roomId = g_net.snap.roomId;
             token = g_net.authToken;
+            autoReady=g_net.snap.phase==SessionPhase::LobbyWaiting && !g_net.snap.localReady;
             heartbeatBody = "{\"roomId\":\"" + JsonEsc(roomId) + "\",\"authToken\":\"" + JsonEsc(token) +
                 "\",\"lanIp\":\"" + g_net.localLanIp + "\",\"lanPort\":" + std::to_string(g_net.localUdpPort) +
                 ",\"publicIp\":\"" + g_net.publicIp + "\",\"publicPort\":" + std::to_string(g_net.publicPort) + "}";
@@ -1936,9 +1944,10 @@ void TickNetplayLobby() {
     }
 
     if (shouldPoll && !g_heartbeat.valid()) {
-        g_heartbeat = std::async(std::launch::async, [roomId, heartbeatBody] {
+        if(autoReady) {heartbeatBody.pop_back();heartbeatBody+=",\"ready\":true}";}
+        g_heartbeat = std::async(std::launch::async, [roomId, heartbeatBody,autoReady] {
             HeartbeatResult result; result.roomId = roomId;
-            result.ok = HttpRequestJson("POST", "/api/rooms/heartbeat", heartbeatBody,
+            result.ok = HttpRequestJson("POST", autoReady?"/api/rooms/ready":"/api/rooms/heartbeat", heartbeatBody,
                 result.status, result.response, result.error);
             return result;
         });

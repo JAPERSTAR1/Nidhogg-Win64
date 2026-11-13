@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--package', type=Path, default=ROOT / 'dist/Nidhogg-Windows-v1.1.0-rc.1-x64.zip')
+    parser.add_argument('--package', type=Path, default=ROOT / 'dist/Nidhogg-Windows-v1.1.0-rc.2-x64.zip')
     parser.add_argument('--assets', type=Path, default=Path(os.environ.get('NIDHOGG_ASSETS', ROOT / 'CUSA00920')))
     args = parser.parse_args()
     assets = args.assets.resolve()
@@ -30,7 +30,8 @@ def main():
     expected = {'Nidhogg.exe', 'Nidhogg.png', 'Play Online.cmd', 'READ-ME.txt',
                 'READ-ME-AR.txt', 'RELEASE-NOTES.md', 'RELEASE-VERIFICATION.md', 'release-manifest.json',
                 'MULTIPLAYER.md', 'NETWORK-VERIFICATION.md', 'THIRD_PARTY_NOTICES.md',
-                'LibAtrac9-LICENSE.txt', 'AZURE-VERIFICATION.md', 'AZURE-DEPLOYMENT.md'}
+                'LibAtrac9-LICENSE.txt', 'AZURE-VERIFICATION.md', 'AZURE-DEPLOYMENT.md',
+                'NATIVE-FRONTEND.md', 'INTEGRATED-UI-PERFORMANCE.md', 'REDUCED-FLASHES.md'}
     with zipfile.ZipFile(args.package) as z:
         assert set(z.namelist()) == expected, 'Unexpected package entries'
         assert z.testzip() is None, 'Corrupt ZIP'
@@ -42,12 +43,13 @@ def main():
     checks = {'exact_asset_free_manifest': True, 'executable_matches_manifest': True}
     results = {}
 
-    def run(label, sequence='', second='', frames=700, profile=None, mute=False, verify=False):
+    def run(label, sequence='', second='', frames=700, profile=None, mute=False, verify=False, preserve_config=False):
         user = output / (profile or label)
         (user / 'config').mkdir(parents=True, exist_ok=True)
-        (user / 'config/settings.json').write_text(json.dumps({
-            'vsync': 0, 'displayWidth': 640, 'displayHeight': 360, 'renderScale': .5,
-            'mute': mute, 'launchDirectly': False}), encoding='utf8')
+        if not preserve_config:
+            (user / 'config/settings.json').write_text(json.dumps({
+                'vsync': 0, 'displayWidth': 640, 'displayHeight': 360, 'renderScale': .5,
+                'mute': mute, 'launchDirectly': False, 'lobbyServerUrl':'http://127.0.0.1:29889'}), encoding='utf8')
         shot = max(1, frames - 30)
         env = {k: v for k, v in os.environ.items() if not k.startswith('NIDHOGG_')}
         env.update(NIDHOGG_QA_UNFOCUSED='1', NIDHOGG_UNCAPPED='1',
@@ -71,19 +73,19 @@ def main():
         return log
 
     run('asset-verification', verify=True)
-    menu = run('save-create', '100:0x4000:8,280:0x4000:8,330:0x0040:6,360:0x0040:6,390:0x4000:8,430:0x0080:14,470:0x2000:8', frames=560, profile='save-profile')
-    prefs = output / 'save-profile/saves/SAVEDATA00/prefs.bin'
-    checks['save_created'] = prefs.is_file() and prefs.stat().st_size == 16
-    before = prefs.read_bytes() if prefs.exists() else b''
-    run('save-reload', '100:0x4000:8', frames=400, profile='save-profile')
-    checks['save_preserved_after_restart'] = bool(before) and prefs.read_bytes() == before
+    run('save-create', '100:0x4000:8,280:0x4000:8,330:0x0040:6,360:0x0040:6,390:0x4000:8,430:0x0080:8,470:0x2000:8', frames=560, profile='save-profile')
+    prefs = output / 'save-profile/config/settings.json'
+    before = json.loads(prefs.read_text())
+    checks['native_settings_saved'] = 'qualityPreset' in before and before['qualityPreset']==1
+    run('save-reload', '100:0x4000:8', frames=400, profile='save-profile', preserve_config=True)
+    checks['native_settings_preserved_after_restart'] = json.loads(prefs.read_text())==before
 
     base = '100:0x4000:8,280:0x4000:8,330:0x4000:8,380:0x4000:8'
     for name, nav, room, start in [
-        ('Castle', '', 'rCastleCenter', 440),
-        ('Wilds', ',430:0x0040:8', 'rWildsCenter', 485),
-        ('Mines', ',430:0x0040:8,475:0x0040:8', 'rMinesCenter', 530),
-        ('Clouds', ',430:0x0010:8', 'rSkyCenter', 485),
+        ('Castle', '', 'rCastleCenter', 470),
+        ('Wilds', ',460:0x0040:8', 'rWildsCenter', 515),
+        ('Mines', ',460:0x0040:8,505:0x0040:8', 'rMinesCenter', 560),
+        ('Clouds', ',460:0x0010:8', 'rSkyCenter', 515),
     ]:
         sequence = base + nav + f',{start}:0x4000:8,{start+80}:0x8000:10,{start+100}:0x0020:60'
         log = run(name, sequence, f'{start+90}:0x0080:40,{start+105}:0x8000:8', start+170)
@@ -93,7 +95,10 @@ def main():
     sequence = base + ',440:0x4000:8,480:0x0040:35,520:0x0010:20,530:0x8000:8,555:0x0020:2200'
     sequence += ''.join(f',{f}:0x4000:12' for f in range(640, 2650, 95))
     sequence += ''.join(f',{f}:0x4000:8' for f in range(2750, 3950, 50))
-    log = run('local-match-rematch', sequence, '480:0x0010:20,490:0x8000:8,575:0x0080:2200', 6500)
+    # The native Local Versus action forwards the original confirmations before
+    # level select, adding thirty frames to the former direct-menu script.
+    sequence=','.join(f'{int(f)+(30 if int(f)>=440 else 0)}:{m}:{d}' for f,m,d in (x.split(':') for x in sequence.split(',')))
+    log = run('local-match-rematch', sequence, '510:0x0010:20,520:0x8000:8,605:0x0080:2200', 6500)
     checks['local_match_winner'] = 'yellowPlayer wins match!' in log
     checks['local_match_results'] = 'Created room rMatchStats' in log
     checks['local_rematch'] = log.count('Created room rCastleCenter') >= 2
@@ -106,7 +111,7 @@ def main():
     log = run('arcade', sequence, frames=3500)
     checks['arcade_progress'] = 'Created room rArcadeProgress' in log
     checks['arcade_gameplay'] = re.search(r'Created room r(Castle|Mines|Sky|Wilds)Center', log) is not None
-    log = run('mute', base + ',440:0x4000:8,510:0x8000:8', mute=True)
+    log = run('mute', base + ',470:0x4000:8,540:0x8000:8', mute=True)
     peaks = re.findall(r'peak=([0-9.]+)', log)
     checks['mute_zero_peak'] = bool(peaks) and all(float(value) == 0 for value in peaks)
     checks['original_eboot_unchanged'] = hashlib.sha256((assets / 'eboot.bin').read_bytes()).hexdigest() == original_hash

@@ -75,6 +75,8 @@ struct Settings {
     TextureFilterMode textureFilter = TextureFilterMode::PixelPoint;
     int anisotropy = 1;        // 1, 2, 4, 8, 16
     bool postScanlines = false;
+    bool showRoomTransitions = false;
+    bool showScreenFlashes = false;
     VSyncMode vsync = VSyncMode::On;
     int swapBuffers = 2;       // 2 or 3
     int presentationFpsLimit = 60;  // 0 = Unlimited, 30, 60, 120, 144, or custom (simulation stays 60 Hz)
@@ -104,7 +106,14 @@ struct Settings {
     bool launchDirectly = false;
     bool showFps = false;
     bool showFrameGraph = false;
-    bool showNetStats = true;
+    bool showNetStats = false;
+    bool netShowPing = true;
+    bool netShowDelay = false;
+    bool netShowTransport = false;
+    bool netShowSync = false;
+    int netHudCorner = 1; // top left, top right, bottom left, bottom right
+    int netHudScale = 100; // percent, independent of settings text size
+    int netHudOpacity = 45; // background only; text stays legible
 };
 
 struct DisplayModeInfo {

@@ -374,6 +374,8 @@ bool LoadSettings(Settings& out, const std::string& path) {
     s.textureFilter = static_cast<TextureFilterMode>(tf);
     JsonReadInt(j, "anisotropy", s.anisotropy, 1, 16);
     JsonReadBool(j, "postScanlines", s.postScanlines);
+    JsonReadBool(j, "showRoomTransitions", s.showRoomTransitions);
+    JsonReadBool(j, "showScreenFlashes", s.showScreenFlashes);
     int vs = static_cast<int>(s.vsync);
     JsonReadInt(j, "vsync", vs, 0, 2);
     s.vsync = static_cast<VSyncMode>(vs);
@@ -425,6 +427,13 @@ bool LoadSettings(Settings& out, const std::string& path) {
     JsonReadBool(j, "showFps", s.showFps);
     JsonReadBool(j, "showFrameGraph", s.showFrameGraph);
     JsonReadBool(j, "showNetStats", s.showNetStats);
+    JsonReadBool(j,"netShowPing",s.netShowPing);
+    JsonReadBool(j,"netShowDelay",s.netShowDelay);
+    JsonReadBool(j,"netShowTransport",s.netShowTransport);
+    JsonReadBool(j,"netShowSync",s.netShowSync);
+    JsonReadInt(j,"netHudCorner",s.netHudCorner,0,3);
+    JsonReadInt(j,"netHudScale",s.netHudScale,75,150);
+    JsonReadInt(j,"netHudOpacity",s.netHudOpacity,0,90);
 
     out = s;
     return true;
@@ -448,6 +457,8 @@ bool SaveSettings(const Settings& s, const std::string& path) {
       << "  \"textureFilter\": " << static_cast<int>(s.textureFilter) << ",\n"
       << "  \"anisotropy\": " << s.anisotropy << ",\n"
       << "  \"postScanlines\": " << (s.postScanlines ? "true" : "false") << ",\n"
+      << "  \"showRoomTransitions\": " << (s.showRoomTransitions ? "true" : "false") << ",\n"
+      << "  \"showScreenFlashes\": " << (s.showScreenFlashes ? "true" : "false") << ",\n"
       << "  \"vsync\": " << static_cast<int>(s.vsync) << ",\n"
       << "  \"swapBuffers\": " << s.swapBuffers << ",\n"
       << "  \"presentationFpsLimit\": " << s.presentationFpsLimit << ",\n"
@@ -490,7 +501,14 @@ bool SaveSettings(const Settings& s, const std::string& path) {
       << "  \"launchDirectly\": " << (s.launchDirectly ? "true" : "false") << ",\n"
       << "  \"showFps\": " << (s.showFps ? "true" : "false") << ",\n"
       << "  \"showFrameGraph\": " << (s.showFrameGraph ? "true" : "false") << ",\n"
-      << "  \"showNetStats\": " << (s.showNetStats ? "true" : "false") << "\n"
+      << "  \"showNetStats\": " << (s.showNetStats ? "true" : "false") << ",\n"
+      << "  \"netShowPing\": " << (s.netShowPing?"true":"false") << ",\n"
+      << "  \"netShowDelay\": " << (s.netShowDelay?"true":"false") << ",\n"
+      << "  \"netShowTransport\": " << (s.netShowTransport?"true":"false") << ",\n"
+      << "  \"netShowSync\": " << (s.netShowSync?"true":"false") << ",\n"
+      << "  \"netHudCorner\": " << s.netHudCorner << ",\n"
+      << "  \"netHudScale\": " << s.netHudScale << ",\n"
+      << "  \"netHudOpacity\": " << s.netHudOpacity << "\n"
       << "}\n";
 
     const std::string text = o.str();

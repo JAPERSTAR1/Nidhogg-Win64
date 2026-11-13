@@ -11,6 +11,7 @@
 #include <windowsx.h>
 #include <d3d11.h>
 #include <d3dcompiler.h>
+#include <wincodec.h>
 #include <xinput.h>
 #include <wrl/client.h>
 
@@ -175,11 +176,11 @@ constexpr Color Rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255) {
     return {r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f};
 }
 
-constexpr Color kColPanelBg    = Rgba(16, 18, 26, 238);
-constexpr Color kColHeaderBg   = Rgba(25, 28, 40, 255);
-constexpr Color kColRowIdle    = Rgba(28, 32, 46, 220);
-constexpr Color kColRowHover   = Rgba(46, 52, 74, 245);
-constexpr Color kColRowFocus   = Rgba(66, 58, 26, 245);
+constexpr Color kColPanelBg    = Rgba(15, 27, 43, 248);
+constexpr Color kColHeaderBg   = Rgba(15, 27, 43, 255);
+constexpr Color kColRowIdle    = Rgba(15, 27, 43, 0);
+constexpr Color kColRowHover   = Rgba(59, 82, 110, 160);
+constexpr Color kColRowFocus   = Rgba(59, 82, 110, 220);
 constexpr Color kColGold       = Rgba(248, 206, 52, 255);
 constexpr Color kColGoldDim    = Rgba(185, 150, 38, 255);
 constexpr Color kColText       = Rgba(240, 242, 248, 255);
@@ -219,6 +220,15 @@ struct OverlayState {
 
     // UI state
     bool open = false;
+    bool loadingMatch=false;
+    double lastRoomRefresh=0;
+    bool pauseGame=false;
+    bool fromMultiplayer=false;
+    bool mainMenuReady=false;
+    int mainMenuRow=2;
+    uint64_t localRouteStart=0;
+    int localRouteRow=2;
+    bool localRouteNeedsReady=false,ignoreButtonsUntilRelease=false;
     bool checkedStartupFlags = false;
     int tab = 0;           // 0..5
     int selectedRow = 0;
@@ -255,7 +265,8 @@ struct OverlayState {
 
     // Frame timing diagnostics
     uint64_t lastPresentUsec = 0;
-    uint64_t lastSimUsec = 0;
+    uint64_t fpsWindowUsec=0;
+    uint32_t windowPresents=0,windowSimulations=0;
     double smoothPresFps = 60.0;
     double smoothSimHz = 60.0;
     std::array<float, 120> frameTimesMs{};
@@ -279,11 +290,15 @@ double NowSec() {
     return static_cast<double>(now.QuadPart - start.QuadPart) / static_cast<double>(freq.QuadPart);
 }
 
-// Atlas layout: 128x64 texels.
+// Atlas layout: 256x128 texels, 16x16 cells.
 // Cell (0,0) [0..7, 0..7] is solid white (used for solid rectangles).
 // Glyphs 0..94 occupy 16 columns x 6 rows starting at cell index 1.
+struct Glyph {int width=8,height=8,advance=8,offset=0;};
+Glyph g_glyphs[95];
+constexpr float kAtlasWidth=2048,kAtlasHeight=1024;
+bool g_menuArt=false,g_logoArt=false;
 void BuildFontAtlas(ID3D11Device* dev) {
-    constexpr uint32_t W = 128, H = 64;
+    constexpr uint32_t W = 2048, H = 1024;
     std::vector<uint32_t> px(W * H, 0u);
 
     // Solid white block at cell 0 (top-left 8x8)
@@ -293,8 +308,8 @@ void BuildFontAtlas(ID3D11Device* dev) {
 
     for (int gi = 0; gi < 95; ++gi) {
         const int cell = gi + 1;
-        const int cx = (cell % 16) * 8;
-        const int cy = (cell / 16) * 8;
+        const int cx = (cell % 16) * 16;
+        const int cy = (cell / 16) * 16;
         for (int r = 0; r < 8; ++r) {
             const uint8_t bits = kFont8x8[gi][r];
             for (int c = 0; c < 8; ++c) {
@@ -303,6 +318,61 @@ void BuildFontAtlas(ID3D11Device* dev) {
                 }
             }
         }
+    }
+
+    // Reuse the user's original menu font, including its spacing. No game
+    // artwork is embedded in the port or copied into distributions.
+    const std::string fontRoot=core::CurrentSettings().assetPath+"/Data/fonts/fMenu";
+    ComPtr<IWICImagingFactory> wic;ComPtr<IWICBitmapDecoder> decoder;
+    ComPtr<IWICBitmapFrameDecode> frame;ComPtr<IWICFormatConverter> converter;
+    if(SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&wic))) &&
+       SUCCEEDED(wic->CreateDecoderFromFilename(core::Utf8ToWide(fontRoot+".png").c_str(),nullptr,GENERIC_READ,WICDecodeMetadataCacheOnLoad,&decoder)) &&
+       SUCCEEDED(decoder->GetFrame(0,&frame)) && SUCCEEDED(wic->CreateFormatConverter(&converter)) &&
+       SUCCEEDED(converter->Initialize(frame.Get(),GUID_WICPixelFormat32bppRGBA,WICBitmapDitherTypeNone,nullptr,0,WICBitmapPaletteTypeCustom))) {
+        UINT fw=0,fh=0;converter->GetSize(&fw,&fh);
+        if(fw && fh && fw<=1024 && fh<=1024) {
+            std::vector<uint32_t> original(static_cast<size_t>(fw)*fh);
+            if(SUCCEEDED(converter->CopyPixels(nullptr,fw*4,fw*fh*4,reinterpret_cast<BYTE*>(original.data())))) {
+                FILE* csv=core::FopenUtf8(fontRoot+".csv","rb");
+                if(csv) {
+                    char line[256];std::fgets(line,sizeof(line),csv);
+                    while(std::fgets(line,sizeof(line),csv)) {
+                        int ch,x,y,w,h,advance,offset;
+                        if(sscanf_s(line,"%d,%d,%d,%d,%d,%d,%d",&ch,&x,&y,&w,&h,&advance,&offset)!=7 ||
+                           ch<32 || ch>126 || w<0 || w>16 || h<0 || h>16 || x<0 || y<0 || x+w>static_cast<int>(fw) || y+h>static_cast<int>(fh)) continue;
+                        const int cell=ch-31,cx=cell%16*16,cy=cell/16*16;
+                        for(int r=0;r<16;++r) for(int c=0;c<16;++c) px[(cy+r)*W+cx+c]=0;
+                        const int top=std::min(5,h);
+                        for(int r=top;r<h;++r) for(int c=0;c<w;++c) px[(cy+r-top)*W+cx+c]=original[(y+r)*fw+x+c];
+                        g_glyphs[ch-32]={w,h-top,advance,offset};
+                    }
+                    std::fclose(csv);
+                }
+            }
+        }
+    }
+
+    auto crop=[&](const char* name,UINT sx,UINT sy,UINT sw,UINT sh,UINT dx,UINT dy) {
+        ComPtr<IWICImagingFactory> factory;ComPtr<IWICBitmapDecoder> source;
+        ComPtr<IWICBitmapFrameDecode> bitmap;ComPtr<IWICFormatConverter> rgba;
+        const auto path=core::Utf8ToWide(core::CurrentSettings().assetPath+"/Data/"+name);
+        if(FAILED(CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&factory))) ||
+           FAILED(factory->CreateDecoderFromFilename(path.c_str(),nullptr,GENERIC_READ,WICDecodeMetadataCacheOnLoad,&source)) ||
+           FAILED(source->GetFrame(0,&bitmap)) || FAILED(factory->CreateFormatConverter(&rgba)) ||
+           FAILED(rgba->Initialize(bitmap.Get(),GUID_WICPixelFormat32bppRGBA,WICBitmapDitherTypeNone,nullptr,0,WICBitmapPaletteTypeCustom))) return false;
+        UINT width=0,height=0;rgba->GetSize(&width,&height);
+        if(sx+sw>width || sy+sh>height || dx+sw>W || dy+sh>H || width>4096 || height>4096) return false;
+        std::vector<uint32_t> data(size_t(width)*height);
+        if(FAILED(rgba->CopyPixels(nullptr,width*4,UINT(data.size()*4),reinterpret_cast<BYTE*>(data.data())))) return false;
+        for(UINT y=0;y<sh;++y) std::copy_n(data.data()+(sy+y)*width+sx,sw,px.data()+(dy+y)*W+dx);
+        return true;
+    };
+    g_menuArt=crop("background/0.png",600,0,320,192,256,0);
+    g_logoArt=crop("atlas/0.png",56,540,159,39,576,0);
+    if(g_logoArt) for(UINT y=0;y<39;++y) for(UINT x=576;x<735;++x) {
+        auto& pixel=px[y*W+x];
+        const unsigned brightness=(pixel&255)+((pixel>>8)&255)+((pixel>>16)&255);
+        pixel=brightness>100?(pixel&0xff000000u):0;
     }
 
     D3D11_TEXTURE2D_DESC td{};
@@ -333,8 +403,8 @@ void PushQuad(float x, float y, float w, float h, float u0, float v0, float u1, 
 }
 
 void DrawRect(float x, float y, float w, float h, Color c) {
-    const float u = 2.0f / 128.0f;
-    const float v = 2.0f / 64.0f;
+    const float u = 2.0f / kAtlasWidth;
+    const float v = 2.0f / kAtlasHeight;
     PushQuad(x, y, w, h, u, v, u, v, c);
 }
 
@@ -346,7 +416,7 @@ void DrawOutline(float x, float y, float w, float h, float thick, Color c) {
 }
 
 void DrawTextUi(float x, float y, float scale, Color c, const std::string& text) {
-    const float glyphW = 8.0f * scale;
+    scale*=2.0f;
     const float glyphH = 8.0f * scale;
     float cx = x;
     for (unsigned char ch : text) {
@@ -357,17 +427,45 @@ void DrawTextUi(float x, float y, float scale, Color c, const std::string& text)
         }
         if (ch < 32 || ch > 126) ch = '?';
         const int cell = (ch - 32) + 1;
-        const float u0 = ((cell % 16) * 8) / 128.0f;
-        const float v0 = ((cell / 16) * 8) / 64.0f;
-        const float u1 = u0 + 8.0f / 128.0f;
-        const float v1 = v0 + 8.0f / 64.0f;
-        PushQuad(cx, y, glyphW, glyphH, u0, v0, u1, v1, c);
-        cx += glyphW;
+        const auto& glyph=g_glyphs[ch-32];
+        const float u0 = ((cell % 16) * 16) / kAtlasWidth;
+        const float v0 = ((cell / 16) * 16) / kAtlasHeight;
+        PushQuad(cx+glyph.offset*scale,y,glyph.width*scale,glyph.height*scale,
+                 u0,v0,u0+glyph.width/kAtlasWidth,v0+glyph.height/kAtlasHeight,c);
+        cx += glyph.advance*scale;
     }
 }
 
 float MeasureTextWidth(float scale, const std::string& text) {
-    return static_cast<float>(text.size()) * 8.0f * scale;
+    float width=0;for(unsigned char ch:text) width+=g_glyphs[ch>=32 && ch<=126?ch-32:'?'-32].advance*scale;
+    return width*2;
+}
+
+void DrawMenuScene(float W,float H,float S) {
+    const double time=NowSec();
+    DrawRect(0,0,W,H,Rgba(27,54,96));
+    if(g_menuArt) {
+        const float tw=640*S,th=384*S,drift=float(std::fmod(time*8,tw));
+        for(float y=-th;y<H;y+=th) for(float x=-tw+drift;x<W;x+=tw)
+            PushQuad(x,y,tw,th,256/kAtlasWidth,0,576/kAtlasWidth,192/kAtlasHeight,Rgba(140,172,226,18));
+    }
+    const float floor=H-22*S;
+    DrawRect(0,floor,W,H-floor,Rgba(171,144,18));
+    for(int i=0;i<int(W/(3*S))+1;++i) {
+        unsigned hash=unsigned(i)*1664525u+1013904223u;hash^=hash>>13;
+        const float h=(3+hash%14)*S;
+        DrawRect(i*3*S,floor-h,3*S,h,Rgba(171,144,18));
+    }
+    const float lw=410*S,lh=100*S,lx=(W-lw)/2,ly=17*S;
+    DrawRect(lx,ly+5*S,lw,lh-10*S,Rgba(255,210,12));
+    for(int i=0;i<52;++i) {
+        const float rough=(2+(i*19)%7)*S,x=lx+i*lw/52;
+        DrawRect(x,ly+5*S-rough,lw/52,rough,Rgba(255,210,12));
+        DrawRect(x,ly+lh-5*S,lw/52,rough,Rgba(255,185,12));
+    }
+    if(g_logoArt) PushQuad(lx+8*S,ly+3*S,lw-16*S,lh-6*S,
+        576/kAtlasWidth,0,735/kAtlasWidth,39/kAtlasHeight,Rgba(0,0,0));
+    else DrawTextUi(lx+70*S,ly+32*S,S*3,Rgba(0,0,0),"NIDHOGG");
 }
 
 void RefreshHardwareLists() {
@@ -456,10 +554,54 @@ const char* StageName(int idx) {
 
 #include "online_actions.inc"
 
+void BackFromMenu() {
+    g_ui.editingText=EditTarget::None;
+    if(g_ui.tab==4 && g_ui.fromMultiplayer && g_ui.onlinePage!=OnlineSubPage::Home) {
+        g_ui.onlinePage=OnlineSubPage::Home;g_ui.selectedRow=0;
+    } else if(g_ui.tab==4 && g_ui.fromMultiplayer && net::GetSnapshot().phase==net::SessionPhase::Offline) {
+        g_ui.tab=6;g_ui.selectedRow=1;
+    } else {g_ui.open=false;g_ui.pauseGame=false;g_ui.fromMultiplayer=false;g_ui.ignoreButtonsUntilRelease=true;}
+}
+
 void AdjustSettingRow(void* hwnd, int tab, int row, int dir, bool activated) {
     auto& cfg = core::CurrentSettings();
+    if(tab==6 && row==0 && activated) {
+        if(g_ui.pauseGame) {g_ui.open=false;g_ui.pauseGame=false;g_ui.fromMultiplayer=false;g_ui.ignoreButtonsUntilRelease=true;return;}
+        g_ui.open=false;g_ui.localRouteStart=std::max<uint64_t>(1,ps4::SubmittedFrames());
+        g_ui.localRouteRow=g_ui.mainMenuRow;g_ui.localRouteNeedsReady=!g_ui.mainMenuReady;return;
+    }
     if (g_onlineTask.valid()) return;
     bool save = false;
+    if(tab==6) {
+        if(!activated) {
+            if(dir>0 && row<6 && !g_ui.publicRooms.empty()) g_ui.selectedRow=6;
+            if(dir<0 && row>=6) g_ui.selectedRow=0;
+            return;
+        }
+        if(row==1 || row==2) {
+            const int stage=g_ui.createStageIndex;g_ui.tab=4;g_ui.onlinePage=OnlineSubPage::Home;g_ui.selectedRow=0;
+            QueueSimple([stage,pub=row==1](std::string& error){return net::CreateRoom("",pub,stage,error);});
+        }
+        if(row==3) {g_ui.tab=4;g_ui.onlinePage=OnlineSubPage::JoinCode;g_ui.editingText=EditTarget::RoomCode;g_ui.selectedRow=0;}
+        if(row==4) RefreshRoomsAsync();
+        if(row==5) BackFromMenu();
+        if(row>=6 && size_t(row-6)<g_ui.publicRooms.size()) {
+            const auto id=g_ui.publicRooms[row-6].roomId;g_ui.tab=4;g_ui.onlinePage=OnlineSubPage::Home;
+            QueueSimple([id](std::string& error){return net::JoinRoomById(id,error);});
+        }
+        return;
+    }
+    if(tab==7 && activated) {
+        if(row==0) {g_ui.open=false;g_ui.pauseGame=false;}
+        if(row==1) {g_ui.tab=0;g_ui.selectedRow=0;}
+        if(row==2) {
+            g_ui.fromMultiplayer=true;g_ui.onlinePage=OnlineSubPage::Home;g_ui.selectedRow=0;
+            g_ui.tab=net::GetSnapshot().roomId.empty()?6:4;
+            if(g_ui.tab==6) {RefreshRoomsAsync();g_ui.lastRoomRefresh=NowSec();}
+        }
+        if(row==3) ps4::RequestQuit();
+        return;
+    }
 
     if (tab == 0) {  // Graphics
         switch (row) {
@@ -521,6 +663,8 @@ void AdjustSettingRow(void* hwnd, int tab, int row, int dir, bool activated) {
                 save = true;
                 break;
             }
+            case 8: cfg.showRoomTransitions=!cfg.showRoomTransitions;save=true;break;
+            case 9: cfg.showScreenFlashes=!cfg.showScreenFlashes;save=true;break;
         }
     } else if (tab == 1) {  // Display
         if (g_ui.monitors.empty()) RefreshHardwareLists();
@@ -610,22 +754,29 @@ void AdjustSettingRow(void* hwnd, int tab, int row, int dir, bool activated) {
         HandleOnlineAction(row, dir, activated, save);
     } else if (tab == 5) {  // General
         switch (row) {
-            case 0: break;  // Language (English only)
-            case 1: cfg.showFps = !cfg.showFps; save = true; break;
-            case 2: cfg.showFrameGraph = !cfg.showFrameGraph; save = true; break;
-            case 3: cfg.showNetStats = !cfg.showNetStats; save = true; break;
-            case 4: cfg.launchDirectly = !cfg.launchDirectly; save = true; break;
-            case 5:
+            case 0: cfg.showNetStats=!cfg.showNetStats;save=true;break;
+            case 1: cfg.netShowPing=!cfg.netShowPing;save=true;break;
+            case 2: cfg.netShowDelay=!cfg.netShowDelay;save=true;break;
+            case 3: cfg.netShowTransport=!cfg.netShowTransport;save=true;break;
+            case 4: cfg.netShowSync=!cfg.netShowSync;save=true;break;
+            case 5: cfg.netHudCorner=(cfg.netHudCorner+(dir?dir:1)+4)%4;save=true;break;
+            case 6: cfg.netHudScale=std::clamp(cfg.netHudScale+dir*25,75,150);save=true;break;
+            case 7: cfg.netHudOpacity=std::clamp(cfg.netHudOpacity+dir*15,0,90);save=true;break;
+            case 8: cfg.showFps = !cfg.showFps; save = true; break;
+            case 9: cfg.showFrameGraph = !cfg.showFrameGraph; save = true; break;
+            case 10: break;  // Language (English only)
+            case 11: cfg.launchDirectly = !cfg.launchDirectly; save = true; break;
+            case 12:
                 if (activated) {
                     core::ResetSettingsToDefaults();
                     RefreshHardwareLists();
                     gnm::ApplyDisplaySettings(hwnd);
                 }
                 break;
-            case 6:
+            case 13:
                 if (activated) g_ui.open = false;
                 break;
-            case 7:
+            case 14:
                 if (activated) ps4::RequestQuit();
                 break;
         }
@@ -634,10 +785,21 @@ void AdjustSettingRow(void* hwnd, int tab, int row, int dir, bool activated) {
     if (save) core::SaveSettings(cfg);
 }
 
+WORD MenuControllerButtons(const XINPUT_GAMEPAD& pad) {
+    WORD buttons=pad.wButtons;
+    if(pad.sThumbLY>16000) buttons|=XINPUT_GAMEPAD_DPAD_UP;
+    if(pad.sThumbLY<-16000) buttons|=XINPUT_GAMEPAD_DPAD_DOWN;
+    if(pad.sThumbLX>16000) buttons|=XINPUT_GAMEPAD_DPAD_RIGHT;
+    if(pad.sThumbLX<-16000) buttons|=XINPUT_GAMEPAD_DPAD_LEFT;
+    return buttons;
+}
 void PollControllerForOverlay(void* hwnd) {
+    static const bool qa=GetEnvironmentVariableA("NIDHOGG_QA_UNFOCUSED",nullptr,0)!=0;
+    if(qa) return;
     XINPUT_STATE xi{};
-    if (XInputGetState(0, &xi) != ERROR_SUCCESS) return;
-    const WORD b = xi.Gamepad.wButtons;
+    const int pad=core::CurrentSettings().p1Controller;
+    if(pad<0 || XInputGetState(static_cast<DWORD>(pad), &xi) != ERROR_SUCCESS) return;
+    const WORD b = MenuControllerButtons(xi.Gamepad);
     const WORD pressed = b & ~g_ui.prevPadButtons;
     g_ui.prevPadButtons = b;
 
@@ -658,10 +820,10 @@ void PollControllerForOverlay(void* hwnd) {
         return;
     }
 
-    if (pressed & XINPUT_GAMEPAD_LEFT_SHOULDER) {
+    if (pressed & XINPUT_GAMEPAD_LEFT_SHOULDER && g_ui.tab<6 && !g_ui.fromMultiplayer) {
         g_ui.tab = (g_ui.tab + 5) % 6;
         g_ui.selectedRow = 0;
-    } else if (pressed & XINPUT_GAMEPAD_RIGHT_SHOULDER) {
+    } else if (pressed & XINPUT_GAMEPAD_RIGHT_SHOULDER && g_ui.tab<6 && !g_ui.fromMultiplayer) {
         g_ui.tab = (g_ui.tab + 1) % 6;
         g_ui.selectedRow = 0;
     } else if (pressed & XINPUT_GAMEPAD_DPAD_UP) {
@@ -675,7 +837,7 @@ void PollControllerForOverlay(void* hwnd) {
     } else if (pressed & XINPUT_GAMEPAD_A) {
         AdjustSettingRow(hwnd, g_ui.tab, g_ui.selectedRow, +1, true);
     } else if (pressed & XINPUT_GAMEPAD_B) {
-        g_ui.open = false;
+        BackFromMenu();
     }
 }
 
@@ -766,16 +928,114 @@ void OpenOverlayTab(int tabIndex) {
     g_ui.open = true;
     g_ui.tab = std::clamp(tabIndex, 0, 5);
     g_ui.selectedRow = 0;
+    if(tabIndex!=4) g_ui.fromMultiplayer=false;
+    const auto room=ps4::CurrentRoom();
+    g_ui.pauseGame=room.rfind("rCastle",0)==0 || room.rfind("rMines",0)==0 ||
+        room.rfind("rWilds",0)==0 || room.rfind("rSky",0)==0;
+    XINPUT_STATE pad{};
+    if(XInputGetState(static_cast<DWORD>(core::CurrentSettings().p1Controller),&pad)==ERROR_SUCCESS)
+        g_ui.prevPadButtons=MenuControllerButtons(pad.Gamepad);
     RefreshHardwareLists();
 }
 
 bool IsOverlayOpen() {
     return g_ui.open;
 }
+void BeginMatchTransition(){g_ui.open=false;g_ui.pauseGame=false;g_ui.fromMultiplayer=false;g_ui.loadingMatch=true;g_ui.editingText=EditTarget::None;}
+bool OwnsScreen(){
+    const auto room=ps4::CurrentRoom();
+    if(g_ui.loadingMatch && (room.rfind("rCastle",0)==0 || room.rfind("rMines",0)==0 ||
+        room.rfind("rWilds",0)==0 || room.rfind("rSky",0)==0)) g_ui.loadingMatch=false;
+    return g_ui.open || g_ui.loadingMatch;
+}
+bool PausesSimulation(){const auto phase=net::GetSnapshot().phase;return g_ui.open && g_ui.pauseGame &&
+    (phase==net::SessionPhase::Offline || phase==net::SessionPhase::LobbyWaiting);}
+void RecordSimulationFrame(){++g_ui.windowSimulations;}
+
+uint32_t FilterGameMenuInput(int player,uint32_t buttons,uint64_t frame,uint8_t& lx,uint8_t& ly) {
+    static const bool legacy=GetEnvironmentVariableA("NIDHOGG_LEGACY_MENU_TEST",nullptr,0)!=0;
+    const auto phase=net::GetSnapshot().phase;
+    if(legacy || phase==net::SessionPhase::InMatch || phase==net::SessionPhase::SyncingMenu ||
+        phase==net::SessionPhase::ConnectingTransport) return buttons;
+    if(player!=1) return g_ui.open?0:buttons;
+    static uint64_t last=UINT64_MAX;static uint32_t previous=0,output=0;
+    static std::string room;
+    const auto current=ps4::CurrentRoom();
+    if(current=="rMainMenu" && !g_ui.open) {
+        if(ly<64) buttons|=0x10;if(ly>192) buttons|=0x40;
+        lx=ly=128;
+    }
+    if(frame==last) return output;
+    last=frame;
+    if(current!=room) {
+        room=current;g_ui.mainMenuReady=false;g_ui.mainMenuRow=2;
+        if(g_ui.localRouteStart && room=="rMainMenu") {
+            g_ui.localRouteStart=frame;g_ui.localRouteRow=2;g_ui.localRouteNeedsReady=true;
+        }
+        if(room=="rLevelSelect") g_ui.localRouteStart=0;
+    }
+    const uint32_t pressed=buttons&~previous;previous=buttons;output=buttons;
+    if(room=="rMainMenu") output=(buttons&~0x50u)|(pressed&0x50u);
+    if(g_ui.open) {
+        // Also feed the deterministic QA pad script through the real menu path.
+        // Physical keyboard/controller events are handled by the window layer.
+        if(g_ui.confirmDisplayPending) {
+            if(pressed&0x4000) g_ui.confirmDisplayPending=false;
+            if(pressed&0x2000) RevertDisplayChanges(ps4::GameWindow());
+            return output=0;
+        }
+        if(g_ui.tab<6 && !g_ui.fromMultiplayer && (pressed&(0x400|0x800))) {
+            g_ui.tab=(g_ui.tab+((pressed&0x400)?5:1))%6;g_ui.selectedRow=0;
+        }
+        if(pressed&0x10) g_ui.selectedRow=(g_ui.selectedRow+g_ui.rowCount-1)%std::max(1,g_ui.rowCount);
+        if(pressed&0x40) g_ui.selectedRow=(g_ui.selectedRow+1)%std::max(1,g_ui.rowCount);
+        if(pressed&0x4000) AdjustSettingRow(ps4::GameWindow(),g_ui.tab,g_ui.selectedRow,1,true);
+        if(pressed&0x2000) BackFromMenu();
+        if(pressed&0x80) AdjustSettingRow(ps4::GameWindow(),g_ui.tab,g_ui.selectedRow,-1,false);
+        if(pressed&0x20) AdjustSettingRow(ps4::GameWindow(),g_ui.tab,g_ui.selectedRow,1,false);
+        return output=0;
+    }
+    if(g_ui.ignoreButtonsUntilRelease) {
+        if(!buttons) g_ui.ignoreButtonsUntilRelease=false;
+        return output=0;
+    }
+    if(g_ui.localRouteStart && room!="rMainMenu") return output=frame%50<8?0x4000:0;
+    if(room=="rMainMenu") {
+        if(g_ui.localRouteStart) {
+            const auto elapsed=frame-g_ui.localRouteStart;
+            const int upward=(g_ui.localRouteRow-2+6)%6;
+            const int moves=std::min(upward,6-upward);
+            const uint64_t offset=g_ui.localRouteNeedsReady?50:0;
+            const uint64_t confirm=4+offset+moves*30;
+            output=0;
+            if(g_ui.localRouteNeedsReady && elapsed>=4 && elapsed<10) output=0x4000;
+            for(int i=0;i<moves;++i) if(elapsed>=4+offset+i*30 && elapsed<10+offset+i*30) output=upward<=3?0x10:0x40;
+            if((elapsed>=confirm && elapsed<confirm+6)||(elapsed>=confirm+50 && elapsed<confirm+56)) output=0x4000;
+            if(elapsed>=confirm+61) g_ui.localRouteStart=0;
+            return output;
+        }
+        if(!g_ui.mainMenuReady) {if(pressed&0x4000) g_ui.mainMenuReady=true;return output;}
+        if(pressed&0x10) g_ui.mainMenuRow=(g_ui.mainMenuRow+5)%6;
+        if(pressed&0x40) g_ui.mainMenuRow=(g_ui.mainMenuRow+1)%6;
+        if(pressed&0x4000) {
+            if(g_ui.mainMenuRow==4) {g_ui.fromMultiplayer=false;OpenOverlayTab(0);return output=0;}
+            if(g_ui.mainMenuRow==2) {
+                OpenOverlayTab(4);g_ui.fromMultiplayer=true;
+                if(net::GetSnapshot().roomId.empty()) {g_ui.tab=6;g_ui.rowCount=6;RefreshRoomsAsync();g_ui.lastRoomRefresh=NowSec();}
+                return output=0;
+            }
+        }
+    } else if((pressed&8) && room!="rLogos" && !room.empty()) {
+        OpenOverlayTab(0);g_ui.tab=7;g_ui.rowCount=4;g_ui.pauseGame=true;return output=0;
+    }
+    return output;
+}
 
 bool OnWindowMessage(void* hwnd, uint32_t msg, uint64_t wp, int64_t lp) {
     if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) {
         const int vk = static_cast<int>(wp);
+        if((lp&(1LL<<30)) && (vk==VK_F1 || vk==VK_F10 || vk==VK_F3 ||
+            (g_ui.open && (vk==VK_RETURN || vk==VK_SPACE)))) return true;
 
         // Keybinding capture mode
         if (g_ui.open && g_ui.capturingBindId >= 0) {
@@ -803,13 +1063,15 @@ bool OnWindowMessage(void* hwnd, uint32_t msg, uint64_t wp, int64_t lp) {
         }
 
         if (vk == VK_F1 || vk == VK_F10) {
-            g_ui.open = !g_ui.open;
+            if(g_ui.open) {g_ui.open=false;g_ui.pauseGame=false;}
+            else OpenOverlayTab(g_ui.tab<6?g_ui.tab:0);
             g_ui.editingText = EditTarget::None;
             g_ui.capturingBindId = -1;
             if (g_ui.open) RefreshHardwareLists();
             return true;
         }
 
+        if(vk==VK_F3) {auto& cfg=core::CurrentSettings();cfg.showNetStats=!cfg.showNetStats;core::SaveSettings(cfg);return true;}
         if (!g_ui.open) return false;
 
         if (g_ui.confirmDisplayPending) {
@@ -847,15 +1109,11 @@ bool OnWindowMessage(void* hwnd, uint32_t msg, uint64_t wp, int64_t lp) {
         }
 
         if (vk == VK_ESCAPE) {
-            if (g_ui.tab == 4 && g_ui.onlinePage != OnlineSubPage::Home) {
-                g_ui.onlinePage = OnlineSubPage::Home;
-                g_ui.selectedRow = 0;
-            } else {
-                g_ui.open = false;
-            }
+            BackFromMenu();
             return true;
         }
         if (vk == VK_TAB) {
+            if(g_ui.tab>=6 || g_ui.fromMultiplayer) return true;
             const int delta = (GetKeyState(VK_SHIFT) & 0x8000) ? 5 : 1;
             g_ui.tab = (g_ui.tab + delta) % 6;
             g_ui.selectedRow = 0;
@@ -934,7 +1192,7 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
         char* v = nullptr;
         size_t len = 0;
         if (_dupenv_s(&v, &len, "NIDHOGG_OPEN_ONLINE") == 0 && v && *v == '1') {
-            OpenOverlayTab(4);
+            OpenOverlayTab(4);g_ui.tab=6;g_ui.fromMultiplayer=true;RefreshRoomsAsync();g_ui.lastRoomRefresh=NowSec();
         }
         if (v) { std::free(v); v = nullptr; }
         if (_dupenv_s(&v, &len, "NIDHOGG_OPEN_SETTINGS") == 0 && v && *v == '1') {
@@ -945,6 +1203,9 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
 
     PollOnlineAction();
     net::TickNetplayLobby();
+    if(g_ui.open && g_ui.tab==6 && !g_onlineTask.valid() && NowSec()-g_ui.lastRoomRefresh>4) {
+        g_ui.lastRoomRefresh=NowSec();RefreshRoomsAsync();
+    }
     PollControllerForOverlay(hwnd);
 
     // Check 15s display revert timeout
@@ -960,32 +1221,30 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
     const uint64_t nowUsec = static_cast<uint64_t>(qpcNow.QuadPart * 1000000ULL / s_qpcFreq.QuadPart);
     if (g_ui.lastPresentUsec != 0 && nowUsec > g_ui.lastPresentUsec) {
         const float dtMs = static_cast<float>(nowUsec - g_ui.lastPresentUsec) / 1000.0f;
-        const double instFps = 1000.0 / std::max(0.1f, dtMs);
-        g_ui.smoothPresFps = g_ui.smoothPresFps * 0.90 + instFps * 0.10;
         g_ui.frameTimesMs[g_ui.frameTimeCursor] = dtMs;
         g_ui.frameTimeCursor = (g_ui.frameTimeCursor + 1) % g_ui.frameTimesMs.size();
     }
     g_ui.lastPresentUsec = nowUsec;
 
-    if (isNewSimFrame) {
-        if (g_ui.lastSimUsec != 0 && nowUsec > g_ui.lastSimUsec) {
-            const double dtSimMs = static_cast<double>(nowUsec - g_ui.lastSimUsec) / 1000.0;
-            const double instSimHz = 1000.0 / std::max(0.5, dtSimMs);
-            g_ui.smoothSimHz = g_ui.smoothSimHz * 0.90 + instSimHz * 0.10;
-        }
-        g_ui.lastSimUsec = nowUsec;
+    if(!g_ui.fpsWindowUsec) g_ui.fpsWindowUsec=nowUsec;
+    ++g_ui.windowPresents;
+    if(nowUsec-g_ui.fpsWindowUsec>=500000) {
+        const double seconds=(nowUsec-g_ui.fpsWindowUsec)/1000000.0;
+        g_ui.smoothPresFps=g_ui.windowPresents/seconds;
+        g_ui.smoothSimHz=g_ui.windowSimulations/seconds;
+        g_ui.windowPresents=g_ui.windowSimulations=0;g_ui.fpsWindowUsec=nowUsec;
     }
 
     g_ui.verts.clear();
     const float W = static_cast<float>(targetWidth);
     const float H = static_cast<float>(targetHeight);
-    const float S = std::clamp(std::floor(H / 500.0f + 0.4f), 1.0f, 5.0f);
+    const float S = std::clamp(std::min(W/960.0f,H/680.0f),0.65f,3.0f);
     const auto& cfg = core::CurrentSettings();
     const auto netSnap = net::GetSnapshot();
 
     // ---- 1. Diagnostics HUD (FPS / Frame-Time Graph / Netplay Status) ----
     float hudY = 12.0f * S;
-    if (cfg.showFps) {
+    if (cfg.showFps && !OwnsScreen()) {
         char fpsBuf[128];
         const uint32_t intW = static_cast<uint32_t>(1920.0f * cfg.renderScale + 0.5f);
         const uint32_t intH = static_cast<uint32_t>(1080.0f * cfg.renderScale + 0.5f);
@@ -999,7 +1258,7 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
         hudY += bh + 6.0f * S;
     }
 
-    if (cfg.showFrameGraph) {
+    if (cfg.showFrameGraph && !OwnsScreen()) {
         const float gw = 124.0f * 2.0f * S;
         const float gh = 44.0f * S;
         DrawRect(12.0f * S, hudY, gw, gh, Rgba(12, 14, 20, 200));
@@ -1018,65 +1277,74 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
         hudY += gh + 6.0f * S;
     }
 
-    if (cfg.showNetStats && netSnap.phase != net::SessionPhase::Offline) {
-        char netBuf[192];
-        const char* tmode =
-            (netSnap.transport == net::TransportMode::DirectP2P) ? "P2P-AES" :
-            (netSnap.transport == net::TransportMode::UdpRelay) ? "UDP-RELAY" :
-            (netSnap.transport == net::TransportMode::RelayFallback) ? "RELAY-AES" : "NEGOTIATING";
-        const char* syncTxt = netSnap.desyncDetected ? "DESYNC!" : "SYNC OK";
-        std::snprintf(netBuf, sizeof(netBuf), "ONLINE [%s] P%d | RTT %.1fms | D:%df | %s #%llu",
-                      tmode, netSnap.localPlayerNum, netSnap.rttMs, netSnap.inputDelayFrames,
-                      syncTxt, static_cast<unsigned long long>(netSnap.matchFrame));
-        const float bw = MeasureTextWidth(S, netBuf) + 16.0f * S;
-        const float bh = 16.0f * S;
-        const Color col = netSnap.desyncDetected ? kColRed : kColGreen;
-        DrawRect(W - bw - 12.0f * S, 12.0f * S, bw, bh, Rgba(12, 14, 20, 215));
-        DrawOutline(W - bw - 12.0f * S, 12.0f * S, bw, bh, 1.0f * S, col);
-        DrawTextUi(W - bw - 4.0f * S, 16.0f * S, S, col, netBuf);
+    if (cfg.showNetStats && !OwnsScreen() && netSnap.phase != net::SessionPhase::Offline) {
+        std::string text;
+        auto add=[&](const std::string& value){if(!text.empty()) text+="   ";text+=value;};
+        char value[64];
+        if(cfg.netShowPing) {std::snprintf(value,sizeof(value),"PING %.0f ms",netSnap.rttMs);add(value);}
+        if(cfg.netShowDelay) {std::snprintf(value,sizeof(value),"DELAY %df",netSnap.inputDelayFrames);add(value);}
+        if(cfg.netShowTransport) add(netSnap.transport==net::TransportMode::DirectP2P?"DIRECT":"RELAY");
+        if(cfg.netShowSync) add(netSnap.desyncDetected?"OUT OF SYNC":"SYNC OK");
+        if(!text.empty()) {
+            const float hs=std::clamp(S,1.0f,2.0f)*cfg.netHudScale/100.0f;
+            const float width=MeasureTextWidth(hs,text)+16*hs,height=20*hs,margin=12*hs;
+            const float x=(cfg.netHudCorner&1)?W-width-margin:margin;
+            const float y=(cfg.netHudCorner>=2)?H-height-margin:margin;
+            DrawRect(x,y,width,height,Rgba(8,10,15,static_cast<uint8_t>(cfg.netHudOpacity*255/100)));
+            DrawTextUi(x+8*hs,y+6*hs,hs,netSnap.desyncDetected?kColRed:Rgba(222,225,232),text);
+        }
     }
 
-    // ---- 2. Full Settings & Online Overlay (F1) ----
-    if (g_ui.open) {
-        DrawRect(0, 0, W, H, Rgba(6, 8, 14, 175));
+    if(g_ui.loadingMatch && !g_ui.open) {
+        DrawMenuScene(W,H,S);
+        const std::string title="STARTING MATCH";
+        DrawTextUi((W-MeasureTextWidth(S*1.5f,title))/2,H*.40f,S*1.5f,kColText,title);
+        const auto status=netSnap.statusText.empty()?std::string("Connecting players..."):netSnap.statusText;
+        DrawTextUi((W-MeasureTextWidth(S,status))/2,H*.52f,S,kColMuted,status);
+    }
 
-        const float pw = std::min(W - 40.0f * S, 460.0f * S);
-        const float ph = std::min(H - 36.0f * S, 360.0f * S);
+    // Full frontend screen. The compositor omits the guest image while this
+    // screen owns the viewport; no gameplay or floating panel sits behind it.
+    if (g_ui.open) {
+        if(g_ui.fromMultiplayer && g_ui.tab==4 && g_ui.onlinePage==OnlineSubPage::Home && netSnap.roomId.empty()) g_ui.tab=6;
+        if(g_ui.tab==6 && !netSnap.roomId.empty()) g_ui.tab=4;
+        DrawMenuScene(W,H,S);
+
+        const float pw = std::min(W - 64.0f * S, 1040.0f * S);
+        const float ph = H;
         const float px = std::floor((W - pw) * 0.5f);
         const float py = std::floor((H - ph) * 0.5f);
 
-        DrawRect(px, py, pw, ph, kColPanelBg);
-        DrawOutline(px, py, pw, ph, 2.0f * S, kColGold);
 
         // Title header
-        DrawRect(px + 2.0f * S, py + 2.0f * S, pw - 4.0f * S, 24.0f * S, kColHeaderBg);
-        DrawTextUi(px + 12.0f * S, py + 9.0f * S, S, kColGold,
-                   "NIDHOGG  //  PC SETTINGS & ONLINE MULTIPLAYER");
-        const std::string closeHint = "[F1 / ESC]";
-        DrawTextUi(px + pw - MeasureTextWidth(S, closeHint) - 12.0f * S, py + 9.0f * S,
+        const std::string heading=(g_ui.tab==4 && (g_ui.fromMultiplayer || !netSnap.roomId.empty())) || g_ui.tab==6?"MULTIPLAYER":g_ui.tab==7?"PAUSED":"OPTIONS";
+        DrawTextUi((W-MeasureTextWidth(S*1.5f,heading))/2,133*S,S*1.5f,kColText,heading);
+        const std::string closeHint = "BACK  [ESC / B]";
+        DrawTextUi(px + pw - MeasureTextWidth(S, closeHint) - 24.0f * S, py + 26.0f * S,
                    S, kColMuted, closeHint);
 
         // Navigation Tabs
-        const char* tabNames[6] = {"GRAPHICS", "DISPLAY", "AUDIO", "CONTROLS", "ONLINE", "GENERAL"};
-        const float tabY = py + 30.0f * S;
-        const float tabW = (pw - 24.0f * S) / 6.0f;
-        const float tabH = 20.0f * S;
+        const char* tabNames[6] = {"GRAPHICS", "DISPLAY", "AUDIO", "CONTROLS", "ONLINE", "HUD"};
+        const float tabY = 225*S;
+        const float tabW = pw/6;
+        const float tabH = 32.0f * S;
         for (int t = 0; t < 6; ++t) {
-            const float tx = px + 12.0f * S + t * tabW;
+            if(g_ui.tab>=6 || (g_ui.tab==4 && g_ui.fromMultiplayer)) break;
+            const float tx = px+t*tabW;
+            const float ty=180*S;
             const bool hovered = (g_ui.mouseX >= tx && g_ui.mouseX < tx + tabW - 3.0f * S &&
-                                  g_ui.mouseY >= tabY && g_ui.mouseY < tabY + tabH);
+                                  g_ui.mouseY >= ty && g_ui.mouseY < ty + tabH);
             if (hovered && g_ui.mouseClicked && !g_ui.confirmDisplayPending &&
                 g_ui.capturingBindId < 0) {
                 g_ui.tab = t;
                 g_ui.selectedRow = 0;
                 g_ui.editingText = EditTarget::None;
+                if(t==4) g_ui.onlinePage=OnlineSubPage::OnlineSettings;
             }
             const bool active = (g_ui.tab == t);
-            DrawRect(tx, tabY, tabW - 3.0f * S, tabH,
-                     active ? kColGold : (hovered ? kColRowHover : kColRowIdle));
-            const Color tc = active ? Rgba(14, 16, 22, 255) : kColText;
-            const float tw = MeasureTextWidth(S, tabNames[t]);
-            DrawTextUi(tx + (tabW - 3.0f * S - tw) * 0.5f, tabY + 6.0f * S, S, tc, tabNames[t]);
+            if(active || hovered) DrawRect(tx,ty,tabW-3*S,tabH,Rgba(128,158,198,65));
+            const std::string name=t==4?"NETWORK":tabNames[t];
+            DrawTextUi(tx+(tabW-MeasureTextWidth(S,name))/2,ty+10*S,S,active?kColText:kColMuted,name);
         }
 
         // Build rows for active tab
@@ -1089,7 +1357,22 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
         std::vector<RowItem> rows;
         std::string footerNote;
 
-        if (g_ui.tab == 0) {
+        if(g_ui.tab==6) {
+            rows.push_back({g_ui.pauseGame?"RESUME LOCAL GAME":"LOCAL VERSUS",g_ui.pauseGame?"Continue this match":"Play on this PC",true});
+            rows.push_back({"HOST PUBLIC GAME","Open session",true});
+            rows.push_back({"HOST PRIVATE GAME","Invite code",true});
+            rows.push_back({"JOIN WITH CODE","Enter code",true});
+            rows.push_back({"REFRESH SESSIONS","Refresh",true});
+            rows.push_back({"BACK","Main menu",true});
+            for(const auto& room:g_ui.publicRooms) rows.push_back({room.roomName,
+                std::to_string(room.playerCount)+"/2  "+StageName(room.stageIndex),true,kColGold});
+            if(g_ui.publicRooms.empty()) rows.push_back({"NO PUBLIC GAMES","Host a session",true,kColMuted});
+            footerNote=g_ui.onlineBannerIsError || g_onlineTask.valid()?g_ui.onlineBanner:"Choose a session to join, or host a public or private game.";
+        } else if(g_ui.tab==7) {
+            rows.push_back({"RESUME","Continue",true});rows.push_back({"SETTINGS","Display, sound, controls",true});
+            rows.push_back({"ONLINE MULTIPLAYER","Rooms",true});rows.push_back({"QUIT TO DESKTOP","Exit",true,kColRed});
+            footerNote="The offline game is paused. Your settings save automatically.";
+        } else if (g_ui.tab == 0) {
             const char* qNames[] = {"Low", "Medium", "High", "Ultra", "Custom"};
             const char* fNames[] = {"Pixel Point (Original)", "Sharp Bilinear (Pixel AA)",
                                     "Bilinear Smooth", "Anisotropic"};
@@ -1110,6 +1393,8 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
             rows.push_back({"Vertical Sync (VSync)", vNames[static_cast<int>(cfg.vsync) % 3]});
             rows.push_back({"Presentation Buffering", cfg.swapBuffers == 3 ? "Triple (3)" : "Double (2)"});
             rows.push_back({"Presentation FPS Limit", fpsCapBuf});
+            rows.push_back({"Room Transition Effects",cfg.showRoomTransitions?"Original":"Off"});
+            rows.push_back({"Screen Flashes",cfg.showScreenFlashes?"Original":"Off"});
             footerNote = "Original 60.00 Hz physics & combat speed is always preserved.";
         } else if (g_ui.tab == 1) {
             if (g_ui.monitors.empty()) RefreshHardwareLists();
@@ -1180,34 +1465,29 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
                 footerNote = "Select any binding and press Enter/Click to remap. Zero key conflicts.";
             }
         } else if (g_ui.tab == 4) {
+            if(!g_ui.fromMultiplayer && netSnap.roomId.empty()) g_ui.onlinePage=OnlineSubPage::OnlineSettings;
             if (netSnap.phase == net::SessionPhase::LobbyWaiting ||
                 netSnap.phase == net::SessionPhase::ConnectingTransport ||
                 netSnap.phase == net::SessionPhase::SyncingMenu ||
                 netSnap.phase == net::SessionPhase::InMatch ||
                 ((netSnap.phase == net::SessionPhase::Error || netSnap.phase == net::SessionPhase::Disconnected) && !netSnap.roomId.empty())) {
                 const std::string visStr = netSnap.isPublic ? "PUBLIC ROOM" : "PRIVATE ROOM";
-                const std::string p1Line = netSnap.hostName + (netSnap.isHost
-                    ? (netSnap.localReady ? " [READY]" : " [NOT READY]")
-                    : (netSnap.remoteReady ? " [READY]" : " [NOT READY]"));
+                const std::string p1Line = netSnap.hostName+" [HOST]";
                 const std::string p2Line = netSnap.remoteConnected
-                    ? (netSnap.guestName + (!netSnap.isHost
-                        ? (netSnap.localReady ? " [READY]" : " [NOT READY]")
-                        : (netSnap.remoteReady ? " [READY]" : " [NOT READY]")))
+                    ? netSnap.guestName
                     : "(Waiting for Player 2...)";
+                DrawTextUi(px+12*S,190*S,S,kColText,p1Line+"   /   "+p2Line);
 
                 rows.push_back({"Room Code (" + visStr + ")",
                                 netSnap.roomCode + "  [Copy]", true, kColGold});
-                rows.push_back({"Ready Status (" + std::to_string(netSnap.playerCount) + "/2)  " +
-                                    p1Line + " vs " + p2Line,
-                                netSnap.localReady ? "READY" : "NOT READY", true,
-                                netSnap.localReady ? kColGreen : kColGold});
+                rows.push_back({"MAP",netSnap.isHost?StageName(netSnap.stageIndex):"Host chooses"});
                 rows.push_back({"Switch Room Visibility",
                                 netSnap.isHost ? (netSnap.isPublic ? "Make PRIVATE" : "Make PUBLIC")
                                                : "Host Only",
                                 true, netSnap.isHost ? kColGold : kColMuted});
                 rows.push_back({"[ START ONLINE MATCH ]",
-                                netSnap.isHost ? StageName(netSnap.stageIndex) : "Waiting on Host",
-                                true, netSnap.isHost ? kColGreen : kColMuted});
+                                netSnap.isHost?(netSnap.remoteConnected?"Start game":"Waiting for player"):"Waiting on Host",
+                                true, netSnap.isHost && netSnap.remoteConnected ? kColGreen : kColMuted});
                 rows.push_back({"Host Kick Challenger",
                                 (netSnap.isHost && netSnap.remoteConnected) ? "Kick P2" : "---",
                                 true, kColRed});
@@ -1215,18 +1495,18 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
                 footerNote = netSnap.statusText;
             } else if (g_ui.onlinePage == OnlineSubPage::Home) {
                 rows.push_back({g_ui.offerCreateAfterQuickMatch
-                                    ? "1. [ Create Public Room Now ]"
-                                    : "1. Quick Match",
-                                g_ui.offerCreateAfterQuickMatch ? "No open room found" : "Auto-Match",
+                                    ? "CREATE ROOM"
+                                    : "QUICK MATCH",
+                                g_ui.offerCreateAfterQuickMatch ? "No opponent found" : "Find opponent",
                                 true, kColGreen});
-                rows.push_back({"2. Browse Public Rooms", "Server List", true, kColGold});
-                rows.push_back({"3. Create Public Room", "Visible in Browser", true, kColGold});
-                rows.push_back({"4. Create Private Room", "Hidden (6-Char Code)", true, kColGold});
-                rows.push_back({"5. Join Private Room", "Enter Room Code", true, kColGold});
-                rows.push_back({"   Host Stage Selection", StageName(g_ui.createStageIndex)});
-                rows.push_back({"6. Online Settings", cfg.playerName + " @ " + cfg.region, true, kColMuted});
+                rows.push_back({"BROWSE ROOMS", "Public games", true, kColGold});
+                rows.push_back({"HOST PUBLIC GAME", "Anyone can join", true, kColGold});
+                rows.push_back({"HOST PRIVATE GAME", "Share a code", true, kColGold});
+                rows.push_back({"JOIN WITH CODE", "Enter friend's code", true, kColGold});
+                rows.push_back({"HOST STAGE", StageName(g_ui.createStageIndex)});
+                rows.push_back({"ONLINE OPTIONS", cfg.playerName, true, kColMuted});
                 footerNote = g_ui.onlineBanner.empty()
-                                 ? "Native P2P encrypted UDP lockstep + automatic relay fallback."
+                                 ? "Create a room or enter your friend's code to play together."
                                  : g_ui.onlineBanner;
             } else if (g_ui.onlinePage == OnlineSubPage::Browser) {
                 rows.push_back({"[ Refresh Public Rooms ]",
@@ -1260,43 +1540,62 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
                                 cfg.playerName + (g_ui.editingText == EditTarget::PlayerName ? "_" : ""),
                                 true});
                 rows.push_back({"Preferred Region", cfg.region});
-                rows.push_back({"Input Delay (Click Auto/Manual)",
+                rows.push_back({"Input Delay (A: Auto / Manual)",
                     (cfg.autoInputDelay ? "Auto, minimum " : "Manual: ") + std::to_string(cfg.inputDelayFrames) + " frames"});
                 rows.push_back({"Lobby Server URL",
                                 cfg.lobbyServerUrl + (g_ui.editingText == EditTarget::ServerUrl ? "_" : ""),
                                 true});
-                rows.push_back({"[ < Back to Online Menu ]", "Save & Return", true, kColGreen});
+                rows.push_back({g_ui.fromMultiplayer?"BACK TO MULTIPLAYER":"BACK TO OPTIONS", "Save & Return", true, kColGreen});
                 footerNote = "Click Player Name or Server URL to edit text (Ctrl+V supported).";
             }
         } else if (g_ui.tab == 5) {
-            rows.push_back({"Game Language", "English (Original CUSA00920)"});
-            rows.push_back({"Show FPS Counter", cfg.showFps ? "Shown" : "Hidden"});
-            rows.push_back({"Show Frame-Time Graph", cfg.showFrameGraph ? "Shown" : "Hidden"});
-            rows.push_back({"Show Network Statistics", cfg.showNetStats ? "Shown" : "Hidden"});
+            rows.push_back({"Connection HUD (F3)",cfg.showNetStats?"Shown":"Hidden"});
+            rows.push_back({"Ping",cfg.netShowPing?"Shown":"Hidden"});
+            rows.push_back({"Input Delay",cfg.netShowDelay?"Shown":"Hidden"});
+            rows.push_back({"Connection Type",cfg.netShowTransport?"Shown":"Hidden"});
+            rows.push_back({"Sync Status",cfg.netShowSync?"Shown":"Hidden"});
+            const char* corners[]={"Top left","Top right","Bottom left","Bottom right"};
+            rows.push_back({"HUD Position",corners[cfg.netHudCorner]});
+            rows.push_back({"HUD Size",std::to_string(cfg.netHudScale)+"%"});
+            rows.push_back({"HUD Background",std::to_string(cfg.netHudOpacity)+"%"});
+            rows.push_back({"FPS Counter", cfg.showFps ? "Shown" : "Hidden"});
+            rows.push_back({"Frame-Time Graph", cfg.showFrameGraph ? "Shown" : "Hidden"});
+            rows.push_back({"Game Language", "English"});
             rows.push_back({"Startup Mode", cfg.launchDirectly ? "Direct to Game" : "Show Launcher"});
-            rows.push_back({"[ Reset All Settings to Defaults ]", "Reset", true, kColRed});
-            rows.push_back({"[ Resume Game ]", "F1", true, kColGreen});
-            rows.push_back({"[ Quit to Desktop ]", "Clean Exit", true, kColRed});
-            footerNote = "Settings saved automatically to " + core::ConfigFilePath();
+            rows.push_back({"Reset All Settings", "Reset", true, kColRed});
+            rows.push_back({"Resume Game", "F1", true, kColGreen});
+            rows.push_back({"Quit to Desktop", "Quit", true, kColRed});
+            footerNote = "Choose the details you want. F3 hides or shows the HUD.";
         }
 
         g_ui.rowCount = static_cast<int>(rows.size());
         if (g_ui.selectedRow >= g_ui.rowCount) g_ui.selectedRow = std::max(0, g_ui.rowCount - 1);
 
         // Scrollable row viewport (displays up to 11 rows cleanly)
-        const int maxVis = 11;
+        const bool sessions=g_ui.tab==6;
+        const int maxVis=std::clamp(static_cast<int>((H/S-290)/34),1,12);
         int startRow = 0;
         if (g_ui.rowCount > maxVis) {
             startRow = std::clamp(g_ui.selectedRow - maxVis / 2, 0, g_ui.rowCount - maxVis);
         }
         const int endRow = std::min(g_ui.rowCount, startRow + maxVis);
+        if(!sessions && startRow>0) DrawTextUi(px+pw-45*S,tabY-23*S,S,kColMuted,"UP");
+        if(!sessions && endRow<g_ui.rowCount) DrawTextUi(px+pw-72*S,py+ph-88*S,S,kColMuted,"MORE");
 
-        float ry = tabY + tabH + 10.0f * S;
-        const float rowH = 22.0f * S;
-        const float rowX = px + 12.0f * S;
-        const float rowW = pw - 24.0f * S;
+        const float rowH = 34.0f * S;
+        std::vector<int> visible;
+        if(sessions) {
+            for(int i=0;i<6;++i) visible.push_back(i);
+            const int first=std::clamp(g_ui.selectedRow-3,6,std::max(6,g_ui.rowCount-6));
+            for(int i=first;i<std::min(g_ui.rowCount,first+6);++i) visible.push_back(i);
+            DrawTextUi(px+pw*.40f,190*S,S,kColGold,"PUBLIC SESSIONS");
+        } else for(int r=startRow;r<endRow;++r) visible.push_back(r);
 
-        for (int r = startRow; r < endRow; ++r) {
+        for (int r : visible) {
+            const float rowX=sessions?px+(r>=6?pw*.40f:0):px;
+            const float rowW=sessions?(r>=6?pw*.60f:pw*.35f):pw;
+            const int index=sessions?(r<6?r:int(std::find(visible.begin(),visible.end(),r)-visible.begin())-6):r-startRow;
+            const float ry=tabY+index*(sessions?48*S:rowH);
             const bool hovered = (g_ui.mouseX >= rowX && g_ui.mouseX < rowX + rowW &&
                                   g_ui.mouseY >= ry && g_ui.mouseY < ry + rowH - 2.0f * S);
             if (hovered && !g_ui.confirmDisplayPending && g_ui.capturingBindId < 0) {
@@ -1309,26 +1608,27 @@ void RenderOverlay(void* hwnd, ID3D11Device* device, ID3D11DeviceContext* contex
                 }
             }
             const bool sel = (g_ui.selectedRow == r);
-            DrawRect(rowX, ry, rowW, rowH - 2.0f * S,
-                     sel ? kColRowFocus : (hovered ? kColRowHover : kColRowIdle));
-            if (sel) DrawOutline(rowX, ry, rowW, rowH - 2.0f * S, 1.0f * S, kColGoldDim);
+            if(sel || hovered) DrawRect(rowX,ry,rowW,rowH-2*S,Rgba(144,171,208,65));
 
             std::string lbl = rows[r].label;
-            if (lbl.size() > 34) lbl.resize(34);
-            DrawTextUi(rowX + 8.0f * S, ry + 6.0f * S, S, kColText, lbl);
+            const float labelPart=sessions?1.0f:.56f;
+            while(MeasureTextWidth(S,lbl)>rowW*labelPart-20*S && !lbl.empty()) lbl.pop_back();
+            DrawTextUi(rowX + 12.0f * S, ry + 10.0f * S, sessions && r<6?S*1.2f:S, sel?kColText:kColMuted, lbl);
 
             std::string val = rows[r].isButton ? rows[r].value : ("< " + rows[r].value + " >");
-            if (val.size() > 30) val = val.substr(0, 30);
+            while(MeasureTextWidth(S,val)>rowW*.40f && !val.empty()) val.pop_back();
             const float vw = MeasureTextWidth(S, val);
-            DrawTextUi(rowX + rowW - vw - 8.0f * S, ry + 6.0f * S, S, rows[r].valColor, val);
-            ry += rowH;
+            if(!sessions) DrawTextUi(rowX + rowW - vw - 12.0f * S, ry + 10.0f * S, S, rows[r].valColor, val);
+            else if(r>=6) DrawTextUi(rowX+12*S,ry+27*S,S*.7f,kColMuted,rows[r].value);
         }
 
         // Footer bar
-        DrawRect(px + 2.0f * S, py + ph - 24.0f * S, pw - 4.0f * S, 22.0f * S, kColHeaderBg);
-        if (footerNote.size() > 54) footerNote.resize(54);
+        DrawTextUi(px+12*S,py+ph-74*S,S,kColMuted,
+            g_ui.tab<6 && !g_ui.fromMultiplayer?"TAB / LB RB: CATEGORY   ARROWS: SELECT   ENTER / A: CONFIRM":
+                       "ARROWS / D-PAD: SELECT   ENTER / A: CONFIRM");
+        while(MeasureTextWidth(S,footerNote)>pw-32*S && !footerNote.empty()) footerNote.pop_back();
         const Color footCol = (g_ui.tab == 4 && g_ui.onlineBannerIsError) ? kColRed : kColMuted;
-        DrawTextUi(px + 10.0f * S, py + ph - 16.0f * S, S, footCol, footerNote);
+        DrawTextUi(px + 10.0f * S, py + ph - 48.0f * S, S, footCol, footerNote);
 
         // 15-Second Display Mode Confirmation Modal
         if (g_ui.confirmDisplayPending) {

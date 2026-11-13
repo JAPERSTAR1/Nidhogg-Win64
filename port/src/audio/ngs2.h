@@ -29,6 +29,7 @@ int32_t AudioOutClose(int32_t handle);
 
 // Diagnostics & lifecycle
 void ShutdownAudio();
+void ResetAudio();
 uint64_t MixedFrames();
 float PeakAmplitude();
 uint32_t ActiveVoices();

@@ -14,6 +14,7 @@ void RenderFrame(void* hwnd, const std::vector<Draw>& draws);
 // Re-presents the latest rendered frame with live overlay/HUD updates without
 // advancing guest simulation (used when presentation FPS > 60 Hz or in menus).
 void PresentCachedFrame(void* hwnd);
+bool PresentationDue();
 
 // Forwards Win32 window messages to the native overlay & display manager.
 // Returns true when the overlay consumed the input event.
@@ -27,5 +28,6 @@ void ApplyDisplaySettings(void* hwnd);
 
 // Releases D3D11 swapchain/fullscreen state cleanly before exit.
 void ShutdownRenderer();
+void ResetGuestResources();
 
 }  // namespace ps4::gnm

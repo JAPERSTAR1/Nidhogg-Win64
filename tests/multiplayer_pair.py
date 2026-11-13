@@ -27,6 +27,8 @@ def main():
     p.add_argument('--endpoint', default='http://127.0.0.1:27880')
     p.add_argument('--label', default='internet-local')
     p.add_argument('--combat', action='store_true')
+    p.add_argument('--mixed-effects', action='store_true', help='Host disables transition/flash rendering; guest keeps original FX')
+    p.add_argument('--stage',type=int,choices=range(4),default=0)
     p.add_argument('--disconnect-frame', type=int, default=0)
     args = p.parse_args()
     result = ROOT / 'tests' / 'results' / args.label
@@ -43,6 +45,8 @@ def main():
                 'renderScale': .5, 'showNetStats': True, 'lobbyServerUrl': args.endpoint,
                 'playerName': role, 'inputDelayFrames': args.delay,
                 'autoInputDelay': not args.fixed_delay,
+                'showRoomTransitions': args.mixed_effects and role=='guest',
+                'showScreenFlashes': args.mixed_effects and role=='guest',
             }))
             env = {k: v for k, v in os.environ.items() if not k.startswith('NIDHOGG_')}
             env.update(NIDHOGG_QA_UNFOCUSED='1', NIDHOGG_FORCE_RELAY='0' if args.direct else '1',
@@ -51,6 +55,7 @@ def main():
                 NIDHOGG_NET_DUMP='1',
                 NIDHOGG_NET_AUTO_EXIT='1',
                 NIDHOGG_NET_QA_COMBAT='1' if args.combat else '0',
+                NIDHOGG_NET_QA_STAGE=str(args.stage),
                 NIDHOGG_NET_AUTO='host_private' if role == 'host' else 'join_code',
                 NIDHOGG_NET_CODE_OUT=str(code), NIDHOGG_SCREENSHOT_DIR=str(user / 'shots'),
                 NIDHOGG_SCREENSHOT='600,1000,1400', NIDHOGG_NET_SIM_LATENCY_MS=str(args.latency))
@@ -74,7 +79,12 @@ def main():
         report = {}
         for role, client in zip(['host', 'guest'], clients):
             log = (result / role / 'logs/nidhogg.log').read_text(errors='replace')
+            windows = re.findall(r'\[window\] created pid=\d+ hwnd=(\S+)', log)
+            resets = re.findall(r'\[guest-reset\] completed in process pid=\d+ hwnd=(\S+)', log)
             report[role] = {'exit': client.poll(), 'barrier': 'BARRIER SYNCED' in log,
+                'sameProcess': f'in-process deterministic boot pid={client.pid}' in log,
+                'sameWindow': len(windows)==1 and bool(resets) and all(w==windows[0] for w in resets),
+                'resetCount':log.count('[guest-reset] completed'),
                 'desync': 'DESYNC' in log, 'timeout': 'timed out' in log,
                 'wins': re.findall(r'(yellowPlayer|orangePlayer) wins match!', log),
                 'hashes': dict(re.findall(r'frame=(\d+).*?hash=([0-9a-f]+) sync=OK', log)),
@@ -87,7 +97,8 @@ def main():
         print(json.dumps({role: {k: v for k, v in r.items() if k not in ('network', 'hashes')} | {'hashChecks': len(r['hashes'])} for role,r in report.items()}, indent=2))
         a, b = report['host'], report['guest']
         common = set(a['hashes']) & set(b['hashes'])
-        passed = all(r['exit'] == 0 and r['barrier'] and not r['desync'] for r in report.values()) and len(common) >= 3 and all(a['hashes'][f] == b['hashes'][f] for f in common)
+        expected=['rCastleCenter','rMinesCenter','rSkyCenter','rWildsCenter'][args.stage]
+        passed = all(r['exit'] == 0 and r['barrier'] and r['sameProcess'] and r['sameWindow'] and not r['desync'] and any(expected in room for room in r['rooms']) for r in report.values()) and len(common) >= 3 and all(a['hashes'][f] == b['hashes'][f] for f in common)
         if args.disconnect_frame: passed = passed and a['stopped']
         if args.combat: passed = passed and bool(a['wins']) and a['wins'] == b['wins']
         if not passed: raise SystemExit(1)
