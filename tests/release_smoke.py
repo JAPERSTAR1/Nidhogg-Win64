@@ -48,7 +48,7 @@ def main():
         (user / 'config').mkdir(parents=True, exist_ok=True)
         if not preserve_config:
             (user / 'config/settings.json').write_text(json.dumps({
-                'vsync': 0, 'displayWidth': 640, 'displayHeight': 360, 'renderScale': .5,
+                'vsync': 0, 'presentationFpsLimit': 0, 'displayWidth': 640, 'displayHeight': 360, 'renderScale': .5,
                 'mute': mute, 'launchDirectly': False, 'lobbyServerUrl':'http://127.0.0.1:29889'}), encoding='utf8')
         shot = max(1, frames - 30)
         env = {k: v for k, v in os.environ.items() if not k.startswith('NIDHOGG_')}
